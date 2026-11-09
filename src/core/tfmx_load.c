@@ -101,13 +101,18 @@ int tfmx_partner(const char *path, char *out, size_t cap) {
     char dir[1024]; if (dl >= sizeof dir) return -1;
     memcpy(dir, path, dl); dir[dl] = 0;
     DIR *d = opendir(dl ? dir : ".");
-    int found = 1;
+    int found = 1, nsam = 0;
+    char only[512] = "";
     if (d) {
         struct dirent *de;
         while ((de = readdir(d))) {
             if (strcasecmp(de->d_name, want) == 0) { snprintf(out, cap, "%s%s", dir, de->d_name); found = 0; break; }
+            if (tfmx_is_sample_name(de->d_name) && nsam++ == 0) snprintf(only, sizeof only, "%s", de->d_name);
         }
         closedir(d);
     }
+    /* Kein exakter Partner: liegt genau eine Sampledatei im Ordner (z. B. ein gemeinsames Set.sam
+     * fuer alle Songs eines Spiels), gehoert sie zu diesem Song. */
+    if (found && nsam == 1) { snprintf(out, cap, "%s%s", dir, only); found = 0; }
     return found;
 }
