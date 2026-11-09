@@ -8,7 +8,6 @@
 extern unsigned long long xplay_mute;   /* Bit n = Kanal n stumm (alle Formate) */
 
 #define PAULA_CLK 3546895.0
-#define CIA_CLK   709379.0
 
 static const uint16_t NOTE[64] = {
     1710,1614,1524,1438,1357,1281,1209,1141,1077,1017, 960, 908,
@@ -152,7 +151,7 @@ static void effects(Chan *c) {
         int reset = 1, per = c->ref, v = c->pv;
         if (per > v) { v = (int)(((uint32_t)v * (uint16_t)(256 + c->pd)) >> 8); reset = per <= v; }
         else if (per < v) { v = (int)(((uint32_t)v * (uint16_t)(256 - c->pd)) >> 8); reset = per >= v; }
-        if (reset) { c->pd = 0; c->pv = per & 0x7FF; }
+        if (reset) { c->pd = 0; c->pv = c->per = per & 0x7FF; }   /* Ziel erreicht: Periode exakt auf den Zielwert setzen */
         else c->per = c->pv = v & 0x7FF;
     }
     if (c->env_s) {
@@ -306,8 +305,9 @@ TfmxPlayer *tfp_new(const TfmxSong *s, int sub, int rate) {
     p->s = s; p->rate = rate;
     const TfmxSub *b = &s->sub[sub];
     p->start = b->start; p->stop = b->end; p->tpos = b->start; p->tloop = -1;
-    if (b->tempo >= 0x10) { p->tick_hz = CIA_CLK / (double)(0x1B51F8 / b->tempo); p->pskip = 0; }
-    else { p->tick_hz = CIA_CLK / (s->pal ? 11822.0 : 14320.0); p->pskip = b->tempo; }
+    /* Tick-Takt wie die gaengigen Player: Tempo < 0x10 = 50 Hz mit Pattern-Teiler, sonst Tempo = BPM, Tick = BPM * 2/5 Hz */
+    if (b->tempo >= 0x10) { p->tick_hz = (double)(((unsigned)b->tempo << 8) * 2 / 5) / 256.0; p->pskip = 0; }
+    else { p->tick_hz = 50.0; p->pskip = b->tempo; }
     p->spt = rate / p->tick_hz;
     p->tcap = (int)p->spt + 4;
     p->tl = calloc((size_t)p->tcap, sizeof(float)); p->tr = calloc((size_t)p->tcap, sizeof(float));
