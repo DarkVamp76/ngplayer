@@ -33,6 +33,8 @@ typedef struct TfmxPlayer TfmxPlayer;
 TfmxPlayer *tfp_new(const TfmxSong *s, int sub, int rate);
 void tfp_free(TfmxPlayer *p);
 int  tfp_render(TfmxPlayer *p, int16_t *out, int nframes); /* Stereo; liefert 0 am Songende */
+void tfp_set_interp(TfmxPlayer *p, int on);                  /* lineare Interpolation (Standard: an) */
+void tfp_set_lowpass(TfmxPlayer *p, int on);                 /* Paula-Tiefpass ca. 4,9 kHz (Standard: an) */
 void tfp_set_scope(TfmxPlayer *p, float *buf, int len);    /* 4 Kanaele, Ring pro Kanal */
 unsigned tfp_scope_pos(const TfmxPlayer *p);
 int  tfp_chan_pan(const TfmxPlayer *p, int ch);            /* 0 links, 1 rechts (Amiga: 0,3 links; 1,2 rechts) */
