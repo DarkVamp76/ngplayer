@@ -209,7 +209,7 @@ static int track_run(TfmxPlayer *p, int inc) {
             p->tloop--; break;
         case 2: p->pskip = p->pcount = (int)t[2]; break;
         case 3:                              /* 7-Stimmen-Modus: Tempo setzen (BPM = 12500 / (100 + x)) */
-            if (S16((int)t[2]) >= 0) {
+            if (S16((int)t[3]) >= 0) {                  /* Wort 3 >= 0: Tempo aus dem Low-Byte von Wort 3 */
                 int x = S8((int)(t[3] & 0xFF)); if (x < -0x20) x = -0x20;
                 p->tick_hz = (125.0 * 100.0 / (100.0 + x)) * 0.4;
                 p->spt = p->rate / p->tick_hz;
