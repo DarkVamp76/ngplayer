@@ -24,6 +24,8 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | IT (Impulse Tracker) | supported, still being completed |
 | DMF (X-Tracker, v8) | supported, some rare effects still missing |
 
+Looking for DMF files to try? The [Radical Rhythms Archive](https://www.radicalrhythms.org/) collects tracks by a German tracker group from the mid-1990s, including DMF modules.
+
 Planned: MTM, 669, MDL, DSM, FAR, STM, PTM, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
 
 ## Features
