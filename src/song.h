@@ -40,6 +40,9 @@ unsigned song_scope_pos(const Song *s);    /* Anzahl bisher geschriebener Frames
 
 /* ---- Kanalzustand fuer die Uebersicht ---- */
 /* Kanal-Stummschaltung: Bit n = Kanal n (gilt fuer das laufende und alle folgenden Stuecke) */
+/* Paula-Tiefpass: -1 = fuer dieses Format nicht vorgesehen, 0 = aus, 1 = an */
+int  song_paula_filter(const Song *s);
+void song_toggle_paula_filter(Song *s);
 void song_set_mute(unsigned long long mask);
 unsigned long long song_get_mute(void);
 int song_chan_pan(const Song *s, int ch);                 /* 0 (links) .. 255 (rechts) */

@@ -14,16 +14,18 @@ static int period_to_note(int per){
 int xmod_load(XSong *s, const uint8_t *b, size_t len){
     memset(s, 0, sizeof *s); s->fmt = 1; s->gvol = 255; for (int i = 0; i < 32; i++) { s->chpan[i] = -1; s->chen[i] = 1; }
     s->maxvol = 0x40; s->speed = 6; s->tempo = 0x7d;
-    int nsm = 31, nch = 4, xchn = 0;
+    int nsm = 31, nch = 4, xchn = 0, ami = 0;
     if (len < 1084) nsm = 15;
     if (nsm == 31) {
         const uint8_t *g = b + 1080;
-        if (!memcmp(g,"M.K.",4)||!memcmp(g,"M!K!",4)||!memcmp(g,"FLT4",4)) nch = 4;
+        if (!memcmp(g,"M.K.",4)||!memcmp(g,"M!K!",4)||!memcmp(g,"FLT4",4)) { nch = 4; ami = 1; }
         else if (g[0]>='1'&&g[0]<='9'&&!memcmp(g+1,"CHN",3)) { nch = g[0]-'0'; xchn = 1; }
         else if (g[0]>='0'&&g[0]<='9'&&g[1]>='0'&&g[1]<='9'&&!memcmp(g+2,"CH",2)) { nch = (g[0]-'0')*10+(g[1]-'0'); xchn = 1; }
         else if (!memcmp(g,"FLT8",4)||!memcmp(g,"OCTA",4)||!memcmp(g,"CD81",4)) nch = 4;  /* Original: 4 Kanaele */
         else nsm = 15;   /* kein Kennwort -> altes 15-Sample-MOD */
     }
+    if (nsm == 15) ami = 1;                  /* alte 15-Sample-MODs stammen vom Amiga */
+    s->amiga = ami;
     if (nch < 1 || nch > 32) return -1;
     s->nch = nch; s->xchn = xchn; s->nsmp = nsm;
     memcpy(s->title, b, 20); s->title[20] = 0;
@@ -46,6 +48,10 @@ int xmod_load(XSong *s, const uint8_t *b, size_t len){
     s->npat = maxp + 1;
     size_t patoff = (nsm == 31) ? 1084 : 600;
     size_t patsz = (size_t)s->npat * 64 * nch * 4;
+    if (nsm == 31) {                         /* Amiga nur bei sicherem Hinweis: "st-"-Samplenamen (Soundtracker-Bibliothek); "M.K." allein sagt nichts (schreiben auch PC-Tracker) */
+        s->amiga = 0;
+        for (int i = 0; i < 31; i++) if ((b[20 + i * 30] | 0x20) == 's' && (b[21 + i * 30] | 0x20) == 't' && b[22 + i * 30] == '-') s->amiga = 1;
+    }
     s->pat = calloc((size_t)s->npat * 64 * nch, sizeof(XCell));
     if (!s->pat) return -1;
     for (int pt = 0; pt < s->npat; pt++)
