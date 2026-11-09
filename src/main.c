@@ -409,7 +409,7 @@ static int resolve_row(const SongPos *sp, int vr, int *pat, int *row, int *other
 static void draw_pattern(float x, float y, float w, float h) {
     card(x, y, w, h, 0);
     text(x + 18, y + 12, 12, DIM, "PATTERN");
-    if (!g_song) { text(x + 18, y + 44, 14, FAINT, "Kein Titel geladen."); return; }
+    if (!g_song) { text(x + 18, y + 44, 14, FAINT, "No song loaded."); return; }
     if (!g_view_valid) return;
     SongPos sp = g_view;
     int nch = song_channels(g_song);
@@ -564,7 +564,7 @@ static void draw_pattern(float x, float y, float w, float h) {
 
 static void draw_spectrum(float x, float y, float w, float h) {
     card(x, y, w, h, 0);
-    text(x + 18, y + 10, 12, DIM, "SPEKTRUM");
+    text(x + 18, y + 10, 12, DIM, "SPECTRUM");
     float bx = x + 18, bw = w - 36, by0 = y + 30, avail = h - 30 - 20, bh = avail * 0.80f, base = by0 + bh;
     for (int g = 0; g <= 3; g++) rect(bx, by0 + bh * g / 3.0f, bw, 1, alpha(FAINT, 0.20f));
     float step = bw / NBANDS, barw = step * 0.68f, refl = avail * 0.20f;
@@ -596,7 +596,7 @@ static void draw_spectrum(float x, float y, float w, float h) {
 /* Pegel: zwei waagerechte Balken */
 static void draw_level(float x, float y, float w, float h) {
     card(x, y, w, h, 0);
-    text(x + 18, y + 10, 12, DIM, "PEGEL");
+    text(x + 18, y + 10, 12, DIM, "LEVEL");
     enum { SEG = 22 };
     float bx = x + 40, bw = w - 40 - 18, sg = bw / SEG, bh = 22;
     for (int c = 0; c < 2; c++) {
@@ -677,7 +677,7 @@ static void draw_overview(float x, float y, float w, float h) {
     if (nch > 64) nch = 64;
     int cols = overview_cols(nch), rows = (nch + cols - 1) / cols;
     float rh = cols == 1 ? 17.0f : 15.0f, fs = cols == 1 ? 12.0f : 11.0f;
-    text(x + 18, y + 10, 12, DIM, "KANAELE");
+    text(x + 18, y + 10, 12, DIM, "CHANNELS");
     float cwid = (w - 36) / cols;
     float panw = cwid * 0.17f; if (panw < 54) panw = 54; if (panw > 150) panw = 150;
     float barw = cwid * 0.26f; if (barw < 64) barw = 64; if (barw > 300) barw = 300;
@@ -905,10 +905,10 @@ static void ma_show(int on) {
 static void ma_start(void) {
     if (dl_state == 1) return;
     int id = ma_parse_id(ma_buf);
-    if (!id) { snprintf(ma_msg, sizeof ma_msg, "Keine Modul-ID erkannt. Erwartet: Zahl oder modarchive-Link."); ma_msg_err = 1; return; }
-    if (!net_have_curl()) { snprintf(ma_msg, sizeof ma_msg, "curl nicht gefunden - bitte installieren."); ma_msg_err = 1; return; }
+    if (!id) { snprintf(ma_msg, sizeof ma_msg, "No module ID found. Expected: a number or a modarchive link."); ma_msg_err = 1; return; }
+    if (!net_have_curl()) { snprintf(ma_msg, sizeof ma_msg, "curl not found - please install it."); ma_msg_err = 1; return; }
     dl_id = id; dl_state = 1;
-    snprintf(ma_msg, sizeof ma_msg, "Lade Modul #%d ...", id); ma_msg_err = 0;
+    snprintf(ma_msg, sizeof ma_msg, "Downloading module #%d ...", id); ma_msg_err = 0;
     dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
 }
 static void ma_poll(void) {
@@ -920,7 +920,7 @@ static void ma_poll(void) {
             play_index(npl - 1); list_follow = 1;
             ma_buf[0] = 0; ma_len = 0; ma_show(0);
         } else {
-            const char *m = dl_rc == 100 ? "Server lieferte keine Moduldatei (ID gibt es nicht?)." : dl_rc == 22 ? "Modul nicht gefunden (Server-Fehler)." : (dl_rc == 6 || dl_rc == 7 || dl_rc == 28) ? "Keine Verbindung zum Server." : "Download fehlgeschlagen.";
+            const char *m = dl_rc == 100 ? "Server returned no module file (does the ID exist?)." : dl_rc == 22 ? "Module not found (server error)." : (dl_rc == 6 || dl_rc == 7 || dl_rc == 28) ? "Cannot reach the server." : "Download failed.";
             snprintf(ma_msg, sizeof ma_msg, "%s (Code %d)", m, dl_rc); ma_msg_err = 1;
         }
         dl_state = 0;
@@ -951,7 +951,7 @@ static void draw_ma_dialog(double t) {
     float w = 640, h = 168, x = (view_w - w) / 2, y = (view_h - h) / 2 - 20;
     card(x, y, w, h, 0);
     text(x + 24, y + 18, 12, DIM, "THE MOD ARCHIVE");
-    text(x + 24, y + 38, 14, TXT, "Modul-ID oder Link einf\xfcgen");
+    text(x + 24, y + 38, 14, TXT, "Paste a module ID or link");
     float bx = x + 24, by = y + 70, bw = w - 48, bh = 36;
     rrect(bx, by, bw, bh, 8, alpha(EDGE, 0.5f));
     rrect(bx + 1, by + 1, bw - 2, bh - 2, 7, BG1);
@@ -960,7 +960,7 @@ static void draw_ma_dialog(double t) {
     text(bx + 12, by + 9, 15, TXT, s);
     if (dl_state != 1 && ((int)(t * 2) & 1)) rect(bx + 12 + text_width(s, 15) + 2, by + 8, 2, 20, VC[0]);
     if (ma_msg[0]) text(x + 24, y + 120, 13, ma_msg_err ? WARN : VC[0], ma_msg);
-    else text(x + 24, y + 120, 12, FAINT, "Enter l\xe4" "dt  \xb7  Strg+V einf\xfcgen  \xb7  Esc schlie\xdft");
+    else text(x + 24, y + 120, 12, FAINT, "Enter downloads  \xb7  Ctrl+V paste  \xb7  Esc close");
 }
 
 static void draw_ui(double t) {
@@ -1010,9 +1010,9 @@ static void draw_ui(double t) {
         }
         { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s  \xb7  Module player", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
         if (!npl) {
-            text(x + 18, y + 60, 14, DIM, "Keine Dateien.");
-            text(x + 18, y + 84, 13, FAINT, "MOD, S3M, XM oder IT");
-            text(x + 18, y + 102, 13, FAINT, "ins Fenster ziehen.");
+            text(x + 18, y + 60, 14, DIM, "No files.");
+            text(x + 18, y + 84, 13, FAINT, "MOD, S3M, XM, IT, DMF or TFMX");
+            text(x + 18, y + 102, 13, FAINT, "drop them on the window.");
         }
     }
 
@@ -1048,7 +1048,7 @@ static void draw_ui(double t) {
             float cx = ax + 22, cy = hy + hh - 30;
             char b[48];
             cx += chip(cx, cy, song_format(g_song), VC[0], 1);
-            snprintf(b, sizeof b, "%d KAN\xc4LE", song_channels(g_song));
+            snprintf(b, sizeof b, "%d CHANNELS", song_channels(g_song));
             cx += chip(cx, cy, b, VC[2], 1);
             snprintf(b, sizeof b, "%d ORDERS", song_norders(g_song));
             cx += chip(cx, cy, b, DIM, 0);
@@ -1111,8 +1111,8 @@ static void draw_ui(double t) {
                 click = 0;
             }
         }
-        text(bx + 190, cy - 20, 12, FAINT, "Leertaste Pause  \xb7  Links/Rechts Spulen (Subsong)  \xb7  Hoch/Runter Titel  \xb7  Shift+Pfeile Kan\xe4le");
-        { char lb[96]; snprintf(lb, sizeof lb, "O Mod Archive  \xb7  R Neustart  \xb7  F Vollbild  \xb7  F5/F6 A/V-Sync %.0f ms  \xb7  Esc Ende", g_lag_ms); text(bx + 190, cy + 2, 12, FAINT, lb); }
+        text(bx + 190, cy - 20, 12, FAINT, "Space pause  \xb7  Left/Right seek (subsong)  \xb7  Up/Down track  \xb7  Shift+arrows channels");
+        { char lb[96]; snprintf(lb, sizeof lb, "O Mod Archive  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms  \xb7  Esc quit", g_lag_ms); text(bx + 190, cy + 2, 12, FAINT, lb); }
         float vx = bx + bw - 250, vw = 200;
         text(vx - 44, cy - 8, 12, DIM, "VOL");
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
@@ -1144,7 +1144,7 @@ static int gl_compile(GLenum type, const char *src) {
     glCompileShader(sh);
     GLint ok = 0;
     glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
-    if (!ok) { char log[1024]; glGetShaderInfoLog(sh, sizeof log, NULL, log); fprintf(stderr, "Shader-Fehler: %s\n", log); return 0; }
+    if (!ok) { char log[1024]; glGetShaderInfoLog(sh, sizeof log, NULL, log); fprintf(stderr, "Shader error: %s\n", log); return 0; }
     return (int)sh;
 }
 
