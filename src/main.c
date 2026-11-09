@@ -10,6 +10,7 @@
 #define _DEFAULT_SOURCE
 #include "font_data.h"
 #include "song.h"
+#include "tfmx.h"
 #include "net.h"
 #include "version.h"
 
@@ -111,6 +112,7 @@ static float list_scroll;
 static int list_follow;
 
 static int is_mod_name(const char *n) {
+    if (tfmx_is_song_name(n)) return 1;          /* mdat.NAME / NAME.tfx; smpl.* und .sam sind nur Sampledaten */
     const char *d = strrchr(n, '.');
     if (!d) return 0;
     static const char *ext[] = { ".mod", ".s3m", ".xm", ".it", ".dmf", NULL };

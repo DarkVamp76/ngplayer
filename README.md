@@ -23,6 +23,7 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | XM (FastTracker 2) | supported |
 | IT (Impulse Tracker) | supported, still being completed |
 | DMF (X-Tracker, v8) | supported, some rare effects still missing |
+| TFMX (Chris Hülsbeck, `mdat.NAME` + `smpl.NAME` or `NAME.tfx` + `NAME.sam`) | supported (subsong 0, no pattern view yet) |
 
 Looking for DMF files to try? The [Radical Rhythms Archive](https://www.radicalrhythms.org/) collects tracks by a German tracker group from the mid-1990s, including DMF modules.
 

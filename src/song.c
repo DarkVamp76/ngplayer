@@ -3,9 +3,11 @@
 #include "core.h"
 #include "it.h"
 #include "dmf.h"
+#include "tfmx.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 extern void ngp_it_tables_init(void);
 int xplay_pos(const XPlayer *p, int *ord, int *row);
@@ -21,7 +23,7 @@ int xxm_chan_pan(const void *p, int ch);
 int itp_chan_pan(const ITPlayer *p, int ch);
 void itp_pos(const ITPlayer *p, int *ord, int *pat, int *row);
 
-enum { K_MOD, K_S3M, K_XM, K_IT, K_DMF };
+enum { K_MOD, K_S3M, K_XM, K_IT, K_DMF, K_TFMX };
 
 struct Song {
     int kind;
@@ -32,14 +34,44 @@ struct Song {
     ITPlayer *ip;
     DMFSong *dm;
     DMFPlayer *dp;
+    TfmxSong *tf;
+    TfmxPlayer *tp;
+    int tstart;             /* TFMX: erste Trackstep-Zeile des Subsongs */
     char title[40];
     const char *fmt;
     int nch, nord;
 };
 
+/* TFMX braucht zwei Dateien (mdat.X + smpl.X oder X.tfx + X.sam); liefert 0 bei Erfolg */
+static int open_tfmx(Song *s, const char *path, const uint8_t *b, long n, int rate, char *err, size_t errcap) {
+    char sm[1100];
+    int pr = tfmx_partner(path, sm, sizeof sm);
+    if (pr) { snprintf(err, errcap, pr > 0 ? "TFMX: sample file missing (smpl.* or .sam next to the song file)" : "TFMX: file must be named mdat.NAME or NAME.tfx"); return -1; }
+    FILE *f = fopen(sm, "rb");
+    if (!f) { snprintf(err, errcap, "TFMX: cannot open sample file"); return -1; }
+    fseek(f, 0, SEEK_END); long ns = ftell(f); fseek(f, 0, SEEK_SET);
+    uint8_t *sb = (ns > 0 && ns < (64L << 20)) ? (uint8_t *)malloc((size_t)ns) : NULL;
+    if (!sb || fread(sb, 1, (size_t)ns, f) != (size_t)ns) { fclose(f); free(sb); snprintf(err, errcap, "TFMX: sample file read error"); return -1; }
+    fclose(f);
+    int e = 0;
+    s->tf = tfmx_load(b, (size_t)n, sb, (size_t)ns, &e);
+    free(sb);
+    if (!s->tf) { snprintf(err, errcap, "TFMX: unsupported or damaged file (%d)", e); return -1; }
+    s->kind = K_TFMX; s->fmt = "TFMX";
+    s->title[0] = 0;
+    for (int i = 0; i < 6 && !s->title[0]; i++)
+        if (s->tf->text[i][0] && strncasecmp(s->tf->text[i], "date", 4) && strncasecmp(s->tf->text[i], "time", 4) && strncasecmp(s->tf->text[i], "(empty", 6)) snprintf(s->title, sizeof s->title, "%s", s->tf->text[i]);
+    s->tstart = s->tf->sub[0].start;
+    s->nch = 4; s->nord = s->tf->sub[0].end >= s->tf->sub[0].start ? s->tf->sub[0].end - s->tf->sub[0].start + 1 : 1;
+    s->tp = tfp_new(s->tf, 0, rate);
+    if (!s->tp) { snprintf(err, errcap, "TFMX: cannot start player"); return -1; }
+    return 0;
+}
+
 Song *song_open(const char *path, int rate, char *err, size_t errcap) {
     static int inited;
     if (!inited) { ngp_it_tables_init(); inited = 1; }
+    if (tfmx_is_sample_name(path)) { snprintf(err, errcap, "TFMX sample data (open the mdat.* / .tfx file instead)"); return NULL; }
     FILE *f = fopen(path, "rb");
     if (!f) { snprintf(err, errcap, "cannot open file"); return NULL; }
     fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
@@ -70,6 +102,8 @@ Song *song_open(const char *path, int rate, char *err, size_t errcap) {
             s->nch = s->dm->nch; s->nord = s->dm->nord;
             s->dp = dmp_new(s->dm, rate);
         }
+    } else if (n > 0x200 && (!memcmp(b, "TFMX-SONG", 9) || !memcmp(b, "TFMX_SONG", 9) || !memcmp(b, "TFMX-MOD", 8))) {
+        if (open_tfmx(s, path, b, n, rate, err, errcap)) { free(b); song_close(s); return NULL; }
     } else if (n > 80 && !memcmp(b, "Extended Module: ", 17)) {
         r = xxm_load(&s->xs, b, (size_t)n);
         if (!r) {
@@ -96,7 +130,7 @@ Song *song_open(const char *path, int rate, char *err, size_t errcap) {
         }
     }
     free(b);
-    if (r || (!s->xp && !s->xxp && !s->ip && !s->dp)) {
+    if (r || (!s->xp && !s->xxp && !s->ip && !s->dp && !s->tp)) {
         snprintf(err, errcap, "unsupported or damaged module (%d)", r);
         song_close(s);
         return NULL;
@@ -111,14 +145,17 @@ void song_close(Song *s) {
     if (s->ip) itp_free(s->ip);
     if (s->dp) dmp_free(s->dp);
     if (s->dm) dmf_free(s->dm);
+    if (s->tp) tfp_free(s->tp);
+    if (s->tf) tfmx_free(s->tf);
     if (s->it) it_free(s->it);
-    if (s->kind != K_IT && s->kind != K_DMF) xsong_free(&s->xs);
+    if (s->kind != K_IT && s->kind != K_DMF && s->kind != K_TFMX) xsong_free(&s->xs);
     free(s);
 }
 
 int song_render(Song *s, int16_t *out, int n) {
     if (s->ip) return itp_render(s->ip, out, n);
     if (s->dp) return dmp_render(s->dp, out, n);
+    if (s->tp) return tfp_render(s->tp, out, n);
     if (s->xxp) return xxm_render(s->xxp, out, n);
     return xplay_render(s->xp, out, n);
 }
@@ -129,6 +166,7 @@ int song_channels(const Song *s) { return s->nch; }
 int song_norders(const Song *s) { return s->nord; }
 int song_order(const Song *s) {
     if (s->dp) { int o = 0; dmp_pos(s->dp, &o, NULL, NULL); return o; }
+    if (s->tp) { int o = tfp_pos(s->tp) - s->tstart; return o < 0 ? 0 : o; }
     if (s->xp) return xplay_order(s->xp);
     if (s->xxp) return xxm_order(s->xxp);
     return -1;
@@ -137,6 +175,7 @@ int song_order(const Song *s) {
 /* ================================================================== Pattern-Zugriff */
 static int pat_of(const Song *s, int order) {
     if (order < 0 || order >= s->nord) return -1;
+    if (s->kind == K_TFMX) return order;          /* keine Patterns im Tracker-Sinn: Trackstep-Zeile */
     if (s->kind == K_DMF) { int p = s->dm->order[order]; return p < s->dm->npat ? p : -1; }
     if (s->kind == K_IT) { int p = s->it->orders[order]; return p >= 254 ? -1 : (p < s->it->npat ? p : -1); }
     int p = s->xs.orders[order];
@@ -155,6 +194,7 @@ void song_pos(const Song *s, SongPos *o) {
     int ord = 0, row = 0, pat = 0;
     if (s->ip) itp_pos(s->ip, &ord, &pat, &row);
     else if (s->dp) dmp_pos(s->dp, &ord, &pat, &row);
+    else if (s->tp) { ord = tfp_pos(s->tp) - s->tstart; if (ord < 0) ord = 0; pat = ord; row = 0; }
     else { if (s->xxp) xxm_pos(s->xxp, &ord, &row); else xplay_pos(s->xp, &ord, &row); pat = pat_of(s, ord); }
     o->order = ord; o->pattern = pat; o->row = row; o->nrows = song_pattern_rows(s, pat);
 }
@@ -277,7 +317,7 @@ static void fmt_it(const ITCell *x, SongCell *o) {
 void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
     memset(o, 0, sizeof *o);
     strcpy(o->note, "..."); strcpy(o->inst, ".."); strcpy(o->vol, "..."); strcpy(o->fx, "...");
-    if (pattern < 0) return;
+    if (pattern < 0 || s->kind == K_TFMX) return;    /* TFMX: noch keine Zellenanzeige */
     SongCell t; memset(&t, 0, sizeof t);
     if (s->kind == K_DMF) {
         if (pattern >= s->dm->npat || row >= s->dm->pat[pattern].nrows || ch >= 32) return;
@@ -322,12 +362,14 @@ void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
 void song_scope_enable(Song *s, float *buf, int len) {
     if (s->ip) itp_set_scope(s->ip, buf, len);
     else if (s->dp) dmp_set_scope(s->dp, buf, len);
+    else if (s->tp) tfp_set_scope(s->tp, buf, len);
     else if (s->xxp) xxm_set_scope(s->xxp, buf, len);
     else xplay_set_scope(s->xp, buf, len);
 }
 unsigned song_scope_pos(const Song *s) {
     if (s->ip) return itp_scope_pos(s->ip);
     if (s->dp) return dmp_scope_pos(s->dp);
+    if (s->tp) return tfp_scope_pos(s->tp);
     if (s->xxp) return xxm_scope_pos(s->xxp);
     return xplay_scope_pos(s->xp);
 }
@@ -340,6 +382,7 @@ int song_chan_pan(const Song *s, int ch) {
     if (ch < 0 || ch >= s->nch) return 128;
     if (s->ip) return itp_chan_pan(s->ip, ch);
     if (s->dp) return dmp_chan_pan(s->dp, ch);
+    if (s->tp) return tfp_chan_pan(s->tp, ch) ? 255 : 0;
     if (s->xxp) return xxm_chan_pan(s->xxp, ch);
     return xplay_chan_pan(s->xp, ch);
 }

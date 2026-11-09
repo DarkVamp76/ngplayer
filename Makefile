@@ -5,7 +5,7 @@ SDL_CFLAGS ?= $(shell sdl2-config --cflags)
 SDL_LIBS   ?= $(shell sdl2-config --libs)
 CFLAGS  += -w -Isrc -Isrc/core -Ibuild $(SDL_CFLAGS)
 LIBS     = $(SDL_LIBS) -lm
-CORE     = $(addprefix src/core/,replay.c mod_load.c s3m_load.c xm_load.c xm_replay.c it_load.c it_replay.c it_unpack.c period.c dmf_load.c dmf_replay.c)
+CORE     = $(addprefix src/core/,replay.c mod_load.c s3m_load.c xm_load.c xm_replay.c it_load.c it_replay.c it_unpack.c period.c dmf_load.c dmf_replay.c tfmx_load.c tfmx_replay.c)
 SRC      = src/main.c src/song.c src/net.c $(CORE)
 PREFIX  ?= /usr/local
 
