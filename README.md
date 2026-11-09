@@ -2,21 +2,46 @@
 
 # ngPlayer
 
-A fast, good-looking module player for Linux. Plays **MOD, S3M, XM and IT** with a replayer that follows the
-behaviour of the classic DOS players, and a GPU-rendered (SDL2 + OpenGL 3.3) interface in the style of
-[ngSid](https://github.com/darkVamp76).
+A fast, good-looking module player for Linux with a GPU-rendered interface: per-voice oscilloscopes, realtime
+panning and buttery-smooth pattern scrolling.
 
 ![ngPlayer](assets/screenshot.png)
 
+## Why
+
+ngPlayer is inspired by the great **XTC-Play** module player by Sanction. Back in the DOS days, players like it
+on a Gravis UltraSound (and UltraSound PnP) set the bar for how tracker music could sound. I wanted that same
+level of quality on Linux, together with an interface that is a joy to look at.
+
+## Supported formats
+
+| Format | Status |
+| --- | --- |
+| MOD (ProTracker and compatibles) | supported |
+| S3M (Scream Tracker 3) | supported |
+| XM (FastTracker 2) | supported |
+| IT (Impulse Tracker) | supported, still being completed |
+
+Planned: DMF, MTM, 669, MDL, DSM, FAR, STM, PTM, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
+
 ## Features
 
-- MOD, S3M, XM and IT playback (IT with NNA, envelopes, filters, volume column)
-- Pattern view with **all channels**, notes, instruments, volume column and colour-coded effects
+- Pattern view with **all channels**: notes, instruments, volume column and colour-coded effects
 - **Oscilloscope per voice** and **realtime panning** in every channel header
 - Channel overview: volume bars with peak hold, last note, effect name and panning per channel
-- Butter-smooth, time-continuous scrolling locked to the audio clock (runs at full monitor refresh rate)
+- Time-continuous scrolling locked to the audio clock, drawn at the full refresh rate of your monitor
 - Spectrum analyser and level meters
-- Seek inside a song (Left/Right), drag & drop files and folders, playlist
+- Seek inside a song (Left/Right), drag and drop for files and folders, playlist
+
+## Technical details
+
+- Written in C. The replayer and mixer are independent of the interface; one loader and replayer per format
+  behind a common song layer.
+- Replayer behaviour is checked against reference renders with an automated regression suite.
+- Interface: SDL2 for window, input and audio, **OpenGL 3.3** for drawing. A batched renderer draws rounded
+  rectangles via signed distance fields, glow, polylines and a baked glyph atlas from a single vertex buffer.
+- The audio thread renders in short slices and reports every row change with its sample position, so the
+  display scrolls exactly in time with what you hear.
 
 ## Install
 
