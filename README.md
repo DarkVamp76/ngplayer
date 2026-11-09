@@ -5,10 +5,8 @@
 A fast, good-looking module player for Linux with a GPU-rendered interface: per-voice oscilloscopes, realtime
 panning and buttery-smooth pattern scrolling.
 
-![ngPlayer]
 <img width="974" height="852" alt="Bildschirmfoto_20261109_011108" src="https://github.com/user-attachments/assets/671bf8eb-88cb-423e-a01b-592d369f34a9" />
 <img width="1318" height="1116" alt="Bildschirmfoto_20261109_011034" src="https://github.com/user-attachments/assets/73cd3f3a-93f1-46b6-97bf-57baa953fe1e" />
-
 
 ## Why
 
