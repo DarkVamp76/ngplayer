@@ -113,7 +113,7 @@ static int list_follow;
 static int is_mod_name(const char *n) {
     const char *d = strrchr(n, '.');
     if (!d) return 0;
-    static const char *ext[] = { ".mod", ".s3m", ".xm", ".it", NULL };
+    static const char *ext[] = { ".mod", ".s3m", ".xm", ".it", ".dmf", NULL };
     for (int i = 0; ext[i]; i++) if (!strcasecmp(d, ext[i])) return 1;
     return 0;
 }

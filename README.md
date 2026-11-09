@@ -22,8 +22,9 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | S3M (Scream Tracker 3) | supported |
 | XM (FastTracker 2) | supported |
 | IT (Impulse Tracker) | supported, still being completed |
+| DMF (X-Tracker, v8) | supported, some rare effects still missing |
 
-Planned: DMF, MTM, 669, MDL, DSM, FAR, STM, PTM, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
+Planned: MTM, 669, MDL, DSM, FAR, STM, PTM, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
 
 ## Features
 
