@@ -17,6 +17,7 @@ int main(int argc, char **argv) {
     if (!m || !s) { fprintf(stderr, "Lesefehler\n"); return 2; }
     int err; TfmxSong *t = tfmx_load(m, nm, s, ns, &err);
     if (!t) { fprintf(stderr, "Ladefehler %d\n", err); return 3; }
+    if (getenv("MUTE")) xplay_mute = strtoull(getenv("MUTE"), NULL, 0);
     int sub = argc > 4 ? atoi(argv[4]) : 0;
     printf("Sample: %s | Subsongs: %d | Zeile0: %s\n", sm, tfmx_subsong_count(t), t->text[0]);
     TfmxPlayer *p = tfp_new(t, sub, 44100);

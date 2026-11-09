@@ -124,7 +124,14 @@ static void add_file(const char *path) {
     pl = (entry *)realloc(pl, sizeof(entry) * (size_t)(npl + 1));
     pl[npl].path = strdup(path);
     const char *b = strrchr(path, '/');
-    snprintf(pl[npl].label, sizeof pl[npl].label, "%s", b ? b + 1 : path);
+    const char *fn = b ? b + 1 : path;
+    if (tfmx_is_song_name(fn)) {                 /* TFMX: Namensschema mdat.X / X.tfx ist kein sinnvoller Anzeigename */
+        char nm[128];
+        size_t n = strlen(fn);
+        if (!strncasecmp(fn, "mdat.", 5)) snprintf(nm, sizeof nm, "%s", fn + 5);
+        else { snprintf(nm, sizeof nm, "%s", fn); if (n > 4) nm[n - 4] = 0; }
+        snprintf(pl[npl].label, sizeof pl[npl].label, "%s TFMX", nm);
+    } else snprintf(pl[npl].label, sizeof pl[npl].label, "%s", fn);
     npl++;
 }
 
@@ -717,6 +724,92 @@ static void draw_logo(float x, float y, float s) {
         rrect(x + LG_BAR[i][0] * k, y + LG_BAR[i][1] * k, 14 * k, LG_BAR[i][2] * k, 5 * k, (i & 1) ? pk : cy);
     rrect(x + 26 * k, y + 140 * k, 124 * k, 3 * k, 1.5f * k, alpha(cy, 0.35f));
 }
+/* ---------------------------------------------------------------- Soundchips (Kopfzeile)
+   Gezeichnet mit den vorhandenen Primitiven (Koordinaten im 320x200-Raster, Chip um 160,100). */
+static float chip_tsz(float fs, float k) { float z = fs * k; return z < 7.0f ? 7.0f : z; }
+static void chip_dip(float x, float y, float h) {            /* Paula, DIP-48; h = Hoehe in Pixeln */
+    float k = h / 132.0f, ox = x - 34 * k, oy = y - 34 * k;
+    col pin = C(0.62f, 0.65f, 0.70f, 1), body = C(0.15f, 0.17f, 0.22f, 1), ink = C(0.90f, 0.92f, 0.96f, 1), dim = C(0.60f, 0.64f, 0.72f, 1);
+    float x0 = 40, x1 = 280, y0 = 50, y1 = 150, pw = (x1 - x0) / 24.0f;
+    for (int i = 0; i < 24; i++) {
+        float px = x0 + i * pw + pw * 0.2f;
+        rect(ox + px * k, oy + (y0 - 16) * k, pw * 0.6f * k, 16 * k, pin);
+        rect(ox + px * k, oy + y1 * k, pw * 0.6f * k, 16 * k, pin);
+    }
+    rrect(ox + (x0 - 6) * k - 1, oy + y0 * k - 1, (x1 - x0 + 12) * k + 2, (y1 - y0) * k + 2, 5 * k + 1, C(0.02f, 0.03f, 0.04f, 1));
+    rrect(ox + (x0 - 6) * k, oy + y0 * k, (x1 - x0 + 12) * k, (y1 - y0) * k, 5 * k, body);
+    rrect(ox + (x0 - 6 - 10) * k, oy + (y0 + 40) * k, 20 * k, 20 * k, 10 * k, C(0.02f, 0.03f, 0.04f, 1));
+    rrect(ox + (x0 + 14 - 3.5f) * k, oy + (y1 - 14 - 3.5f) * k, 7 * k, 7 * k, 3.5f * k, C(0.02f, 0.03f, 0.04f, 1));
+    float cx = ox + 160 * k, z;
+    z = chip_tsz(11, k);  text(cx - text_width("8364R7", z) / 2, oy + 72 * k, z, dim, "8364R7");
+    z = chip_tsz(26, k);  text(cx - text_width("PAULA", z) / 2, oy + 90 * k, z, ink, "PAULA");
+    z = chip_tsz(11, k);  text(cx - text_width("48-PIN DIP", z) / 2, oy + 125 * k, z, dim, "48-PIN DIP");
+}
+static void chip_gf1(float x, float y, float h) {            /* Forte GF1, PLCC im Sockel; h = Hoehe */
+    float k = h / 180.0f, ox = x - 70 * k, oy = y - 10 * k;
+    col sock = C(0.29f, 0.31f, 0.33f, 1), tooth = C(0.56f, 0.57f, 0.60f, 1), body = C(0.23f, 0.24f, 0.26f, 1), ink = C(0.79f, 0.80f, 0.83f, 1);
+    float cx = 160, cy = 100, hs = 90, bh = 62, ch = 22, pw = 134.0f / 25.0f;
+    rect(ox + (cx - hs) * k, oy + (cy - hs) * k, 2 * hs * k, 2 * hs * k, sock);
+    rect(ox + (cx - hs) * k, oy + (cy - hs) * k, 2 * hs * k, 2 * hs * k, C(0, 0, 0, 0.12f));
+    tri(ox + (cx + hs - ch) * k, oy + (cy - hs) * k, ox + (cx + hs) * k, oy + (cy - hs) * k, ox + (cx + hs) * k, oy + (cy - hs + ch) * k, C(0.06f, 0.07f, 0.08f, 1));
+    for (int i = 0; i < 25; i++) {
+        float o = -67 + pw * i + pw * 0.15f, tw = pw * 0.6f, tl = hs - bh - 6;
+        if (cx + o + tw < cx + hs - ch - 1)
+            rect(ox + (cx + o) * k, oy + (cy - hs + 4) * k, tw * k, tl * k, tooth);
+        rect(ox + (cx + o) * k, oy + (cy + bh + 2) * k, tw * k, tl * k, tooth);
+        rect(ox + (cx - hs + 4) * k, oy + (cy + o) * k, tl * k, tw * k, tooth);
+        if (cy + o > cy - hs + ch)
+            rect(ox + (cx + bh + 2) * k, oy + (cy + o) * k, tl * k, tw * k, tooth);
+    }
+    rect(ox + (cx - bh) * k, oy + (cy - bh) * k, 2 * bh * k, 2 * bh * k, body);
+    tri(ox + (cx + bh - 10) * k, oy + (cy - bh) * k, ox + (cx + bh) * k, oy + (cy - bh) * k, ox + (cx + bh) * k, oy + (cy - bh + 10) * k, sock);
+    float tx = ox + (cx - bh + 12) * k, z = chip_tsz(14, k);
+    text(tx, oy + (cy - 36) * k, z, ink, "FORTE GF1");
+    z = chip_tsz(11, k);
+    rect(tx, oy + (cy - 12) * k, 28 * k, 1.2f, ink); rect(tx, oy + (cy + 24) * k, 28 * k, 1.2f, ink);
+    rect(tx, oy + (cy - 12) * k, 1.2f, 36 * k, ink);  rect(tx + 28 * k - 1.2f, oy + (cy - 12) * k, 1.2f, 36 * k, ink);
+    text(tx + 38 * k, oy + (cy - 12) * k, z, ink, "ICS11614");
+    text(tx + 38 * k, oy + (cy + 3) * k, z, ink, "9245");
+    text(tx + 38 * k, oy + (cy + 18) * k, z, ink, "AH222616");
+}
+static void chip_iw(float x, float y, float h) {             /* AMD InterWave, QFP-160; h = Hoehe */
+    float k = h / 176.0f, ox = x - 72 * k, oy = y - 12 * k;
+    col pin = C(0.62f, 0.65f, 0.70f, 1), body = C(0.21f, 0.22f, 0.24f, 1), ink = C(0.79f, 0.80f, 0.83f, 1), dimple = C(0.15f, 0.16f, 0.17f, 1);
+    float cx = 160, cy = 100, hb = 76, pl = 12, pw = 152.0f / 40.0f;
+    for (int i = 0; i < 40; i++) {
+        float o = -hb + pw * i + pw * 0.25f, w = pw * 0.45f;
+        rect(ox + (cx + o) * k, oy + (cy - hb - pl) * k, w * k, pl * k, pin);
+        rect(ox + (cx + o) * k, oy + (cy + hb) * k, w * k, pl * k, pin);
+        rect(ox + (cx - hb - pl) * k, oy + (cy + o) * k, pl * k, w * k, pin);
+        rect(ox + (cx + hb) * k, oy + (cy + o) * k, pl * k, w * k, pin);
+    }
+    rrect(ox + (cx - hb) * k, oy + (cy - hb) * k, 2 * hb * k, 2 * hb * k, 3 * k, body);
+    for (int a = -1; a <= 1; a += 2) for (int b = -1; b <= 1; b += 2)
+        rrect(ox + (cx + a * (hb - 12) - 4.5f) * k, oy + (cy + b * (hb - 12) - 4.5f) * k, 9 * k, 9 * k, 4.5f * k, dimple);
+    float tx = ox + (cx - hb + 26) * k, z = chip_tsz(15, k);
+    text(tx + text(tx, oy + (cy - 20) * k, z, ink, "InterWave"), oy + (cy - 20) * k, z * 0.5f, ink, "TM");
+    z = chip_tsz(12, k);
+    text(tx, oy + (cy - 2) * k, z, ink, "AM78C201KC");
+    z = chip_tsz(11, k);
+    text(tx, oy + (cy + 15) * k, z, ink, "9539BGA  B2");
+    text(tx, oy + (cy + 31) * k, z, ink, "\xa9 1995 AMD");
+}
+/* Welcher Chip: 0 = Paula (TFMX, MOD bis 4 Kanaele), 1 = GF1 (bis 14 Kanaele), 2 = InterWave (ab 15 Kanaelen) */
+static int chip_kind(void) {
+    const char *f = song_format(g_song);
+    int n = song_channels(g_song);
+    if (!strcmp(f, "TFMX") || (!strcmp(f, "MOD") && n <= 4)) return 0;
+    return n >= 15 ? 2 : 1;
+}
+static float chips_width(float h) {                       /* Breite des Chipbereichs (0 = keiner) */
+    if (!g_song) return 0;
+    return chip_kind() == 0 ? 252.0f / 132.0f * h : h * 1.02f;
+}
+static void draw_chips(float x, float y, float h) {
+    if (!g_song) return;
+    int k = chip_kind();
+    if (k == 0) chip_dip(x, y, h); else if (k == 1) chip_gf1(x, y, h); else chip_iw(x, y, h);
+}
 static int lg_inside(float px, float py, float x, float y, float w, float h, float r) {
     float cx = px < x + r ? x + r : (px > x + w - r ? x + w - r : px);
     float cy = py < y + r ? y + r : (py > y + h - r ? y + h - r : py);
@@ -929,10 +1022,14 @@ static void draw_ui(double t) {
             snprintf(title, sizeof title, "ngPlayer");
             snprintf(sub, sizeof sub, "Module player for Linux");
         }
+        float chh = hh - 14, chw = chips_width(chh);      /* Soundchip-Grafik zwischen Titel und Zeit */
+        float tmax = haw - 200 - (chw > 0 ? chw + 20 : 0);
+        if (chw > 0) draw_chips(ax + haw - 22 - 130 - chw, hy + 7, chh);
         float tsize = 26;
-        while (tsize > 18 && text_width(title, tsize) > haw - 200) tsize -= 2;
+        while (tsize > 18 && text_width(title, tsize) > tmax) tsize -= 2;
+        fit_text(title, tmax, tsize);
         text(ax + 22, hy + 10, tsize, TXT, title);
-        fit_text(sub, haw - 200, 14);
+        fit_text(sub, tmax, 14);
         if (!g_error[0]) text(ax + 22, hy + 14 + tsize + 2, 14, DIM, sub);
         if (g_song) {
             float cx = ax + 22, cy = hy + hh - 30;
