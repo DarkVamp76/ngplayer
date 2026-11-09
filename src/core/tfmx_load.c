@@ -9,6 +9,27 @@
 static uint32_t be32(const uint8_t *d, size_t n, size_t o) { return o + 4 <= n ? (uint32_t)d[o] << 24 | d[o+1] << 16 | d[o+2] << 8 | d[o+3] : 0; }
 static uint32_t be16(const uint8_t *d, size_t n, size_t o) { return o + 2 <= n ? (uint32_t)d[o] << 8 | d[o+1] : 0; }
 
+/* Fruehe TFMX-Songs (Replayer v1) lassen sich nicht am Header erkennen; hier eine Liste per CRC32 der Songdatei
+ * (selbst ermittelt: diese Songs klingen nur mit den v1-Effekten richtig). Der alte Header "TFMX " zaehlt ebenfalls. */
+static uint32_t crc32_of(const uint8_t *d, size_t n) {
+    uint32_t c = 0xFFFFFFFFu;
+    for (size_t i = 0; i < n; i++) { c ^= d[i]; for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u))); }
+    return ~c;
+}
+static int tfmx_is_v1(const uint8_t *m, size_t nm) {         /* Bit 0: v1, Bit 1: Turrican-Variante, Bit 2: Noten ohne Feinstimmung (Danger Freak) */
+    static const struct { uint32_t crc; int fl; } V1[] = {
+        { 0xF352D151, 3 }, { 0x20A44A0F, 3 }, { 0x591C32EA, 3 }, { 0xBEC86482, 3 },                       /* Turrican */
+        { 0xBB4AB77F, 3 }, { 0xF15B7260, 3 }, { 0xA72B075C, 3 }, { 0x2E5E2457, 3 },
+        { 0xABDA96DF, 1 }, { 0x80167F23, 1 },                                                              /* Hard'n'Heavy */
+        { 0x674380D2, 1 }, { 0xAAE2DB6E, 1 },                                                              /* Grand Monster Slam */
+        { 0xA706D505, 5 }, { 0x00740C49, 5 }, { 0xD339888B, 5 },                                           /* Danger Freak */
+        { 0x746E6FAE, 1 }, { 0x3056F774, 1 } };                                                            /* X-Out */
+    if (nm >= 5 && !memcmp(m, "TFMX", 4) && m[4] == 0x20) return 1;
+    uint32_t c = crc32_of(m, nm);
+    for (size_t i = 0; i < sizeof V1 / sizeof V1[0]; i++) if (V1[i].crc == c) return V1[i].fl;
+    return 0;
+}
+
 TfmxSong *tfmx_load(const uint8_t *m, size_t nm, const uint8_t *sm, size_t ns, int *err) {
     int e = 0; if (!err) err = &e;
     *err = 0;
@@ -48,6 +69,7 @@ TfmxSong *tfmx_load(const uint8_t *m, size_t nm, const uint8_t *sm, size_t ns, i
     s->ntrk = (int)(((s->pt < s->ts ? nm : s->pt) - s->ts) / 16);
     if (s->ntrk > 0x2000) s->ntrk = 0x2000;
     s->pal = (m[10] << 8 | m[11]) & 2 ? 1 : 0;
+    s->v1 = tfmx_is_v1(m, nm);
     return s;
 }
 

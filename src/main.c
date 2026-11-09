@@ -105,7 +105,7 @@ static void audio_cb(void *ud, Uint8 *stream, int len) {
 }
 
 /* ================================================================== Playlist */
-typedef struct { char *path; char label[128]; } entry;
+typedef struct { char *path; char *key; char label[128]; } entry;   /* key: Sortierschluessel (Ordner + Anzeigename) */
 static entry *pl;
 static int npl, cur = -1;
 static float list_scroll;
@@ -132,10 +132,19 @@ static void add_file(const char *path) {
         else { snprintf(nm, sizeof nm, "%s", fn); if (n > 4) nm[n - 4] = 0; }
         snprintf(pl[npl].label, sizeof pl[npl].label, "%s TFMX", nm);
     } else snprintf(pl[npl].label, sizeof pl[npl].label, "%s", fn);
+    {   /* Sortierschluessel: Ordner + Anzeigename, damit TFMX-Songs nach ihrem Namen (nicht nach 'mdat.') einsortiert werden */
+        size_t dl = b ? (size_t)(b + 1 - path) : 0;
+        size_t kl = dl + strlen(pl[npl].label) + 1;
+        pl[npl].key = (char *)malloc(kl);
+        if (pl[npl].key) { memcpy(pl[npl].key, path, dl); strcpy(pl[npl].key + dl, pl[npl].label); }
+    }
     npl++;
 }
 
-static int cmp_entry(const void *a, const void *b) { return strcasecmp(((const entry *)a)->path, ((const entry *)b)->path); }
+static int cmp_entry(const void *a, const void *b) {
+    const entry *x = (const entry *)a, *y = (const entry *)b;
+    return strcasecmp(x->key ? x->key : x->path, y->key ? y->key : y->path);
+}
 
 static void add_path(const char *path, int depth) {
     struct stat st;

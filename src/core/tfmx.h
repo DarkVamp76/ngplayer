@@ -15,6 +15,7 @@ typedef struct {
     uint32_t ts, pt, mt;                     /* Offsets Trackstep-, Pattern-, Makrotabelle */
     int npat, nmac, ntrk;                    /* Eintraege bzw. Trackstep-Zeilen */
     int pal;                                 /* Header-Flag PAL (Bit 1) */
+    int v1;                                  /* frueher TFMX-Replayer (ungeskalte Effekte, andere Ausfuehrungsreihenfolge) */
 } TfmxSong;
 
 /* Fehler: -1 kein TFMX, -2 beschaedigt/abgeschnitten, -3 Speicher */
