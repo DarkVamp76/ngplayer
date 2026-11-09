@@ -736,23 +736,23 @@ static void draw_logo(float x, float y, float s) {
 /* ---------------------------------------------------------------- Soundchips (Kopfzeile)
    Gezeichnet mit den vorhandenen Primitiven (Koordinaten im 320x200-Raster, Chip um 160,100). */
 static float chip_tsz(float fs, float k) { float z = fs * k; return z < 7.0f ? 7.0f : z; }
-static void chip_dip(float x, float y, float h) {            /* Paula, DIP-48; h = Hoehe in Pixeln */
-    float k = h / 132.0f, ox = x - 34 * k, oy = y - 34 * k;
-    col pin = C(0.62f, 0.65f, 0.70f, 1), body = C(0.15f, 0.17f, 0.22f, 1), ink = C(0.90f, 0.92f, 0.96f, 1), dim = C(0.60f, 0.64f, 0.72f, 1);
-    float x0 = 40, x1 = 280, y0 = 50, y1 = 150, pw = (x1 - x0) / 24.0f;
+static void chip_dip(float x, float y, float h) {            /* Paula, DIP-48 (MOS 8364R7); h = Hoehe, Breite = 5 * h */
+    float k = h / 100.0f;
+    col pin = C(0.62f, 0.65f, 0.70f, 1), body = C(0.23f, 0.24f, 0.255f, 1), ink = C(0.79f, 0.80f, 0.83f, 1), dimple = C(0.09f, 0.095f, 0.10f, 1);
+    float x0 = 10, x1 = 490, pw = (x1 - x0) / 24.0f;
     for (int i = 0; i < 24; i++) {
-        float px = x0 + i * pw + pw * 0.2f;
-        rect(ox + px * k, oy + (y0 - 16) * k, pw * 0.6f * k, 16 * k, pin);
-        rect(ox + px * k, oy + y1 * k, pw * 0.6f * k, 16 * k, pin);
+        float px = x0 + i * pw + pw * 0.22f;
+        rect(x + px * k, y, pw * 0.56f * k, 12 * k, pin);
+        rect(x + px * k, y + 88 * k, pw * 0.56f * k, 12 * k, pin);
     }
-    rrect(ox + (x0 - 6) * k - 1, oy + y0 * k - 1, (x1 - x0 + 12) * k + 2, (y1 - y0) * k + 2, 5 * k + 1, C(0.02f, 0.03f, 0.04f, 1));
-    rrect(ox + (x0 - 6) * k, oy + y0 * k, (x1 - x0 + 12) * k, (y1 - y0) * k, 5 * k, body);
-    rrect(ox + (x0 - 6 - 10) * k, oy + (y0 + 40) * k, 20 * k, 20 * k, 10 * k, C(0.02f, 0.03f, 0.04f, 1));
-    rrect(ox + (x0 + 14 - 3.5f) * k, oy + (y1 - 14 - 3.5f) * k, 7 * k, 7 * k, 3.5f * k, C(0.02f, 0.03f, 0.04f, 1));
-    float cx = ox + 160 * k, z;
-    z = chip_tsz(11, k);  text(cx - text_width("8364R7", z) / 2, oy + 72 * k, z, dim, "8364R7");
-    z = chip_tsz(26, k);  text(cx - text_width("PAULA", z) / 2, oy + 90 * k, z, ink, "PAULA");
-    z = chip_tsz(11, k);  text(cx - text_width("48-PIN DIP", z) / 2, oy + 125 * k, z, dim, "48-PIN DIP");
+    rrect(x + (x0 - 4) * k - 1, y + 11 * k - 1, (x1 - x0 + 8) * k + 2, 78 * k + 2, 3 * k + 1, C(0.07f, 0.07f, 0.08f, 1));
+    rrect(x + (x0 - 4) * k, y + 11 * k, (x1 - x0 + 8) * k, 78 * k, 3 * k, body);
+    rrect(x + (95 - 12) * k, y + (50 - 12) * k, 24 * k, 24 * k, 12 * k, dimple);
+    rrect(x + (415 - 12) * k, y + (50 - 12) * k, 24 * k, 24 * k, 12 * k, dimple);
+    float cx = x + 250 * k, z;
+    z = chip_tsz(15, k); text(cx - text_width("MOS", z) / 2, y + 36 * k - z * 0.8f, z, ink, "MOS");
+    z = chip_tsz(17, k); text(cx - text_width("8364R7", z) / 2, y + 57 * k - z * 0.8f, z, ink, "8364R7");
+    z = chip_tsz(14, k); text(cx - text_width("1589  27", z) / 2, y + 77 * k - z * 0.8f, z, ink, "1589  27");
 }
 static void chip_gf1(float x, float y, float h) {            /* Forte GF1, PLCC im Sockel; h = Hoehe */
     float k = h / 180.0f, ox = x - 70 * k, oy = y - 10 * k;
@@ -812,12 +812,12 @@ static int chip_kind(void) {
 }
 static float chips_width(float h) {                       /* Breite des Chipbereichs (0 = keiner) */
     if (!g_song) return 0;
-    return chip_kind() == 0 ? 252.0f / 132.0f * h : h * 1.02f;
+    return chip_kind() == 0 ? 5.0f * h * 0.5f : h * 1.02f;       /* Paula: flacher Streifen (5:1), in halber Hoehe */
 }
 static void draw_chips(float x, float y, float h) {
     if (!g_song) return;
     int k = chip_kind();
-    if (k == 0) chip_dip(x, y, h); else if (k == 1) chip_gf1(x, y, h); else chip_iw(x, y, h);
+    if (k == 0) chip_dip(x, y + h * 0.25f, h * 0.5f); else if (k == 1) chip_gf1(x, y, h); else chip_iw(x, y, h);
 }
 static int lg_inside(float px, float py, float x, float y, float w, float h, float r) {
     float cx = px < x + r ? x + r : (px > x + w - r ? x + w - r : px);
