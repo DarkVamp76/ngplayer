@@ -11,6 +11,7 @@
 #include "font_data.h"
 #include "song.h"
 #include "net.h"
+#include "version.h"
 
 #include <SDL2/SDL.h>
 #include <dirent.h>
@@ -886,6 +887,7 @@ static void draw_ui(double t) {
             text(x + 20, yy + 5, 14, isc ? TXT : DIM, lab);
             if (clicked(x + 8, yy, w - 16, rh)) { play_index(i); click = 0; }
         }
+        { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s  \xb7  Module player", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
         if (!npl) {
             text(x + 18, y + 60, 14, DIM, "Keine Dateien.");
             text(x + 18, y + 84, 13, FAINT, "MOD, S3M, XM oder IT");
@@ -1019,6 +1021,7 @@ static int gl_compile(GLenum type, const char *src) {
 }
 
 int main(int argc, char **argv) {
+    for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--version")) { printf("ngPlayer %s\n", NGPLAYER_VERSION); return 0; }
     const char *shot = NULL;
     int shot_frames = 90;
     for (int i = 1; i < argc; i++) {

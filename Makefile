@@ -3,7 +3,7 @@ CC      ?= gcc
 CFLAGS  ?= -O2
 SDL_CFLAGS ?= $(shell sdl2-config --cflags)
 SDL_LIBS   ?= $(shell sdl2-config --libs)
-CFLAGS  += -w -Isrc -Isrc/core $(SDL_CFLAGS)
+CFLAGS  += -w -Isrc -Isrc/core -Ibuild $(SDL_CFLAGS)
 LIBS     = $(SDL_LIBS) -lm
 CORE     = $(addprefix src/core/,replay.c mod_load.c s3m_load.c xm_load.c xm_replay.c it_load.c it_replay.c it_unpack.c period.c)
 SRC      = src/main.c src/song.c src/net.c $(CORE)
@@ -11,7 +11,16 @@ PREFIX  ?= /usr/local
 
 all: build/ngplayer
 
-build/ngplayer: $(SRC) $(wildcard src/*.h src/*.inc src/core/*.h)
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+
+# erzeugt build/version.h aus 'git describe' (nur neu geschrieben, wenn sich der Inhalt aendert)
+build/version.h: FORCE
+	@mkdir -p build
+	@echo '#define NGPLAYER_VERSION "$(VERSION)"' > $@.tmp; if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; fi
+
+FORCE:
+
+build/ngplayer: $(SRC) build/version.h $(wildcard src/*.h src/*.inc src/core/*.h)
 	@mkdir -p build
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LIBS)
 
@@ -28,7 +37,7 @@ install: build/ngplayer
 clean:
 	rm -rf build
 
-.PHONY: all install clean
+.PHONY: all install clean FORCE
 
 build/nettest: tools/nettest.c src/net.c
 	@mkdir -p build
