@@ -1,4 +1,8 @@
-/* Tabellen aus dem Referenz-Player (obj2), per Skript extrahiert. GPL-3.0-or-later */
+/* Tabellen der Tracker-Formate (kleine Standardwerte), GPL-3.0-or-later:
+ *  - ngp_pt_periods: ProTracker-Periodentabelle, Finetune 0, drei Oktaven (MOD-Spezifikation)
+ *  - ngp_finetune_c2spd: Scream-Tracker-3-C2Spd je Finetune (S3M-Spezifikation)
+ *  - ngp_vib_sine: 32-stufige Vibrato-Sinustabelle (ProTracker)
+ *  - ngp_t12: Notenfrequenz-Faktoren je Halbton, ngp_pan_tab: Panning 17 * n */
 #pragma once
 #include <stdint.h>
 static const uint16_t ngp_pt_periods[84] = {1712,1616,1524,1440,1356,1280,1208,1140,1076,1016,960,906,856,808,762,720,678,640,604,570,538,508,480,453,428,404,381,360,339,320,302,285,269,254,240,226,214,202,190,180,170,160,151,143,135,127,120,113,107,101,95,90,85,80,75,71,67,63,60,56,53,50,47,45,42,40,37,35,33,31,30,28,27,25,24,22,21,20,19,18,17,16,15,14};
