@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Abhaengigkeiten
+        run: sudo apt-get update && sudo apt-get install -y build-essential libsdl2-dev libgl1-mesa-dev curl
+      - name: AppImage bauen
+        run: sh packaging/build-appimage.sh "${GITHUB_REF_NAME}"
+      - name: Pruefsumme
+        run: cd dist && sha256sum *.AppImage > SHA256SUMS
+      - name: Release veroeffentlichen
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.AppImage
+            dist/SHA256SUMS
+          generate_release_notes: true
+      - uses: actions/upload-artifact@v4
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        with:
+          name: ngPlayer-AppImage
+          path: dist/*.AppImage

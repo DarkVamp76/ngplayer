@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ngPlayer
+Comment=Module player for Linux
+Exec=ngplayer %F
+Icon=ngplayer
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+MimeType=audio/x-mod;audio/x-s3m;audio/x-xm;audio/x-it;
