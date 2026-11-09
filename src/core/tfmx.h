@@ -21,6 +21,7 @@ typedef struct {
 /* Fehler: -1 kein TFMX, -2 beschaedigt/abgeschnitten, -3 Speicher */
 TfmxSong *tfmx_load(const uint8_t *mdat, size_t nm, const uint8_t *smpl, size_t ns, int *err);
 void tfmx_free(TfmxSong *s);
+int tfmx_subsongs(const TfmxSong *s, int *idx, int max);  /* Indizes der echten Subsongs (mit Musik, ohne Duplikate), liefert die Anzahl (mind. 1) */
 int tfmx_subsong_count(const TfmxSong *s);                /* benutzbare Subsongs (mind. 1) */
 
 /* Dateinamen: mdat.NAME + smpl.NAME  oder  NAME.tfx + NAME.sam (Gross-/Kleinschreibung egal).

@@ -8,6 +8,9 @@ typedef struct Song Song;
 
 /* Laedt Datei, erkennt das Format am Inhalt. NULL bei Fehler (err gefuellt). */
 Song *song_open(const char *path, int rate, char *err, size_t errcap);
+Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errcap);  /* sub: Subsong (nur TFMX, sonst ignoriert) */
+int song_subsongs(const Song *s);   /* Anzahl Subsongs (mind. 1) */
+int song_subsong(const Song *s);    /* aktueller Subsong, 0-basiert */
 void song_close(Song *s);
 /* rendert n Stereo-Frames; liefert 0 am Songende */
 int song_render(Song *s, int16_t *out, int n);
