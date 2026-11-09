@@ -100,6 +100,7 @@ int xxm_chan_pan(const void *pp, int ch){ return ((const XXPlayer *)pp)->ch[ch].
 unsigned xxm_scope_pos(const void *pp){ return ((const XXPlayer *)pp)->scn; }
 int xxm_pos(const void *pp, int *ord, int *row){ const XXPlayer *p = pp; *ord = p->d_ord; *row = p->d_row; return 0; }
 extern int xplay_solo;
+extern unsigned long long xplay_mute;
 
 static const XCell *cell(const XXPlayer *p, int ch){
     const XSong *s = p->s; int pat = s->orders[p->order]; size_t base = 0;
@@ -357,7 +358,7 @@ int xxm_render(XXPlayer *p, int16_t *out, int n){
             for (int i = 0; i < s->nch; i++) cs[i] = 0;
             for (int i = 0; i < s->nch; i++) {
                 XCh *c = &p->ch[i];
-                int solo_skip = xplay_solo >= 0 && i != xplay_solo;
+                int solo_skip = (xplay_solo >= 0 && i != xplay_solo) || ((xplay_mute >> i) & 1);
                 double gnew = 1.0;
                 if (c->xf > 0) {                          /* alte Stimme ausblenden */
                     int L = xf_len(); double w = (double)(c->xf - 1) / L; gnew = 1.0;

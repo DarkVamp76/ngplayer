@@ -1,6 +1,7 @@
 /* IT-Replayer (Impulse-Tracker-Semantik, nach ITTECH/Schism-Verhalten). GPL-3.0-or-later
  * Stand: Kern ohne Envelopes/NNA/Filter (Sample- und einfacher Instrument-Modus). */
 #include "it.h"
+extern unsigned long long xplay_mute;
 #include "it_tables.h"
 #include <math.h>
 #include <stdlib.h>
@@ -830,7 +831,7 @@ int itp_render(ITPlayer *p, int16_t *out, int n){
             memset(p->tkbuf, 0, sizeof(double) * 2 * p->tk_len);
             if (p->scb) { if (p->tkscap < p->tk_len) { p->tkscap = p->tk_len; p->tksc = realloc(p->tksc, sizeof(float) * 64 * (size_t)p->tkscap); } memset(p->tksc, 0, sizeof(float) * 64 * (size_t)p->tk_len); }
             p->nsamp += p->tk_len;
-            for (int i = 0; i < 192; i++) { if (p->solo < 0 || i == p->solo || (i >= 64 && p->ch[i].master == p->solo + 1)) mix_voice(p, &p->ch[i], p->tkbuf, p->tk_len, 32, p->scb ? p->tksc + (size_t)(i < 64 ? i : (p->ch[i].master > 0 && p->ch[i].master <= 64 ? p->ch[i].master - 1 : 63)) * p->tk_len : NULL); p->ch[i].pgl = p->ch[i].gl; p->ch[i].pgr = p->ch[i].gr; }
+            for (int i = 0; i < 192; i++) { if ((p->solo < 0 || i == p->solo || (i >= 64 && p->ch[i].master == p->solo + 1)) && !((xplay_mute >> (i < 64 ? i : (p->ch[i].master > 0 && p->ch[i].master <= 64 ? p->ch[i].master - 1 : 63))) & 1)) mix_voice(p, &p->ch[i], p->tkbuf, p->tk_len, 32, p->scb ? p->tksc + (size_t)(i < 64 ? i : (p->ch[i].master > 0 && p->ch[i].master <= 64 ? p->ch[i].master - 1 : 63)) * p->tk_len : NULL); p->ch[i].pgl = p->ch[i].gl; p->ch[i].pgr = p->ch[i].gr; }
             for (int i = 0; i < 2 * p->tk_len; i++) { double v = p->tkbuf[i]; v = v > 32767 ? 32767 : v < -32768 ? -32768 : v; p->tkout[i] = (int16_t)lrint(v); }
         }
         int k = p->tk_left < n - done ? p->tk_left : n - done, off = p->tk_len - p->tk_left;

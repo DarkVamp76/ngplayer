@@ -51,6 +51,7 @@ typedef struct {
 typedef struct { int on; int is16; double pos, step; const int8_t *data; uint32_t len, ls, le; int loop; int vol, pan; double volf; int hold; } Voice;
 
 int xplay_solo = -1;
+unsigned long long xplay_mute = 0;   /* Bit n = Kanal n stumm (alle Formate) */
 #define XFMT4(p) ((*(const XSong *const *)(p))->fmt == 4)
 struct XPlayer {
     const XSong *s; int rate;
@@ -411,7 +412,7 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
             for (int i = 0; i < s->nch; i++) cs[i] = 0;
             for (int i = 0; i < s->nch; i++) {
                 Voice *v = &p->v[i];
-                if (xplay_solo >= 0 && i != xplay_solo) { if (v->on) v->pos += v->step; if (v->loop && v->on) { while (v->pos >= v->le) v->pos -= (v->le - v->ls); } else if (v->on && v->pos >= v->len) { v->on = 0; if (xlive_on()) { v->hold = 1; v->pos = v->len; } } continue; }
+                if ((xplay_solo >= 0 && i != xplay_solo) || ((xplay_mute >> i) & 1)) { if (v->on) v->pos += v->step; if (v->loop && v->on) { while (v->pos >= v->le) v->pos -= (v->le - v->ls); } else if (v->on && v->pos >= v->len) { v->on = 0; if (xlive_on()) { v->hold = 1; v->pos = v->len; } } continue; }
                 if (!v->on || !v->vol) { if (v->on) v->pos += v->step; continue; }
                 uint32_t i0 = (uint32_t)v->pos;
                 double fr = v->pos - i0;

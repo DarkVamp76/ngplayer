@@ -298,6 +298,10 @@ unsigned song_scope_pos(const Song *s) {
     return xplay_scope_pos(s->xp);
 }
 
+extern unsigned long long xplay_mute;
+void song_set_mute(unsigned long long mask) { xplay_mute = mask; }
+unsigned long long song_get_mute(void) { return xplay_mute; }
+
 int song_chan_pan(const Song *s, int ch) {
     if (ch < 0 || ch >= s->nch) return 128;
     if (s->ip) return itp_chan_pan(s->ip, ch);

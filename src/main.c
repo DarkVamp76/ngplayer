@@ -171,6 +171,7 @@ static void play_index(int idx) {
     Song *s = song_open(pl[idx].path, g_rate, err, sizeof err);
     unload();
     cur = idx;
+    song_set_mute(0);
     list_follow = 1;
     g_frames = 0; g_ended = 0; g_paused = 0;
     pat_last_order = -1; pat_disp = 0; pat_ch0 = 0;
@@ -268,7 +269,7 @@ static void analyse(float dt) {
 
 /* ================================================================== UI-Helfer */
 static float mx, my;
-static int click, clickx, clicky, mouse_down;
+static int click, clickx, clicky, mouse_down, click_ctrl;
 static int hit(float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; }
 static int clicked(float x, float y, float w, float h) { return click && clickx >= x && clickx < x + w && clicky >= y && clicky < y + h; }
 
@@ -472,6 +473,18 @@ static void draw_pattern(float x, float y, float w, float h) {
         }
         char nb[16]; snprintf(nb, sizeof nb, "%02d", c + 1);
         text(cx + 8, hy + 2, 10, alpha(FAINT, 1.0f), nb);
+        {   /* Klick: stumm/laut, Strg+Klick: Solo */
+            unsigned long long mm = song_get_mute(), all = nch >= 64 ? ~0ULL : ((1ULL << nch) - 1);
+            if (clicked(cx + 2, hy, cw - 4, hh)) {
+                if (click_ctrl) mm = (mm == (all & ~(1ULL << c))) ? 0 : (all & ~(1ULL << c));
+                else mm ^= 1ULL << c;
+                song_set_mute(mm);
+            }
+            if ((song_get_mute() >> c) & 1) {
+                rrect(cx + 2, hy, cw - 4, hh, 7, C(0.02f, 0.03f, 0.055f, 0.72f));
+                text(cx + cw - 4 - text_width("MUTE", 10) - 6, hy + 2, 10, WARN, "MUTE");
+            }
+        }
     }
     /* Zeilenbereich */
     float ry0 = hy + hh + 8, ry1 = y + h - 10;
@@ -1033,6 +1046,17 @@ int main(int argc, char **argv) {
             return 0;
         } else add_path(argv[i], 0);
     }
+    if (!npl) {   /* ohne Argumente: Musikordner des Benutzers */
+        const char *home = getenv("HOME");
+        if (home) {
+            static const char *const dirs[] = { "Musik", "Music" };
+            for (int k = 0; k < 2 && !npl; k++) {
+                char dp[1024];
+                snprintf(dp, sizeof dp, "%s/%s", home, dirs[k]);
+                add_path(dp, 0);
+            }
+        }
+    }
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS)) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
@@ -1104,7 +1128,7 @@ int main(int argc, char **argv) {
             switch (e.type) {
             case SDL_QUIT: running = 0; break;
             case SDL_MOUSEBUTTONDOWN:
-                if (e.button.button == SDL_BUTTON_LEFT) { click = 1; clickx = (int)e.button.x; clicky = (int)e.button.y; }
+                if (e.button.button == SDL_BUTTON_LEFT) { click = 1; clickx = (int)e.button.x; clicky = (int)e.button.y; click_ctrl = (SDL_GetModState() & KMOD_CTRL) != 0; }
                 break;
             case SDL_MOUSEWHEEL:
                 if (mx < 16 + 288 + 16) list_scroll -= e.wheel.y * 3;

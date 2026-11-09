@@ -39,6 +39,9 @@ void song_scope_enable(Song *s, float *buf, int len);
 unsigned song_scope_pos(const Song *s);    /* Anzahl bisher geschriebener Frames (Schreibposition = pos & (len-1)) */
 
 /* ---- Kanalzustand fuer die Uebersicht ---- */
+/* Kanal-Stummschaltung: Bit n = Kanal n (gilt fuer das laufende und alle folgenden Stuecke) */
+void song_set_mute(unsigned long long mask);
+unsigned long long song_get_mute(void);
 int song_chan_pan(const Song *s, int ch);                 /* 0 (links) .. 255 (rechts) */
 /* Klartext-Name des Effekts bzw. des Volumenspalten-Effekts; NULL wenn keiner. *is_vol = 1 bei Volumenspalte */
 const char *song_fx_name(const Song *s, const SongCell *c, int *is_vol);
