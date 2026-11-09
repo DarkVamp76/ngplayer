@@ -37,6 +37,7 @@ struct Song {
     TfmxSong *tf;
     TfmxPlayer *tp;
     int tstart;             /* TFMX: erste Trackstep-Zeile des Subsongs */
+    int nsub, cursub;       /* TFMX: Anzahl echter Subsongs, aktueller (0-basiert) */
     char title[40];
     const char *fmt;
     int nch, nord;
@@ -45,7 +46,7 @@ struct Song {
 /* TFMX braucht zwei Dateien (mdat.X + smpl.X oder X.tfx + X.sam); liefert 0 bei Erfolg */
 static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
 
-static int open_tfmx(Song *s, const char *path, const uint8_t *b, long n, int rate, char *err, size_t errcap) {
+static int open_tfmx(Song *s, const char *path, const uint8_t *b, long n, int rate, int sub, char *err, size_t errcap) {
     int e = 0;
     if (n > 0x12 && !memcmp(b, "TFHD", 4)) {
         /* Einzeldatei: TFHD-Kopf (Big-Endian), dann mdat, dann Samples. Byte 8: 0 offen, 1 TFMX 1.5, 2 Pro, 3 7V (Bit 7 = erzwungen) */
@@ -71,14 +72,20 @@ static int open_tfmx(Song *s, const char *path, const uint8_t *b, long n, int ra
     s->title[0] = 0;
     for (int i = 0; i < 6 && !s->title[0]; i++)
         if (s->tf->text[i][0] && strncasecmp(s->tf->text[i], "date", 4) && strncasecmp(s->tf->text[i], "time", 4) && strncasecmp(s->tf->text[i], "(empty", 6)) snprintf(s->title, sizeof s->title, "%s", s->tf->text[i]);
-    s->tstart = s->tf->sub[0].start;
-    s->nch = 4; s->nord = s->tf->sub[0].end >= s->tf->sub[0].start ? s->tf->sub[0].end - s->tf->sub[0].start + 1 : 1;
-    s->tp = tfp_new(s->tf, 0, rate);
+    int idx[32];
+    s->nsub = tfmx_subsongs(s->tf, idx, 32);
+    if (sub < 0) sub = 0;
+    if (sub >= s->nsub) sub = s->nsub - 1;
+    s->cursub = sub;
+    int real = idx[sub];
+    s->tstart = s->tf->sub[real].start;
+    s->nch = 4; s->nord = s->tf->sub[real].end >= s->tf->sub[real].start ? s->tf->sub[real].end - s->tf->sub[real].start + 1 : 1;
+    s->tp = tfp_new(s->tf, real, rate);
     if (!s->tp) { snprintf(err, errcap, "TFMX: cannot start player"); return -1; }
     return 0;
 }
 
-Song *song_open(const char *path, int rate, char *err, size_t errcap) {
+Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errcap) {
     static int inited;
     if (!inited) { ngp_it_tables_init(); inited = 1; }
     if (tfmx_is_sample_name(path)) { snprintf(err, errcap, "TFMX sample data (open the mdat.* / .tfx file instead)"); return NULL; }
@@ -113,7 +120,7 @@ Song *song_open(const char *path, int rate, char *err, size_t errcap) {
             s->dp = dmp_new(s->dm, rate);
         }
     } else if (n > 0x200 && (!memcmp(b, "TFMX-SONG", 9) || !memcmp(b, "TFMX_SONG", 9) || !memcmp(b, "TFMX-MOD", 8) || !memcmp(b, "TFHD", 4))) {
-        if (open_tfmx(s, path, b, n, rate, err, errcap)) { free(b); song_close(s); return NULL; }
+        if (open_tfmx(s, path, b, n, rate, sub, err, errcap)) { free(b); song_close(s); return NULL; }
     } else if (n > 80 && !memcmp(b, "Extended Module: ", 17)) {
         r = xxm_load(&s->xs, b, (size_t)n);
         if (!r) {
@@ -174,6 +181,9 @@ const char *song_title(const Song *s) { return s->title; }
 const char *song_format(const Song *s) { return s->fmt; }
 int song_channels(const Song *s) { return s->nch; }
 int song_norders(const Song *s) { return s->nord; }
+int song_subsongs(const Song *s) { return s->kind == K_TFMX && s->nsub > 0 ? s->nsub : 1; }
+int song_subsong(const Song *s) { return s->kind == K_TFMX ? s->cursub : 0; }
+Song *song_open(const char *path, int rate, char *err, size_t errcap) { return song_open_sub(path, rate, 0, err, errcap); }
 int song_order(const Song *s) {
     if (s->dp) { int o = 0; dmp_pos(s->dp, &o, NULL, NULL); return o; }
     if (s->tp) { int o = tfp_pos(s->tp) - s->tstart; return o < 0 ? 0 : o; }

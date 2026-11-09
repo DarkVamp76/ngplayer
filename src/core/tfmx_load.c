@@ -75,14 +75,30 @@ TfmxSong *tfmx_load(const uint8_t *m, size_t nm, const uint8_t *sm, size_t ns, i
 
 void tfmx_free(TfmxSong *s) { if (!s) return; free(s->mdat); free(s->smpl); free(s); }
 
-int tfmx_subsong_count(const TfmxSong *s) {
-    int n = 1;
-    for (int i = 1; i < 32; i++) {
+int tfmx_subsongs(const TfmxSong *s, int *idx, int max) {
+    int n = 0;
+    for (int i = 0; i < 32; i++) {
         const TfmxSub *b = &s->sub[i];
-        if (b->end >= b->start && (b->start | b->end) && b->start < s->ntrk && b->end < s->ntrk && b->tempo) n = i + 1;
+        if (b->end < b->start || b->start >= s->ntrk || b->end >= s->ntrk) continue;
+        if (b->start == b->end && i >= 8) continue;      /* Padding-Eintraege am Tabellenende (z.B. 511-511) */
+        int music = 0;                                   /* mindestens eine Zeile mit Stimmen (weder EFFE-Kommando noch nur FF) */
+        for (int r = b->start; r <= b->end && !music; r++) {
+            size_t o = s->ts + 16u * (size_t)r;
+            if (o + 16 > s->nmdat || (s->mdat[o] == 0xEF && s->mdat[o + 1] == 0xFE)) continue;
+            for (int v = 0; v < 8; v++) if (s->mdat[o + 2 * v] != 0xFF) music = 1;
+        }
+        if (!music) continue;
+        int dup = 0;                                     /* Duplikat oder Ueberlappung mit einem schon akzeptierten Subsong */
+        for (int k = 0; k < n; k++) {
+            const TfmxSub *a = &s->sub[idx[k]];
+            if (b->start <= a->end && a->start <= b->end) dup = 1;
+        }
+        if (!dup && n < max) idx[n++] = i;
     }
+    if (n == 0 && max > 0) idx[n++] = 0;
     return n;
 }
+int tfmx_subsong_count(const TfmxSong *s) { int idx[32]; return tfmx_subsongs(s, idx, 32); }
 
 /* ---- Dateinamen ---- */
 static const char *base_of(const char *p) { const char *b = strrchr(p, '/'); return b ? b + 1 : p; }

@@ -3,7 +3,7 @@
  *
  *   ngplayer [--screenshot out.bmp [--frames N]] [datei.mod|s3m|xm|it | ordner ...]
  *
- * Tasten: Leertaste Pause, Links/Rechts im Song spulen, Hoch/Runter Titel, +/- Lautstaerke, R Neustart,
+ * Tasten: Leertaste Pause, Links/Rechts Subsong (TFMX) bzw. Order spulen, Strg+Links/Rechts Order spulen, Hoch/Runter Titel, +/- Lautstaerke, R Neustart,
  *         F/F11 Vollbild, Esc Ende. Maus: Playlist anklicken, Lautstaerkebalken ziehen.
  *         Dateien/Ordner per Drag & Drop auf das Fenster.
  */
@@ -183,10 +183,12 @@ static int pat_last_order = -1, pat_last_nrows = 64, pat_ch0;
 #define SCOPE_LEN 2048
 static float g_scope[64 * SCOPE_LEN];
 
-static void play_index(int idx) {
+static int g_open_sub;   /* gewaehlter Subsong (TFMX), bleibt bei R/Spulen erhalten */
+
+static void play_index_sub(int idx, int sub) {
     if (idx < 0 || idx >= npl) return;
     char err[128] = "";
-    Song *s = song_open(pl[idx].path, g_rate, err, sizeof err);
+    Song *s = song_open_sub(pl[idx].path, g_rate, sub, err, sizeof err);
     unload();
     cur = idx;
     song_set_mute(0);
@@ -204,7 +206,9 @@ static void play_index(int idx) {
     g_rendered = 0; g_lastord = g_lastrow = -1; g_resync = 1;
     if (g_dev) SDL_UnlockAudioDevice(g_dev);
     view_reset = 1;
+    g_open_sub = s ? song_subsong(s) : 0;
 }
+static void play_index(int idx) { play_index_sub(idx, 0); }
 
 /* ================================================================== Analyse (FFT, Spektrum, Pegel) */
 #define NBANDS 64
@@ -858,7 +862,7 @@ static void seek_order(int target) {
     if (target < 0) target = 0;
     if (target >= song_norders(g_song)) { next_prev(1); return; }
     char err[128] = "";
-    Song *s = song_open(pl[cur].path, g_rate, err, sizeof err);
+    Song *s = song_open_sub(pl[cur].path, g_rate, g_open_sub, err, sizeof err);
     if (!s) return;
     static int16_t tmp[128 * 2];
     long long cap = (long long)g_rate * 3600;
@@ -1050,6 +1054,7 @@ static void draw_ui(double t) {
             cx += chip(cx, cy, b, DIM, 0);
             int pf = song_paula_filter(g_song);
             if (pf >= 0) cx += chip(cx, cy, "PAULA-FILTER", pf ? VC[1] : DIM, pf);
+            if (song_subsongs(g_song) > 1) { char sb[24]; snprintf(sb, sizeof sb, "SONG %d/%d", song_subsong(g_song) + 1, song_subsongs(g_song)); cx += chip(cx, cy, sb, VC[2], 1); }
         }
         if (g_error[0]) text(ax + 22, hy + 14 + tsize + 2, 13, WARN, g_error);
         char tb[32];
@@ -1101,12 +1106,12 @@ static void draw_ui(double t) {
             if (clicked(x, cy - r, 2 * r, 2 * r)) {
                 if (i == 0) next_prev(-1);
                 else if (i == 2) next_prev(1);
-                else if (g_ended) { if (cur >= 0) play_index(cur); }
+                else if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); }
                 else g_paused = !g_paused;
                 click = 0;
             }
         }
-        text(bx + 190, cy - 20, 12, FAINT, "Leertaste Pause  \xb7  Links/Rechts Spulen  \xb7  Hoch/Runter Titel  \xb7  Shift+Pfeile Kan\xe4le");
+        text(bx + 190, cy - 20, 12, FAINT, "Leertaste Pause  \xb7  Links/Rechts Spulen (Subsong)  \xb7  Hoch/Runter Titel  \xb7  Shift+Pfeile Kan\xe4le");
         { char lb[96]; snprintf(lb, sizeof lb, "O Mod Archive  \xb7  R Neustart  \xb7  F Vollbild  \xb7  F5/F6 A/V-Sync %.0f ms  \xb7  Esc Ende", g_lag_ms); text(bx + 190, cy + 2, 12, FAINT, lb); }
         float vx = bx + bw - 250, vw = 200;
         text(vx - 44, cy - 8, 12, DIM, "VOL");
@@ -1259,11 +1264,11 @@ int main(int argc, char **argv) {
                 case SDLK_o: ma_show(1); break;
                 case SDLK_ESCAPE: running = 0; break;
                 case SDLK_SPACE: g_paused = !g_paused; break;
-                case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
-                case SDLK_RIGHT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0++; else seek_order((g_view_valid ? g_view.order : song_order(g_song)) + 1); break;
+                case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) > 0) play_index_sub(cur, song_subsong(g_song) - 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
+                case SDLK_RIGHT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0++; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) + 1 < song_subsongs(g_song)) play_index_sub(cur, song_subsong(g_song) + 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) + 1); break;
                 case SDLK_UP: next_prev(-1); break;
                 case SDLK_DOWN: next_prev(1); break;
-                case SDLK_r: if (cur >= 0) play_index(cur); break;
+                case SDLK_r: if (cur >= 0) play_index_sub(cur, g_open_sub); break;
                 case SDLK_F5: g_lag_ms -= 5; if (g_lag_ms < 0) g_lag_ms = 0; break;
                 case SDLK_F6: g_lag_ms += 5; if (g_lag_ms > 300) g_lag_ms = 300; break;
                 case SDLK_PLUS: case SDLK_KP_PLUS: case SDLK_EQUALS: g_vol += 0.05f; if (g_vol > 1) g_vol = 1; break;
