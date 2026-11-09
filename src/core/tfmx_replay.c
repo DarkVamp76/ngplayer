@@ -20,7 +20,8 @@ static const uint16_t NOTE[64] = {
 typedef struct {
     int note, prev, rel, fine;               /* Note, vorige Note, relative Lautstaerke, Feinstimmung */
     int mo, step, wait, run, keyup, sfx, defer, dmaint, ret_mo, ret_step;
-    uint8_t loop; int v1, t1, nd;            /* v1: fruehe Replayer-Variante; t1: Turrican-Variante; nd: Noten ohne Feinstimmung */
+    uint8_t loop; int v1, t1, nd;
+    float tail;                  /* letzter Ausgabewert: klingt nach DMA-Aus kurz aus (kein Knacken) */            /* v1: fruehe Replayer-Variante; t1: Turrican-Variante; nd: Noten ohne Feinstimmung */
     int vol;                                 /* Kanal-Lautstaerke 0..64 */
     int per, ref;                            /* Paula-Periode / Referenzperiode */
     int env_d, env_s, env_c, env_e;          /* Huellkurve */
@@ -36,6 +37,8 @@ typedef struct { int cmd, off, expose, step, wait; uint8_t loop; } Pat;
 struct TfmxPlayer {
     const TfmxSong *s; int rate;
     Chan c[8]; Pat p[8];
+    int interp;                              /* 1 = lineare Interpolation zwischen den Samplewerten */
+    int lp; float lpa, lpl, lpr;             /* Paula-Tiefpass (A500: RC-Glied ca. 4,9 kHz): an/aus, Koeffizient, Filterzustand L/R */
     int nv; uint8_t cm[8];                   /* Stimmenzahl (4 oder 8 im 7-Stimmen-Modus) und Kanal-Zuordnung */
     int tpos, tloop, start, stop;            /* Trackstep-Position/-Schleife */
     int pskip, pcount;
@@ -274,7 +277,12 @@ static void advance_patterns(TfmxPlayer *p) {
 static void gen_ch(TfmxPlayer *p, Chan *c, float *o, int n, int mute) {
     const TfmxSong *s = p->s;
     for (int i = 0; i < n; i++) o[i] = 0.0f;
-    if (!c->dma || c->per < 1 || !s->nsmpl) return;
+    if (!c->dma || c->per < 1 || !s->nsmpl) {
+        float t = c->tail;
+        for (int i = 0; i < n && t != 0.0f; i++) { t *= 0.37f; if (t > -1e-5f && t < 1e-5f) t = 0.0f; o[i] = t; }
+        c->tail = t;
+        return;
+    }
     double step = PAULA_CLK / c->per / p->rate;
     int vol = c->vol < 0 ? 0 : c->vol > 64 ? 64 : c->vol;
     int filled = 0;
@@ -282,10 +290,19 @@ static void gen_ch(TfmxPlayer *p, Chan *c, float *o, int n, int mute) {
         int need = (int)ceil((c->cl - c->pos) / step); if (need < 1) need = 1;
         int k = n - filled < need ? n - filled : need;
         for (int j = 0; j < k; j++) {
-            long idx = c->cs + (long)(c->pos + j * step);
+            double fp = c->pos + j * step;
+            long ip = (long)fp;
+            long idx = c->cs + ip;
             if (idx < 0) idx = 0;
             if ((size_t)idx >= s->nsmpl) idx = (long)s->nsmpl - 1;
-            o[filled + j] = mute ? 0.0f : (float)s->smpl[idx] / 128.0f * (float)vol / 64.0f;
+            float v = (float)s->smpl[idx];
+            if (p->interp) {                 /* naechster Wert: im Durchlauf oder - am Ende - der Schleifenanfang */
+                long i1 = ip + 1 < c->cl ? c->cs + ip + 1 : c->rstart;
+                if (i1 < 0) i1 = 0;
+                if ((size_t)i1 >= s->nsmpl) i1 = (long)s->nsmpl - 1;
+                v += ((float)s->smpl[i1] - v) * (float)(fp - (double)ip);
+            }
+            o[filled + j] = mute ? 0.0f : v / 128.0f * (float)vol / 64.0f;
         }
         c->pos += k * step; filled += k;
         if (c->pos >= c->cl) {
@@ -294,6 +311,11 @@ static void gen_ch(TfmxPlayer *p, Chan *c, float *o, int n, int mute) {
             if (c->pos >= c->cl) c->pos = 0.0;
         }
     }
+    if (vol == 0) {                          /* Lautstaerke 0 bei laufendem DMA: wie beim Abschalten ausklingen statt hart auf 0 springen */
+        float t = c->tail;
+        for (int i = 0; i < n; i++) { t *= 0.37f; if (t > -1e-5f && t < 1e-5f) t = 0.0f; o[i] = t; }
+    }
+    c->tail = n > 0 ? o[n - 1] : 0.0f;
 }
 
 static void seq_step(TfmxPlayer *p) {
@@ -323,8 +345,10 @@ static void do_tick(TfmxPlayer *p) {
         }
     }
     for (int i = 0; i < n; i++) {
-        p->tl[i] = (p->tsc[i] + p->tsc[3 * p->tcap + i]) * 0.5f;
-        p->tr[i] = (p->tsc[p->tcap + i] + p->tsc[2 * p->tcap + i]) * 0.5f;
+        float l = (p->tsc[i] + p->tsc[3 * p->tcap + i]) * 0.5f;
+        float r = (p->tsc[p->tcap + i] + p->tsc[2 * p->tcap + i]) * 0.5f;
+        if (p->lp) { p->lpl += p->lpa * (l - p->lpl); p->lpr += p->lpa * (r - p->lpr); l = p->lpl; r = p->lpr; }
+        p->tl[i] = l; p->tr[i] = r;
     }
     p->tlen = n; p->toff = 0;
 }
@@ -333,7 +357,8 @@ TfmxPlayer *tfp_new(const TfmxSong *s, int sub, int rate) {
     if (!s || sub < 0 || sub >= 32 || rate < 8000) return NULL;
     TfmxPlayer *p = calloc(1, sizeof *p);
     if (!p) return NULL;
-    p->s = s; p->rate = rate;
+    p->s = s; p->rate = rate; p->interp = 1;
+    p->lp = 1; p->lpa = 1.0f - expf(-6.2831853f * 4900.0f / (float)rate);   /* A500: Tiefpass 1. Ordnung bei ca. 4,9 kHz */
     const TfmxSub *b = &s->sub[sub];
     p->start = b->start; p->stop = b->end; p->tpos = b->start; p->tloop = -1;
     /* Tick-Takt wie die gaengigen Player: Tempo < 0x10 = 50 Hz mit Pattern-Teiler, sonst Tempo = BPM, Tick = BPM * 2/5 Hz */
@@ -384,6 +409,8 @@ int tfp_render(TfmxPlayer *p, int16_t *out, int nframes) {
     return done;
 }
 
+void tfp_set_interp(TfmxPlayer *p, int on) { if (p) p->interp = on ? 1 : 0; }
+void tfp_set_lowpass(TfmxPlayer *p, int on) { if (p) p->lp = on ? 1 : 0; }
 void tfp_set_scope(TfmxPlayer *p, float *buf, int len) { p->scb = buf; p->scl = len; p->scn = 0; }
 unsigned tfp_scope_pos(const TfmxPlayer *p) { return p->scn; }
 int tfp_chan_pan(const TfmxPlayer *p, int ch) { (void)p; return (ch == 1 || ch == 2) ? 1 : 0; }

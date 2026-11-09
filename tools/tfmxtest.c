@@ -21,6 +21,8 @@ int main(int argc, char **argv) {
     int sub = argc > 4 ? atoi(argv[4]) : 0;
     printf("Sample: %s | Subsongs: %d | Zeile0: %s\n", sm, tfmx_subsong_count(t), t->text[0]);
     TfmxPlayer *p = tfp_new(t, sub, 44100);
+    if (getenv("INTERP") && !atoi(getenv("INTERP"))) tfp_set_interp(p, 0);
+    if (getenv("LP") && !atoi(getenv("LP"))) tfp_set_lowpass(p, 0);
     int n = (int)(atof(argv[2]) * 44100); int16_t *buf = malloc((size_t)n * 4);
     int got = tfp_render(p, buf, n);
     FILE *o = fopen(argv[3], "wb");
