@@ -62,7 +62,12 @@ int ma_download(int id, char *out, size_t cap) {
     if (!stat(out, &sb) && sb.st_size > 0) return 0;                 /* Cache-Treffer */
     const char *base = getenv("NGPLAYER_MA_URL");                    /* Testhaken */
     snprintf(url, sizeof url, "%s?moduleid=%d", base ? base : "https://api.modarchive.org/downloads.php", id);
-    return net_get(url, out, 60);
+    int r = net_get(url, out, 60);
+    if (r) return r;
+    /* Fehlerseite statt Modul? (HTML/leer) -> verwerfen, damit sie nicht im Cache bleibt */
+    FILE *f = fopen(out, "rb"); unsigned char h[16] = {0}; size_t n = f ? fread(h, 1, sizeof h, f) : 0; if (f) fclose(f);
+    if (n < 16 || h[0] == '<' || !memcmp(h, "Invalid", 7) || !memcmp(h, "Error", 5)) { unlink(out); return 100; }
+    return 0;
 }
 
 int ma_parse_id(const char *s) {

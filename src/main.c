@@ -10,6 +10,7 @@
 #define _DEFAULT_SOURCE
 #include "font_data.h"
 #include "song.h"
+#include "net.h"
 
 #include <SDL2/SDL.h>
 #include <dirent.h>
@@ -762,6 +763,84 @@ static void seek_order(int target) {
     ov_reset = 1; view_reset = 1; pat_ch0 = pat_ch0;
 }
 
+
+/* ---------------------------------------------------------------- The-Mod-Archive-Dialog (Download per ID oder Link) */
+static int ma_open, ma_eat;
+static char ma_buf[256]; static int ma_len;
+static char ma_msg[160]; static int ma_msg_err;
+static volatile int dl_state;              /* 0 leer, 1 laedt, 2 fertig, 3 Fehler */
+static int dl_id, dl_rc; static char dl_path[1100]; static SDL_Thread *dl_thr;
+
+static int dl_thread(void *p) {
+    dl_rc = ma_download(dl_id, dl_path, sizeof dl_path);
+    dl_state = dl_rc ? 3 : 2;
+    return 0;
+}
+static void ma_show(int on) {
+    ma_open = on; ma_eat = on; ma_msg[0] = 0; ma_msg_err = 0;
+    if (on) SDL_StartTextInput(); else SDL_StopTextInput();
+}
+static void ma_start(void) {
+    if (dl_state == 1) return;
+    int id = ma_parse_id(ma_buf);
+    if (!id) { snprintf(ma_msg, sizeof ma_msg, "Keine Modul-ID erkannt. Erwartet: Zahl oder modarchive-Link."); ma_msg_err = 1; return; }
+    if (!net_have_curl()) { snprintf(ma_msg, sizeof ma_msg, "curl nicht gefunden - bitte installieren."); ma_msg_err = 1; return; }
+    dl_id = id; dl_state = 1;
+    snprintf(ma_msg, sizeof ma_msg, "Lade Modul #%d ...", id); ma_msg_err = 0;
+    dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
+}
+static void ma_poll(void) {
+    if (dl_state == 2 || dl_state == 3) {
+        SDL_WaitThread(dl_thr, NULL); dl_thr = NULL;
+        if (dl_state == 2) {
+            add_file(dl_path);
+            snprintf(pl[npl - 1].label, sizeof pl[npl - 1].label, "ModArchive #%d", dl_id);
+            play_index(npl - 1); list_follow = 1;
+            ma_buf[0] = 0; ma_len = 0; ma_show(0);
+        } else {
+            const char *m = dl_rc == 100 ? "Server lieferte keine Moduldatei (ID gibt es nicht?)." : dl_rc == 22 ? "Modul nicht gefunden (Server-Fehler)." : (dl_rc == 6 || dl_rc == 7 || dl_rc == 28) ? "Keine Verbindung zum Server." : "Download fehlgeschlagen.";
+            snprintf(ma_msg, sizeof ma_msg, "%s (Code %d)", m, dl_rc); ma_msg_err = 1;
+        }
+        dl_state = 0;
+    }
+}
+static void ma_key(const SDL_KeyboardEvent *k) {
+    switch (k->keysym.sym) {
+    case SDLK_ESCAPE: ma_show(0); break;
+    case SDLK_RETURN: case SDLK_KP_ENTER: ma_start(); break;
+    case SDLK_BACKSPACE: if (ma_len > 0) ma_buf[--ma_len] = 0; break;
+    case SDLK_v:
+        if (k->keysym.mod & KMOD_CTRL) {
+            char *c = SDL_GetClipboardText();
+            if (c) { for (char *p = c; *p && ma_len < (int)sizeof ma_buf - 1; p++) if (*p >= ' ') ma_buf[ma_len++] = *p; ma_buf[ma_len] = 0; SDL_free(c); }
+        }
+        break;
+    default: break;
+    }
+}
+static void ma_text(const char *t) {
+    if (ma_eat) { ma_eat = 0; if (t[0] == 'o' || t[0] == 'O') return; }
+    for (; *t && ma_len < (int)sizeof ma_buf - 1; t++) if ((unsigned char)*t >= ' ') ma_buf[ma_len++] = *t;
+    ma_buf[ma_len] = 0;
+}
+static void draw_ma_dialog(double t) {
+    if (!ma_open) return;
+    rect(0, 0, view_w, view_h, C(0, 0, 0, 0.60f));
+    float w = 640, h = 168, x = (view_w - w) / 2, y = (view_h - h) / 2 - 20;
+    card(x, y, w, h, 0);
+    text(x + 24, y + 18, 12, DIM, "THE MOD ARCHIVE");
+    text(x + 24, y + 38, 14, TXT, "Modul-ID oder Link einf\xfcgen");
+    float bx = x + 24, by = y + 70, bw = w - 48, bh = 36;
+    rrect(bx, by, bw, bh, 8, alpha(EDGE, 0.5f));
+    rrect(bx + 1, by + 1, bw - 2, bh - 2, 7, BG1);
+    const char *s = ma_buf;
+    while (*s && text_width(s, 15) > bw - 36) s++;
+    text(bx + 12, by + 9, 15, TXT, s);
+    if (dl_state != 1 && ((int)(t * 2) & 1)) rect(bx + 12 + text_width(s, 15) + 2, by + 8, 2, 20, VC[0]);
+    if (ma_msg[0]) text(x + 24, y + 120, 13, ma_msg_err ? WARN : VC[0], ma_msg);
+    else text(x + 24, y + 120, 12, FAINT, "Enter l\xe4" "dt  \xb7  Strg+V einf\xfcgen  \xb7  Esc schlie\xdft");
+}
+
 static void draw_ui(double t) {
     (void)t;
     float W = view_w, H = view_h;
@@ -837,7 +916,7 @@ static void draw_ui(double t) {
         while (tsize > 18 && text_width(title, tsize) > haw - 200) tsize -= 2;
         text(ax + 22, hy + 10, tsize, TXT, title);
         fit_text(sub, haw - 200, 14);
-        text(ax + 22, hy + 14 + tsize + 2, 14, DIM, sub);
+        if (!g_error[0]) text(ax + 22, hy + 14 + tsize + 2, 14, DIM, sub);
         if (g_song) {
             float cx = ax + 22, cy = hy + hh - 30;
             char b[48];
@@ -847,7 +926,7 @@ static void draw_ui(double t) {
             snprintf(b, sizeof b, "%d ORDERS", song_norders(g_song));
             cx += chip(cx, cy, b, DIM, 0);
         }
-        if (g_error[0]) text(ax + 22, hy + hh - 50, 13, WARN, g_error);
+        if (g_error[0]) text(ax + 22, hy + 14 + tsize + 2, 13, WARN, g_error);
         char tb[32];
         mmss(tb, sizeof tb, (double)g_frames / g_rate);
         text_right(ax + haw - 22, hy + 10, 34, TXT, tb);
@@ -903,7 +982,7 @@ static void draw_ui(double t) {
             }
         }
         text(bx + 190, cy - 20, 12, FAINT, "Leertaste Pause  \xb7  Links/Rechts Spulen  \xb7  Hoch/Runter Titel  \xb7  Shift+Pfeile Kan\xe4le");
-        { char lb[96]; snprintf(lb, sizeof lb, "R Neustart  \xb7  F Vollbild  \xb7  F5/F6 A/V-Sync %.0f ms  \xb7  Esc Ende", g_lag_ms); text(bx + 190, cy + 2, 12, FAINT, lb); }
+        { char lb[96]; snprintf(lb, sizeof lb, "O Mod Archive  \xb7  R Neustart  \xb7  F Vollbild  \xb7  F5/F6 A/V-Sync %.0f ms  \xb7  Esc Ende", g_lag_ms); text(bx + 190, cy + 2, 12, FAINT, lb); }
         float vx = bx + bw - 250, vw = 200;
         text(vx - 44, cy - 8, 12, DIM, "VOL");
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
@@ -963,6 +1042,7 @@ int main(int argc, char **argv) {
     SDL_GLContext ctx = SDL_GL_CreateContext(win);
     if (!ctx) { fprintf(stderr, "OpenGL-3.3-Kontext: %s\n", SDL_GetError()); return 1; }
     if (gl_load()) return 1;
+    { const char *tm = getenv("NGPLAYER_TEST_MA"); if (tm) { snprintf(ma_buf, sizeof ma_buf, "%s", tm); ma_len = (int)strlen(ma_buf); ma_show(1); ma_start(); } }
     int vsync_ok = SDL_GL_SetSwapInterval(-1) == 0 || SDL_GL_SetSwapInterval(1) == 0;
 
     int vsh = gl_compile(GL_VERTEX_SHADER, VS), fsh = gl_compile(GL_FRAGMENT_SHADER, FS);
@@ -1035,8 +1115,11 @@ int main(int argc, char **argv) {
                 if (npl > was) { if (cur < 0 || !g_song) play_index(was); }
                 break;
             }
+            case SDL_TEXTINPUT: if (ma_open) ma_text(e.text.text); break;
             case SDL_KEYDOWN:
+                if (ma_open) { ma_key(&e.key); break; }
                 switch (e.key.keysym.sym) {
+                case SDLK_o: ma_show(1); break;
                 case SDLK_ESCAPE: running = 0; break;
                 case SDLK_SPACE: g_paused = !g_paused; break;
                 case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
@@ -1092,7 +1175,9 @@ int main(int argc, char **argv) {
         glUniform1i(u_tex, 0);
         glBindVertexArray(vao);
         glBindTexture(GL_TEXTURE_2D, fonttex);
+        ma_poll();
         draw_ui((double)(now - t0) / freq);
+        draw_ma_dialog((double)(now - t0) / freq);
         set_additive(0);
         flush();
         if (shot && ++frame >= shot_frames) { save_screenshot(shot, dw, dh); running = 0; }
