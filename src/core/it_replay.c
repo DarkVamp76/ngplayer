@@ -836,7 +836,8 @@ int itp_render(ITPlayer *p, int16_t *out, int n){
         }
         int k = p->tk_left < n - done ? p->tk_left : n - done, off = p->tk_len - p->tk_left;
         memcpy(out + 2 * done, p->tkout + 2 * off, sizeof(int16_t) * 2 * k);
-        if (p->scb) for (int j = 0; j < k; j++) { unsigned w = p->scn & (unsigned)(p->scl - 1); for (int c = 0; c < 64; c++) p->scb[(size_t)c * p->scl + w] = p->tksc[(size_t)c * p->tk_len + off + j]; p->scn++; }
+        if (p->scb) { int hs = p->tksc && p->tkscap >= p->tk_len;   /* Scope mitten im Tick eingeschaltet (Spulen): Rest des Ticks ohne Scopedaten */
+            for (int j = 0; j < k; j++) { unsigned w = p->scn & (unsigned)(p->scl - 1); for (int c = 0; c < 64; c++) p->scb[(size_t)c * p->scl + w] = hs ? p->tksc[(size_t)c * p->tk_len + off + j] : 0.0f; p->scn++; } }
         p->tk_left -= k; done += k;
     }
     return done;
