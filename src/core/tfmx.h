@@ -34,8 +34,15 @@ TfmxPlayer *tfp_new(const TfmxSong *s, int sub, int rate);
 void tfp_free(TfmxPlayer *p);
 int  tfp_render(TfmxPlayer *p, int16_t *out, int nframes); /* Stereo; liefert 0 am Songende */
 void tfp_set_interp(TfmxPlayer *p, int on);                  /* lineare Interpolation (Standard: an) */
+int  tfp_get_lowpass(const TfmxPlayer *p);
 void tfp_set_lowpass(TfmxPlayer *p, int on);                 /* Paula-Tiefpass ca. 4,9 kHz (Standard: an) */
 void tfp_set_scope(TfmxPlayer *p, float *buf, int len);    /* 4 Kanaele, Ring pro Kanal */
 unsigned tfp_scope_pos(const TfmxPlayer *p);
 int  tfp_chan_pan(const TfmxPlayer *p, int ch);            /* 0 links, 1 rechts (Amiga: 0,3 links; 1,2 rechts) */
+/* Notenansicht: Zeile = Pattern-Tick innerhalb einer Trackstep-Zeile; kind: 0 leer, 1 Note, 2 Portamento, 3 Key-Up, 4 Vibrato, 5 Huellkurve */
+typedef struct { uint8_t kind, note, macro, vol; int8_t fine; } TfmxCell;
+void tfp_view_prepare(TfmxPlayer *p);                      /* intern: Ansicht vorberechnen (von tfp_new aufgerufen) */
+int  tfp_row(const TfmxPlayer *p);                         /* aktuelle Zeile in der Trackstep-Zeile */
+int  tfp_view_rows(TfmxPlayer *p, int trackrow);           /* Zeilen der Trackstep-Zeile (0 bei Kommandozeilen) */
+TfmxCell tfp_view_cell(TfmxPlayer *p, int trackrow, int row, int chan);
 int  tfp_pos(const TfmxPlayer *p);                         /* aktuelle Trackstep-Zeile */

@@ -43,19 +43,29 @@ struct Song {
 };
 
 /* TFMX braucht zwei Dateien (mdat.X + smpl.X oder X.tfx + X.sam); liefert 0 bei Erfolg */
+static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
+
 static int open_tfmx(Song *s, const char *path, const uint8_t *b, long n, int rate, char *err, size_t errcap) {
-    char sm[1100];
-    int pr = tfmx_partner(path, sm, sizeof sm);
-    if (pr) { snprintf(err, errcap, pr > 0 ? "TFMX: sample file missing (smpl.* or .sam next to the song file)" : "TFMX: file must be named mdat.NAME or NAME.tfx"); return -1; }
-    FILE *f = fopen(sm, "rb");
-    if (!f) { snprintf(err, errcap, "TFMX: cannot open sample file"); return -1; }
-    fseek(f, 0, SEEK_END); long ns = ftell(f); fseek(f, 0, SEEK_SET);
-    uint8_t *sb = (ns > 0 && ns < (64L << 20)) ? (uint8_t *)malloc((size_t)ns) : NULL;
-    if (!sb || fread(sb, 1, (size_t)ns, f) != (size_t)ns) { fclose(f); free(sb); snprintf(err, errcap, "TFMX: sample file read error"); return -1; }
-    fclose(f);
     int e = 0;
-    s->tf = tfmx_load(b, (size_t)n, sb, (size_t)ns, &e);
-    free(sb);
+    if (n > 0x12 && !memcmp(b, "TFHD", 4)) {
+        /* Einzeldatei: TFHD-Kopf (Big-Endian), dann mdat, dann Samples. Byte 8: 0 offen, 1 TFMX 1.5, 2 Pro, 3 7V (Bit 7 = erzwungen) */
+        uint32_t hdr = be32(b + 4), msz = be32(b + 10), ssz = be32(b + 14);
+        if (b[4] || b[5] || hdr < 0x12 || !msz || !ssz || (uint64_t)hdr + msz + ssz > (uint64_t)n) { snprintf(err, errcap, "TFMX: damaged TFHD header"); return -1; }
+        s->tf = tfmx_load(b + hdr, msz, b + hdr + msz, ssz, &e);
+        if (s->tf && (b[8] & 0x7F) == 1) s->tf->v1 |= 1;            /* Versionshinweis: TFMX 1.5 = frueher Replayer */
+    } else {
+        char sm[1100];
+        int pr = tfmx_partner(path, sm, sizeof sm);
+        if (pr) { snprintf(err, errcap, pr > 0 ? "TFMX: sample file missing (smpl.* or .sam next to the song file)" : "TFMX: file must be named mdat.NAME or NAME.tfx"); return -1; }
+        FILE *f = fopen(sm, "rb");
+        if (!f) { snprintf(err, errcap, "TFMX: cannot open sample file"); return -1; }
+        fseek(f, 0, SEEK_END); long ns = ftell(f); fseek(f, 0, SEEK_SET);
+        uint8_t *sb = (ns > 0 && ns < (64L << 20)) ? (uint8_t *)malloc((size_t)ns) : NULL;
+        if (!sb || fread(sb, 1, (size_t)ns, f) != (size_t)ns) { fclose(f); free(sb); snprintf(err, errcap, "TFMX: sample file read error"); return -1; }
+        fclose(f);
+        s->tf = tfmx_load(b, (size_t)n, sb, (size_t)ns, &e);
+        free(sb);
+    }
     if (!s->tf) { snprintf(err, errcap, "TFMX: unsupported or damaged file (%d)", e); return -1; }
     s->kind = K_TFMX; s->fmt = "TFMX";
     s->title[0] = 0;
@@ -102,7 +112,7 @@ Song *song_open(const char *path, int rate, char *err, size_t errcap) {
             s->nch = s->dm->nch; s->nord = s->dm->nord;
             s->dp = dmp_new(s->dm, rate);
         }
-    } else if (n > 0x200 && (!memcmp(b, "TFMX-SONG", 9) || !memcmp(b, "TFMX_SONG", 9) || !memcmp(b, "TFMX-MOD", 8))) {
+    } else if (n > 0x200 && (!memcmp(b, "TFMX-SONG", 9) || !memcmp(b, "TFMX_SONG", 9) || !memcmp(b, "TFMX-MOD", 8) || !memcmp(b, "TFHD", 4))) {
         if (open_tfmx(s, path, b, n, rate, err, errcap)) { free(b); song_close(s); return NULL; }
     } else if (n > 80 && !memcmp(b, "Extended Module: ", 17)) {
         r = xxm_load(&s->xs, b, (size_t)n);
@@ -187,6 +197,7 @@ int song_pattern_rows(const Song *s, int pattern) {
     if (s->kind == K_DMF) return pattern >= 0 && pattern < s->dm->npat ? s->dm->pat[pattern].nrows : 64;
     if (s->kind == K_IT) return pattern >= 0 && pattern < s->it->npat ? s->it->rows[pattern] : 64;
     if (s->kind == K_XM && s->xs.prows && pattern >= 0 && pattern < s->xs.npat) return s->xs.prows[pattern];
+    if (s->kind == K_TFMX) { int r = tfp_view_rows(s->tp, s->tstart + pattern); return r < 1 ? 1 : r; }
     return 64;
 }
 
@@ -194,9 +205,10 @@ void song_pos(const Song *s, SongPos *o) {
     int ord = 0, row = 0, pat = 0;
     if (s->ip) itp_pos(s->ip, &ord, &pat, &row);
     else if (s->dp) dmp_pos(s->dp, &ord, &pat, &row);
-    else if (s->tp) { ord = tfp_pos(s->tp) - s->tstart; if (ord < 0) ord = 0; pat = ord; row = 0; }
+    else if (s->tp) { ord = tfp_pos(s->tp) - s->tstart; if (ord < 0) ord = 0; pat = ord; row = tfp_row(s->tp); }
     else { if (s->xxp) xxm_pos(s->xxp, &ord, &row); else xplay_pos(s->xp, &ord, &row); pat = pat_of(s, ord); }
     o->order = ord; o->pattern = pat; o->row = row; o->nrows = song_pattern_rows(s, pat);
+    if (s->tp && o->row >= o->nrows) o->row = o->nrows - 1;
 }
 
 static const char NOTES[12][3] = { "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-" };
@@ -317,9 +329,21 @@ static void fmt_it(const ITCell *x, SongCell *o) {
 void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
     memset(o, 0, sizeof *o);
     strcpy(o->note, "..."); strcpy(o->inst, ".."); strcpy(o->vol, "..."); strcpy(o->fx, "...");
-    if (pattern < 0 || s->kind == K_TFMX) return;    /* TFMX: noch keine Zellenanzeige */
+    if (pattern < 0) return;
     SongCell t; memset(&t, 0, sizeof t);
-    if (s->kind == K_DMF) {
+    if (s->kind == K_TFMX) {
+        TfmxCell c = tfp_view_cell(s->tp, s->tstart + pattern, row, ch);
+        int m = c.note < 48 ? c.note : 36 + (c.note - 48) % 12;       /* Noten 48..63 wiederholen die Periodentabelle ab 36 */
+        if (c.kind == 1 || c.kind == 2) {
+            put_note(t.note, m); t.has_note = 1;
+            if (c.kind == 1) { t.inst[0] = hexc(c.macro >> 4); t.inst[1] = hexc(c.macro); t.inst[2] = 0; }
+            t.vol[0] = 'v'; t.vol[1] = (char)('0' + c.vol / 10); t.vol[2] = (char)('0' + c.vol % 10); t.vol[3] = 0; t.volclass = 1;
+            if (c.kind == 2) { fx3(t.fx, 'P', (uint8_t)c.fine); t.fxclass = 2; }
+            else if (c.fine) { fx3(t.fx, 'D', (uint8_t)c.fine); t.fxclass = 2; }
+        } else if (c.kind == 3) strcpy(t.note, "===");
+        else if (c.kind == 4) { fx3(t.fx, 'V', c.macro); t.fxclass = 2; }
+        else if (c.kind == 5) { fx3(t.fx, 'E', c.macro); t.fxclass = 1; }
+    } else if (s->kind == K_DMF) {
         if (pattern >= s->dm->npat || row >= s->dm->pat[pattern].nrows || ch >= 32) return;
         const DMFCell *x = &s->dm->pat[pattern].cell[(size_t)row * 32 + ch];
         if (x->has & 2) {
@@ -372,6 +396,17 @@ unsigned song_scope_pos(const Song *s) {
     if (s->tp) return tfp_scope_pos(s->tp);
     if (s->xxp) return xxm_scope_pos(s->xxp);
     return xplay_scope_pos(s->xp);
+}
+
+int song_paula_filter(const Song *s) {
+    if (s->tp) return tfp_get_lowpass(s->tp);
+    if (s->xp && (s->kind == K_MOD || s->kind == K_S3M)) return s->kind == K_MOD ? xplay_get_lowpass(s->xp) : -1;
+    return -1;
+}
+void song_toggle_paula_filter(Song *s) {
+    int v = song_paula_filter(s);
+    if (v < 0) return;
+    if (s->tp) tfp_set_lowpass(s->tp, !v); else xplay_set_lowpass(s->xp, !v);
 }
 
 extern unsigned long long xplay_mute;

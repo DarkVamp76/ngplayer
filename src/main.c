@@ -817,7 +817,7 @@ static float chips_width(float h) {                       /* Breite des Chipbere
 static void draw_chips(float x, float y, float h) {
     if (!g_song) return;
     int k = chip_kind();
-    if (k == 0) chip_dip(x, y + h * 0.25f, h * 0.5f); else if (k == 1) chip_gf1(x, y, h); else chip_iw(x, y, h);
+    if (k == 0) chip_dip(x, y + h * 0.08f, h * 0.5f); else if (k == 1) chip_gf1(x, y, h); else chip_iw(x, y, h);
 }
 static int lg_inside(float px, float py, float x, float y, float w, float h, float r) {
     float cx = px < x + r ? x + r : (px > x + w - r ? x + w - r : px);
@@ -1048,6 +1048,8 @@ static void draw_ui(double t) {
             cx += chip(cx, cy, b, VC[2], 1);
             snprintf(b, sizeof b, "%d ORDERS", song_norders(g_song));
             cx += chip(cx, cy, b, DIM, 0);
+            int pf = song_paula_filter(g_song);
+            if (pf >= 0) cx += chip(cx, cy, "PAULA-FILTER", pf ? VC[1] : DIM, pf);
         }
         if (g_error[0]) text(ax + 22, hy + 14 + tsize + 2, 13, WARN, g_error);
         char tb[32];
@@ -1266,6 +1268,7 @@ int main(int argc, char **argv) {
                 case SDLK_F6: g_lag_ms += 5; if (g_lag_ms > 300) g_lag_ms = 300; break;
                 case SDLK_PLUS: case SDLK_KP_PLUS: case SDLK_EQUALS: g_vol += 0.05f; if (g_vol > 1) g_vol = 1; break;
                 case SDLK_MINUS: case SDLK_KP_MINUS: g_vol -= 0.05f; if (g_vol < 0) g_vol = 0; break;
+                case SDLK_p: if (g_song) song_toggle_paula_filter(g_song); break;
                 case SDLK_f: case SDLK_F11:
                     fullscreen = !fullscreen;
                     SDL_SetWindowFullscreen(win, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);

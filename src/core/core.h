@@ -47,6 +47,7 @@ typedef struct {
     int linear;                /* XM: lineare Frequenztabelle */
     int restart;
     int *prows;                /* XM: Zeilen je Pattern (sonst 64) */
+    int amiga;                 /* MOD: echtes Amiga-Format (M.K., M!K!, FLT4, 15 Samples) -> Paula-Tiefpass */
 } XSong;
 
 int  xmod_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok */
@@ -65,4 +66,6 @@ void xplay_free(XPlayer *p);
 /* rendert n Stereo-Frames (int16 interleaved); liefert 0 am Songende */
 int  xplay_render(XPlayer *p, int16_t *out, int nframes);
 int  xplay_order(const XPlayer *p);
+int  xplay_get_lowpass(const XPlayer *p);   /* -1 = nicht verfuegbar (XM) */
+void xplay_set_lowpass(XPlayer *p, int on); /* Paula-Tiefpass (Standard: nur bei Amiga-MODs an) */
 void xplay_set_fixe8(XPlayer *p, int on);   /* 1 = S8x/E8x setzen echten Pan (Original: fest 170) */

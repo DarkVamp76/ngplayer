@@ -46,6 +46,8 @@ struct TfmxPlayer {
     int done, started;
     float *tl, *tr, *tsc; int tlen, toff, tcap;
     float *scb; int scl; unsigned scn;
+    int trow;                                /* Zeile (Pattern-Tick) innerhalb der aktuellen Trackstep-Zeile */
+    struct VRow *vr; int nvr, vfrozen;       /* Cache der Notenansicht je Trackstep-Zeile; nach dem Start eingefroren (Threadsicherheit) */
 };
 
 static inline unsigned B(const TfmxSong *s, size_t o) { return o < s->nmdat ? s->mdat[o] : 0; }
@@ -258,13 +260,14 @@ static int pattern_run(TfmxPlayer *p, Pat *pt) {
 }
 
 static void advance_patterns(TfmxPlayer *p) {
+    p->trow++;
     for (int again = 1; again;) {
         again = 0;
         for (int i = 0; i < 8; i++) {
             Pat *pt = &p->p[i];
             if (pt->cmd < 0x90) {
                 if (!pt->wait) {
-                    if (pattern_run(p, pt)) { if (track_run(p, 1)) { again = 1; break; } else return; }
+                    if (pattern_run(p, pt)) { if (track_run(p, 1)) { p->trow = 0; again = 1; break; } else return; }
                 } else pt->wait--;
             } else if (pt->cmd == 0xFE) {
                 pt->cmd = 0xFF;
@@ -357,7 +360,7 @@ TfmxPlayer *tfp_new(const TfmxSong *s, int sub, int rate) {
     if (!s || sub < 0 || sub >= 32 || rate < 8000) return NULL;
     TfmxPlayer *p = calloc(1, sizeof *p);
     if (!p) return NULL;
-    p->s = s; p->rate = rate; p->interp = 1;
+    p->s = s; p->rate = rate; p->interp = 1; p->trow = -1;
     p->lp = 1; p->lpa = 1.0f - expf(-6.2831853f * 4900.0f / (float)rate);   /* A500: Tiefpass 1. Ordnung bei ca. 4,9 kHz */
     const TfmxSub *b = &s->sub[sub];
     p->start = b->start; p->stop = b->end; p->tpos = b->start; p->tloop = -1;
@@ -380,11 +383,13 @@ TfmxPlayer *tfp_new(const TfmxSong *s, int sub, int rate) {
     for (int i = 0; i < 8; i++) p->p[i].cmd = 0xFF;
     p->pcount = 0;
     if (!track_run(p, 0)) p->done = 1;
+    tfp_view_prepare(p);
     p->done = p->done && 0;                  /* ein Fehlschlag beim ersten Laden beendet nur, wenn keine Zeile ladbar war */
     return p;
 }
 
-void tfp_free(TfmxPlayer *p) { if (!p) return; free(p->tl); free(p->tr); free(p->tsc); free(p); }
+static void view_free(TfmxPlayer *p);
+void tfp_free(TfmxPlayer *p) { if (!p) return; view_free(p); free(p->tl); free(p->tr); free(p->tsc); free(p); }
 
 int tfp_render(TfmxPlayer *p, int16_t *out, int nframes) {
     int done = 0;
@@ -411,7 +416,131 @@ int tfp_render(TfmxPlayer *p, int16_t *out, int nframes) {
 
 void tfp_set_interp(TfmxPlayer *p, int on) { if (p) p->interp = on ? 1 : 0; }
 void tfp_set_lowpass(TfmxPlayer *p, int on) { if (p) p->lp = on ? 1 : 0; }
+int  tfp_get_lowpass(const TfmxPlayer *p) { return p ? p->lp : 0; }
 void tfp_set_scope(TfmxPlayer *p, float *buf, int len) { p->scb = buf; p->scl = len; p->scn = 0; }
 unsigned tfp_scope_pos(const TfmxPlayer *p) { return p->scn; }
 int tfp_chan_pan(const TfmxPlayer *p, int ch) { (void)p; return (ch == 1 || ch == 2) ? 1 : 0; }
 int tfp_pos(const TfmxPlayer *p) { return p->tpos; }
+
+/* ================================================================== Notenansicht
+ * TFMX-Patterns haben keine feste Zeilenzahl: jede Stimme laeuft mit eigenem Pattern, Waits dehnen die Zeit.
+ * Fuer die Anzeige wird eine Trackstep-Zeile ohne Klangerzeugung "trocken" simuliert (gleiche Befehlslogik wie
+ * pattern_run); Zeile = Pattern-Tick, die Zeilenzahl ergibt sich aus dem ersten Pattern-Ende. */
+#define VMAXROWS 512
+typedef struct VRow { int rows; TfmxCell *cell; Pat fin[8]; int hasfin; } VRow;       /* cell[row * 8 + Kanal]; fin: Pattern-Zustand am Ende (fuer "Pattern fortsetzen" 0x80..0x8F) */
+static VRow *vget(TfmxPlayer *p, int tpos);
+
+static void vput(TfmxPlayer *p, TfmxCell *c, int row, int chan, int kind, int note, int macro, int vol, int fine) {
+    if (row >= VMAXROWS || chan < 0 || chan > 7) return;
+    TfmxCell *x = &c[row * 8 + chan];
+    if (kind >= 3 && (x->kind == 1 || x->kind == 2)) return;     /* Note im selben Tick geht vor Key-Up/Vibrato/Huellkurve */
+    x->kind = (uint8_t)kind; x->note = (uint8_t)note; x->macro = (uint8_t)macro; x->vol = (uint8_t)vol; x->fine = (int8_t)fine;
+    (void)p;
+}
+
+static int vpattern_run(TfmxPlayer *p, Pat *pt, int row, TfmxCell *c) {
+    const TfmxSong *s = p->s;
+    for (int guard = 0; guard < 65536; guard++) {
+        size_t o = (size_t)pt->off + 4u * (unsigned)pt->step;
+        if (o + 4 > s->nmdat) { pt->cmd = 0xFF; return 0; }
+        int b0 = (int)B(s,o), b1 = (int)B(s,o+1), b2 = (int)B(s,o+2), b3 = (int)B(s,o+3);
+        pt->step++;
+        if (b0 < 0xF0) {
+            int dw = 0, n = (b0 + pt->expose) & 0xFF;
+            if (b0 < 0xC0) { if (b0 >= 0x80) { pt->wait = b3; b3 = 0; dw = 1; } n &= 0x3F; }
+            if (n < 0xC0) vput(p, c, row, p->cm[b2 & 7], 1, n, b1 & 127, b2 >> 4, S8(b3));
+            else vput(p, c, row, p->cm[b2 & 7], 2, n & 0x3F, b1, b2 >> 4, S8(b3));
+            if (dw) return 0;
+        } else {
+            int w = b2 << 8 | b3;
+            switch (b0 & 0xF) {
+            case 0: pt->cmd = 0xFF; pt->step--; return 1;
+            case 1:
+                if (pt->loop != 0) { if (pt->loop == 0xFF) pt->loop = (uint8_t)b1; pt->step = w; }
+                pt->loop--; break;
+            case 2: pt->off = (int)PATT(s, b1); pt->step = w; break;
+            case 3: pt->wait = b1; return 0;
+            case 4: case 14: pt->cmd = 0xFF; pt->step--; return 0;
+            case 5: vput(p, c, row, p->cm[b2 & 7], 3, 0, 0, 0, 0); break;
+            case 6: vput(p, c, row, p->cm[b2 & 7], 4, 0, b1, 0, S8(b3)); break;
+            case 7: vput(p, c, row, p->cm[b2 & 7], 5, 0, b1, b2 >> 4, S8(b3)); break;
+            default: break;
+            }
+        }
+    }
+    return 0;
+}
+
+static void vsim(TfmxPlayer *p, int tpos, VRow *out) {
+    const TfmxSong *s = p->s;
+    out->rows = 0; out->cell = NULL; out->hasfin = 0;
+    size_t o = s->ts + 16u * (unsigned)tpos;
+    if (o + 16 > s->nmdat) return;
+    unsigned t[8]; for (int i = 0; i < 8; i++) t[i] = B(s,o+2*i) << 8 | B(s,o+2*i+1);
+    if (t[0] == 0xEFFE) return;                              /* Kommandozeile: keine Noten */
+    TfmxCell *tmp = calloc((size_t)VMAXROWS * 8, sizeof(TfmxCell));
+    if (!tmp) return;
+    Pat q[8];
+    const VRow *pv = NULL;                                   /* vorige Mustertabellenzeile: Zustand fuer "Pattern fortsetzen" */
+    { static int depth; int j = tpos - 1;
+      while (j >= 0 && B(s, s->ts + 16u * (unsigned)j) == 0xEF && B(s, s->ts + 16u * (unsigned)j + 1) == 0xFE) j--;
+      if (j >= 0 && depth < 48) { depth++; pv = vget(p, j); depth--; } }
+    for (int i = 0; i < 8; i++) {
+        int pn = t[i] >> 8, ex = S8(t[i] & 0xFF);
+        memset(&q[i], 0, sizeof q[i]);
+        q[i].cmd = pn; q[i].expose = ex; q[i].loop = 0xFF;
+        if (pn < 0x80) q[i].off = (int)PATT(s, pn);
+        else if (pn < 0x90) {
+            if (pv && pv->hasfin && pv->fin[i].cmd < 0x90) { q[i] = pv->fin[i]; q[i].cmd = pn; q[i].expose = ex; }
+            else q[i].cmd = 0xFF;
+        }
+    }
+    int rows = VMAXROWS;
+    for (int k = 0; k < VMAXROWS && rows == VMAXROWS; k++) {
+        for (int i = 0; i < 8; i++) {
+            Pat *pt = &q[i];
+            if (pt->cmd < 0x90) {
+                if (!pt->wait) { if (vpattern_run(p, pt, k, tmp)) { rows = k; break; } }
+                else pt->wait--;
+            }
+        }
+    }
+    if (rows < 1) rows = 1;
+    memcpy(out->fin, q, sizeof q); out->hasfin = 1;
+    out->rows = rows;
+    out->cell = realloc(tmp, (size_t)rows * 8 * sizeof(TfmxCell));
+    if (!out->cell) { free(tmp); out->rows = 0; }
+}
+
+static VRow *vget(TfmxPlayer *p, int tpos) {
+    if (!p || tpos < 0 || tpos >= 0x800) return NULL;
+    if (tpos >= p->nvr && p->vfrozen) return NULL;
+    if (tpos >= p->nvr) {
+        int n = tpos + 64; if (n > 0x800) n = 0x800;
+        VRow *nv = realloc(p->vr, (size_t)n * sizeof(VRow));
+        if (!nv) return NULL;
+        for (int i = p->nvr; i < n; i++) { nv[i].rows = -1; nv[i].cell = NULL; }
+        p->vr = nv; p->nvr = n;
+    }
+    VRow *v = &p->vr[tpos];
+    if (v->rows < 0) { if (p->vfrozen) return NULL; vsim(p, tpos, v); }
+    return v;
+}
+
+static void view_free(TfmxPlayer *p) {
+    for (int i = 0; i < p->nvr; i++) free(p->vr[i].cell);
+    free(p->vr); p->vr = NULL; p->nvr = 0;
+}
+
+void tfp_view_prepare(TfmxPlayer *p) {            /* alle Trackstep-Zeilen des Subsongs vorberechnen, danach nur noch lesen */
+    for (int t = p->start; t <= p->stop && t < 0x800; t++) vget(p, t);
+    p->vfrozen = 1;
+}
+int tfp_row(const TfmxPlayer *p) { return p ? (p->trow < 0 ? 0 : p->trow) : 0; }
+int tfp_view_rows(TfmxPlayer *p, int trackrow) { VRow *v = vget(p, trackrow); return v ? v->rows : 0; }
+TfmxCell tfp_view_cell(TfmxPlayer *p, int trackrow, int row, int chan) {
+    TfmxCell e; memset(&e, 0, sizeof e);
+    VRow *v = vget(p, trackrow);
+    if (!v || !v->cell || row < 0 || row >= v->rows || chan < 0 || chan > 7) return e;
+    return v->cell[row * 8 + chan];
+}

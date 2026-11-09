@@ -64,6 +64,7 @@ struct XPlayer {
     uint8_t vis[256][64];
     int gvol, fix_e8;
     int done; double acc;
+    int lp; double lpa, lpl, lpr;    /* Paula-Tiefpass (A500: RC ca. 4,9 kHz): an/aus, Koeffizient, Zustand L/R */
 };
 
 static int clampi(int v, int lo, int hi){ return v < lo ? lo : v > hi ? hi : v; }
@@ -303,6 +304,9 @@ XPlayer *xplay_new(const XSong *s, int rate){
     p->s = s; p->rate = rate; p->speed = s->speed; p->tempo = s->tempo; p->gvol = s->gvol ? s->gvol : 255;
     for (int i = 0; i < NCH; i++) p->ch[i].pan5c = (s->fmt == 1) ? ((i % 4 == 0 || i % 4 == 3) ? 60 : 195) : (s->chpan[i] >= 0 ? s->chpan[i] : 128);
     p->tick = 0; p->acc = 0;
+    p->lp = (s->fmt == 1 && s->amiga) ? 1 : 0;
+    if (getenv("XLP") && !atoi(getenv("XLP"))) p->lp = 0;
+    p->lpa = 1.0 - exp(-6.283185307179586 * 4900.0 / rate);
     return p;
 }
 void xplay_free(XPlayer *p){ if (XFMT4(p)) { xxm_free((XXPlayer *)p); return; } free(p); }
@@ -432,6 +436,7 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
             }
             if (p->scb) { unsigned w = p->scn & (unsigned)(p->scl - 1); for (int i = 0; i < s->nch; i++) p->scb[(size_t)i * p->scl + w] = (float)(cs[i] * master * 2.0); p->scn++; }
             l *= master * 32767; r *= master * 32767;
+            if (p->lp) { p->lpl += p->lpa * (l - p->lpl); p->lpr += p->lpa * (r - p->lpr); l = p->lpl; r = p->lpr; }
             out[(done_frames + f)*2]     = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l);
             out[(done_frames + f)*2 + 1] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : r);
         }
@@ -463,3 +468,5 @@ int xplay_trace(XPlayer *p, int nticks, FILE *o){
 }
 
 void xplay_set_fixe8(XPlayer *p, int on){ p->fix_e8 = on; }
+void xplay_set_lowpass(XPlayer *p, int on){ if (!XFMT4(p)) p->lp = on ? 1 : 0; }
+int  xplay_get_lowpass(const XPlayer *p){ return XFMT4(p) ? -1 : p->lp; }
