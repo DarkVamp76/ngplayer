@@ -215,6 +215,7 @@ static void play_index(int idx) { play_index_sub(idx, 0); }
 #define FFTN 2048
 static float band[NBANDS], bandpk[NBANDS], bandhold[NBANDS];
 static float vu[2], vupk[2], vuhold[2];
+static float g_beat;    /* 1 bei erkanntem Beat, klingt schnell ab: treibt den Puls der Soundchip-Grafik */
 static float scopeL[RING], scopeR[RING];   /* Momentaufnahme fuer die Anzeige */
 
 static void fft(double *re, double *im, int n) {
@@ -276,6 +277,23 @@ static void analyse(float dt) {
         if (band[b] >= bandpk[b]) { bandpk[b] = band[b]; bandhold[b] = 0.45f; }
         else if (bandhold[b] > 0) bandhold[b] -= dt;
         else { bandpk[b] -= dt * 0.55f; if (bandpk[b] < band[b]) bandpk[b] = band[b]; }
+    }
+    {   /* Beat: Bass oder Hi-Hat/Rauschen springt ueber den eigenen gleitenden Mittelwert (Schlaege) */
+        static float slow[2], last[2], since = 1;
+        float e[2] = { 0, 0 };
+        int lo1 = (int)(220.0 / binhz) + 1, h0 = (int)(3500.0 / binhz), h1 = (int)(12000.0 / binhz);
+        for (int i = 1; i <= lo1; i++) e[0] += mag[i] * mag[i];
+        for (int i = h0; i <= h1 && i <= FFTN / 2; i++) e[1] += mag[i] * mag[i];
+        e[0] = sqrtf(e[0]); e[1] = sqrtf(e[1]);
+        since += dt;
+        int hitb = 0;
+        for (int k = 0; k < 2; k++) {
+            if (e[k] > 1.5f * slow[k] + 0.006f && e[k] > 1.10f * last[k]) hitb = 1;
+            slow[k] += (e[k] - slow[k]) * (1.0f - expf(-dt / 0.40f));
+            last[k] = e[k];
+        }
+        if (hitb && since > 0.11f) { g_beat = 1; since = 0; }
+        g_beat *= expf(-dt * 7.0f);
     }
     float pk[2] = { pl_, pr_ };
     for (int c = 0; c < 2; c++) {
@@ -739,10 +757,11 @@ static void draw_logo(float x, float y, float s) {
 }
 /* ---------------------------------------------------------------- Soundchips (Kopfzeile)
    Gezeichnet mit den vorhandenen Primitiven (Koordinaten im 320x200-Raster, Chip um 160,100). */
+#define BEATC C(0.133f, 0.827f, 0.933f, 1)      /* Akzentfarbe des Beat-Pulses (Cyan wie das Logo) */
 static float chip_tsz(float fs, float k) { float z = fs * k; return z < 7.0f ? 7.0f : z; }
-static void chip_dip(float x, float y, float h) {            /* Paula, DIP-48 (MOS 8364R7); h = Hoehe, Breite = 5 * h */
+static void chip_dip(float x, float y, float h, float beat) {            /* Paula, DIP-48 (MOS 8364R7); h = Hoehe, Breite = 5 * h */
     float k = h / 100.0f;
-    col pin = C(0.62f, 0.65f, 0.70f, 1), body = C(0.23f, 0.24f, 0.255f, 1), ink = C(0.79f, 0.80f, 0.83f, 1), dimple = C(0.09f, 0.095f, 0.10f, 1);
+    col pin = mix(C(0.62f, 0.65f, 0.70f, 1), BEATC, 0.55f * beat), body = C(0.23f, 0.24f, 0.255f, 1), ink = mix(C(0.79f, 0.80f, 0.83f, 1), C(1, 1, 1, 1), 0.5f * beat), dimple = C(0.09f, 0.095f, 0.10f, 1);
     float x0 = 10, x1 = 490, pw = (x1 - x0) / 24.0f;
     for (int i = 0; i < 24; i++) {
         float px = x0 + i * pw + pw * 0.22f;
@@ -758,9 +777,9 @@ static void chip_dip(float x, float y, float h) {            /* Paula, DIP-48 (M
     z = chip_tsz(17, k); text(cx - text_width("8364R7", z) / 2, y + 57 * k - z * 0.8f, z, ink, "8364R7");
     z = chip_tsz(14, k); text(cx - text_width("1589  27", z) / 2, y + 77 * k - z * 0.8f, z, ink, "1589  27");
 }
-static void chip_gf1(float x, float y, float h) {            /* Forte GF1, PLCC im Sockel; h = Hoehe */
+static void chip_gf1(float x, float y, float h, float beat) {            /* Forte GF1, PLCC im Sockel; h = Hoehe */
     float k = h / 180.0f, ox = x - 70 * k, oy = y - 10 * k;
-    col sock = C(0.29f, 0.31f, 0.33f, 1), tooth = C(0.56f, 0.57f, 0.60f, 1), body = C(0.23f, 0.24f, 0.26f, 1), ink = C(0.79f, 0.80f, 0.83f, 1);
+    col sock = C(0.29f, 0.31f, 0.33f, 1), tooth = mix(C(0.56f, 0.57f, 0.60f, 1), BEATC, 0.55f * beat), body = C(0.23f, 0.24f, 0.26f, 1), ink = mix(C(0.79f, 0.80f, 0.83f, 1), C(1, 1, 1, 1), 0.5f * beat);
     float cx = 160, cy = 100, hs = 90, bh = 62, ch = 22, pw = 134.0f / 25.0f;
     rect(ox + (cx - hs) * k, oy + (cy - hs) * k, 2 * hs * k, 2 * hs * k, sock);
     rect(ox + (cx - hs) * k, oy + (cy - hs) * k, 2 * hs * k, 2 * hs * k, C(0, 0, 0, 0.12f));
@@ -785,9 +804,9 @@ static void chip_gf1(float x, float y, float h) {            /* Forte GF1, PLCC 
     text(tx + 38 * k, oy + (cy + 3) * k, z, ink, "9245");
     text(tx + 38 * k, oy + (cy + 18) * k, z, ink, "AH222616");
 }
-static void chip_iw(float x, float y, float h) {             /* AMD InterWave, QFP-160; h = Hoehe */
+static void chip_iw(float x, float y, float h, float beat) {             /* AMD InterWave, QFP-160; h = Hoehe */
     float k = h / 176.0f, ox = x - 72 * k, oy = y - 12 * k;
-    col pin = C(0.62f, 0.65f, 0.70f, 1), body = C(0.21f, 0.22f, 0.24f, 1), ink = C(0.79f, 0.80f, 0.83f, 1), dimple = C(0.15f, 0.16f, 0.17f, 1);
+    col pin = mix(C(0.62f, 0.65f, 0.70f, 1), BEATC, 0.55f * beat), body = C(0.21f, 0.22f, 0.24f, 1), ink = mix(C(0.79f, 0.80f, 0.83f, 1), C(1, 1, 1, 1), 0.5f * beat), dimple = C(0.15f, 0.16f, 0.17f, 1);
     float cx = 160, cy = 100, hb = 76, pl = 12, pw = 152.0f / 40.0f;
     for (int i = 0; i < 40; i++) {
         float o = -hb + pw * i + pw * 0.25f, w = pw * 0.45f;
@@ -821,7 +840,17 @@ static float chips_width(float h) {                       /* Breite des Chipbere
 static void draw_chips(float x, float y, float h) {
     if (!g_song) return;
     int k = chip_kind();
-    if (k == 0) chip_dip(x, y + h * 0.08f, h * 0.5f); else if (k == 1) chip_gf1(x, y, h); else chip_iw(x, y, h);
+    float beat = g_paused ? 0.0f : g_beat;
+    float cw = chips_width(h), sc = 1.0f + 0.07f * beat;
+    float gx = x + cw / 2, gy = k == 0 ? y + h * 0.08f + h * 0.25f : y + h / 2;
+    if (beat > 0.01f) {                                   /* Glow hinter dem Chip */
+        set_additive(1);
+        blob(gx, gy, (k == 0 ? cw * 0.30f : h * 0.55f) * (1.0f + 0.4f * beat), alpha(BEATC, 0.55f * beat));
+        set_additive(0);
+    }
+    float hh = h * sc;                                    /* leicht wachsen, um die Mitte */
+    float xx = x - (cw * sc - cw) / 2, yy = y - (hh - h) / 2;
+    if (k == 0) chip_dip(xx, yy + hh * 0.08f, hh * 0.5f, beat); else if (k == 1) chip_gf1(xx, yy, hh, beat); else chip_iw(xx, yy, hh, beat);
 }
 static int lg_inside(float px, float py, float x, float y, float w, float h, float r) {
     float cx = px < x + r ? x + r : (px > x + w - r ? x + w - r : px);
