@@ -106,7 +106,11 @@ static void macro_run(TfmxPlayer *p, Chan *c) {
             if (b || e) c->vol = (int8_t)((b ? 0 : c->rel * 3) + e);
             break;
         case 1:
-            c->dmaint = 0; c->cs = c->rstart; c->cl = (c->rlen < 1 ? 1 : c->rlen) * 2; c->pos = 0.0; c->dma = 1; c->defer = defer = 0;
+            c->dmaint = 0; c->cs = c->rstart; c->cl = (c->rlen < 1 ? 1 : c->rlen) * 2; c->pos = 0.0; c->dma = 1;
+            /* Heuristik (gegen die Referenz abgeglichen, Jim Power): Wurde DMA-aus verzoegert (Parameter != 0) und steht das Makro in einem
+             * Unterprogramm (Goto), das mit einem Wait weitergeht, beendet das DMA-an den Tick. Die allgemeine Regel ist noch unbekannt. */
+            if (defer && c->ret_mo && B(s, MACRO(s, c->mo) + 4u * (unsigned)c->step) == 4) brk = 1;
+            c->defer = defer = 0;
             break;
         case 2: c->abl = 0; c->rstart = a << 16 | w; break;
         case 3: c->rlen = w; break;
