@@ -15,6 +15,9 @@
 #include "version.h"
 
 #include <SDL2/SDL.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include <dirent.h>
 #include <math.h>
 #include <stdio.h>
@@ -935,6 +938,9 @@ static void ma_start(void) {
     if (dl_state == 1) return;
     int id = ma_parse_id(ma_buf);
     if (!id) { snprintf(ma_msg, sizeof ma_msg, "No module ID found. Expected: a number or a modarchive link."); ma_msg_err = 1; return; }
+#ifdef __EMSCRIPTEN__
+    snprintf(ma_msg, sizeof ma_msg, "The Mod Archive browser is not available in the web version yet."); ma_msg_err = 1; return;
+#endif
     if (!net_have_curl()) { snprintf(ma_msg, sizeof ma_msg, "curl not found - please install it."); ma_msg_err = 1; return; }
     dl_id = id; dl_state = 1;
     snprintf(ma_msg, sizeof ma_msg, "Downloading module #%d ...", id); ma_msg_err = 0;
@@ -1177,95 +1183,29 @@ static int gl_compile(GLenum type, const char *src) {
     return (int)sh;
 }
 
-int main(int argc, char **argv) {
-    for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--version")) { printf("ngPlayer %s\n", NGPLAYER_VERSION); return 0; }
-    const char *shot = NULL;
-    int shot_frames = 90;
-    for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) shot = argv[++i];
-        else if (!strcmp(argv[i], "--frames") && i + 1 < argc) shot_frames = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--rate") && i + 1 < argc) g_rate = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
-            printf("usage: %s [--rate N] [--screenshot out.bmp [--frames N]] [datei|ordner ...]\n", argv[0]);
-            return 0;
-        } else add_path(argv[i], 0);
-    }
-    if (!npl) {   /* ohne Argumente: Musikordner des Benutzers */
-        const char *home = getenv("HOME");
-        if (home) {
-            static const char *const dirs[] = { "Musik", "Music" };
-            for (int k = 0; k < 2 && !npl; k++) {
-                char dp[1024];
-                snprintf(dp, sizeof dp, "%s/%s", home, dirs[k]);
-                add_path(dp, 0);
-            }
-        }
-    }
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS)) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_Window *win = SDL_CreateWindow("ngPlayer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 860,
-                                       SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    if (!win) { fprintf(stderr, "Fenster: %s\n", SDL_GetError()); return 1; }
-    SDL_SetWindowMinimumSize(win, 900, 600);
-    { SDL_Surface *ic = make_icon(64); if (ic) { SDL_SetWindowIcon(win, ic); SDL_FreeSurface(ic); } }
-    SDL_GLContext ctx = SDL_GL_CreateContext(win);
-    if (!ctx) { fprintf(stderr, "OpenGL-3.3-Kontext: %s\n", SDL_GetError()); return 1; }
-    if (gl_load()) return 1;
-    { const char *tm = getenv("NGPLAYER_TEST_MA"); if (tm) { snprintf(ma_buf, sizeof ma_buf, "%s", tm); ma_len = (int)strlen(ma_buf); ma_show(1); ma_start(); } }
-    int vsync_ok = SDL_GL_SetSwapInterval(-1) == 0 || SDL_GL_SetSwapInterval(1) == 0;
+/* ---------------------------------------------------------------- Hauptschleife (als Funktion, damit sie auch im Browser laeuft) */
+#ifdef __EMSCRIPTEN__
+#define AUDIO_SAMPLES 2048
+#else
+#define AUDIO_SAMPLES 1024
+#endif
+static SDL_Window *win;
+static SDL_GLContext ctx;
+static const char *shot;
+static int shot_frames, vsync_ok, running, frame, fullscreen;
+static Uint64 t0, tlast;
+static double freq;
 
-    int vsh = gl_compile(GL_VERTEX_SHADER, VS), fsh = gl_compile(GL_FRAGMENT_SHADER, FS);
-    if (!vsh || !fsh) return 1;
-    prog = glCreateProgram();
-    glAttachShader(prog, (GLuint)vsh); glAttachShader(prog, (GLuint)fsh);
-    glLinkProgram(prog);
-    GLint lk = 0;
-    glGetProgramiv(prog, GL_LINK_STATUS, &lk);
-    if (!lk) { char log[1024]; glGetProgramInfoLog(prog, sizeof log, NULL, log); fprintf(stderr, "Link: %s\n", log); return 1; }
-    u_res = glGetUniformLocation(prog, "res");
-    u_pxs = glGetUniformLocation(prog, "pxs");
-    u_tex = glGetUniformLocation(prog, "tex");
+#ifdef __EMSCRIPTEN__
+/* Wird von der Webseite (Drag & Drop / Dateiauswahl) aufgerufen, nachdem die Datei ins virtuelle Dateisystem geschrieben wurde. */
+EMSCRIPTEN_KEEPALIVE void ng_web_add(const char *path) {
+    int was = npl;
+    add_path(path, 0);
+    if (npl > was && (cur < 0 || !g_song)) play_index(was);
+}
+#endif
 
-    vb = (vtx *)malloc(sizeof(vtx) * MAXV);
-    glGenVertexArrays(1, &vao);
-    glBindVertexArray(vao);
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(vtx) * MAXV), NULL, GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0); glVertexAttribPointer(0, 2, GL_FLOAT, 0, sizeof(vtx), (void *)0);
-    glEnableVertexAttribArray(1); glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof(vtx), (void *)8);
-    glEnableVertexAttribArray(2); glVertexAttribPointer(2, 4, GL_FLOAT, 0, sizeof(vtx), (void *)16);
-    glEnableVertexAttribArray(3); glVertexAttribPointer(3, 4, GL_FLOAT, 0, sizeof(vtx), (void *)32);
-
-    for (int i = 0; i < 256; i++) glyph_idx[i] = -1;
-    for (int i = 0; i < FONT_GLYPH_COUNT; i++) if (font_glyphs[i].code < 256) glyph_idx[font_glyphs[i].code] = i;
-    glGenTextures(1, &fonttex);
-    glBindTexture(GL_TEXTURE_2D, fonttex);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, FONT_ATLAS_W, FONT_ATLAS_H, 0, GL_RED, GL_UNSIGNED_BYTE, font_atlas);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    SDL_AudioSpec want, have;
-    SDL_zero(want);
-    want.freq = g_rate; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = 1024; want.callback = audio_cb;
-    g_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
-    if (!g_dev) fprintf(stderr, "Audio: %s (weiter ohne Ton)\n", SDL_GetError());
-    else { g_rate = have.freq; SDL_PauseAudioDevice(g_dev, 0); }
-
-    if (npl) play_index(0);
-
-    int running = 1, frame = 0, fullscreen = 0;
-    Uint64 t0 = SDL_GetPerformanceCounter(), tlast = t0;
-    double freq = (double)SDL_GetPerformanceFrequency();
-    while (running) {
+static void iter(void) {
         SDL_Event e;
         click = 0;
         while (SDL_PollEvent(&e)) {
@@ -1354,10 +1294,112 @@ int main(int argc, char **argv) {
         flush();
         if (shot && ++frame >= shot_frames) { save_screenshot(shot, dw, dh); running = 0; }
         SDL_GL_SwapWindow(win);
+#ifndef __EMSCRIPTEN__
         double spent = (double)(SDL_GetPerformanceCounter() - now) / freq;
         if (!vsync_ok || shot) { if (spent < 0.012) SDL_Delay((Uint32)((0.0167 - spent) * 1000)); }
         else if (spent < 0.002) SDL_Delay(1);       /* Schutz, falls der Treiber VSync nicht wirklich abwartet */
+#endif
     }
+
+int main(int argc, char **argv) {
+    for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--version")) { printf("ngPlayer %s\n", NGPLAYER_VERSION); return 0; }
+    shot = NULL;
+    shot_frames = 90;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) shot = argv[++i];
+        else if (!strcmp(argv[i], "--frames") && i + 1 < argc) shot_frames = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--rate") && i + 1 < argc) g_rate = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
+            printf("usage: %s [--rate N] [--screenshot out.bmp [--frames N]] [datei|ordner ...]\n", argv[0]);
+            return 0;
+        } else add_path(argv[i], 0);
+    }
+    if (!npl) {   /* ohne Argumente: Musikordner des Benutzers */
+        const char *home = getenv("HOME");
+        if (home) {
+            static const char *const dirs[] = { "Musik", "Music" };
+            for (int k = 0; k < 2 && !npl; k++) {
+                char dp[1024];
+                snprintf(dp, sizeof dp, "%s/%s", home, dirs[k]);
+                add_path(dp, 0);
+            }
+        }
+    }
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS)) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
+#ifdef __EMSCRIPTEN__
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+#else
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+#endif
+    win = SDL_CreateWindow("ngPlayer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 860,
+                                       SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+    if (!win) { fprintf(stderr, "Fenster: %s\n", SDL_GetError()); return 1; }
+    SDL_SetWindowMinimumSize(win, 900, 600);
+    { SDL_Surface *ic = make_icon(64); if (ic) { SDL_SetWindowIcon(win, ic); SDL_FreeSurface(ic); } }
+    ctx = SDL_GL_CreateContext(win);
+    if (!ctx) { fprintf(stderr, "OpenGL-3.3-Kontext: %s\n", SDL_GetError()); return 1; }
+    if (gl_load()) return 1;
+    { const char *tm = getenv("NGPLAYER_TEST_MA"); if (tm) { snprintf(ma_buf, sizeof ma_buf, "%s", tm); ma_len = (int)strlen(ma_buf); ma_show(1); ma_start(); } }
+    vsync_ok = SDL_GL_SetSwapInterval(-1) == 0 || SDL_GL_SetSwapInterval(1) == 0;
+
+    int vsh = gl_compile(GL_VERTEX_SHADER, VS), fsh = gl_compile(GL_FRAGMENT_SHADER, FS);
+    if (!vsh || !fsh) return 1;
+    prog = glCreateProgram();
+    glAttachShader(prog, (GLuint)vsh); glAttachShader(prog, (GLuint)fsh);
+    glLinkProgram(prog);
+    GLint lk = 0;
+    glGetProgramiv(prog, GL_LINK_STATUS, &lk);
+    if (!lk) { char log[1024]; glGetProgramInfoLog(prog, sizeof log, NULL, log); fprintf(stderr, "Link: %s\n", log); return 1; }
+    u_res = glGetUniformLocation(prog, "res");
+    u_pxs = glGetUniformLocation(prog, "pxs");
+    u_tex = glGetUniformLocation(prog, "tex");
+
+    vb = (vtx *)malloc(sizeof(vtx) * MAXV);
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(vtx) * MAXV), NULL, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0); glVertexAttribPointer(0, 2, GL_FLOAT, 0, sizeof(vtx), (void *)0);
+    glEnableVertexAttribArray(1); glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof(vtx), (void *)8);
+    glEnableVertexAttribArray(2); glVertexAttribPointer(2, 4, GL_FLOAT, 0, sizeof(vtx), (void *)16);
+    glEnableVertexAttribArray(3); glVertexAttribPointer(3, 4, GL_FLOAT, 0, sizeof(vtx), (void *)32);
+
+    for (int i = 0; i < 256; i++) glyph_idx[i] = -1;
+    for (int i = 0; i < FONT_GLYPH_COUNT; i++) if (font_glyphs[i].code < 256) glyph_idx[font_glyphs[i].code] = i;
+    glGenTextures(1, &fonttex);
+    glBindTexture(GL_TEXTURE_2D, fonttex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, FONT_ATLAS_W, FONT_ATLAS_H, 0, GL_RED, GL_UNSIGNED_BYTE, font_atlas);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    SDL_AudioSpec want, have;
+    SDL_zero(want);
+    want.freq = g_rate; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = AUDIO_SAMPLES; want.callback = audio_cb;
+    g_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    if (!g_dev) fprintf(stderr, "Audio: %s (weiter ohne Ton)\n", SDL_GetError());
+    else { g_rate = have.freq; SDL_PauseAudioDevice(g_dev, 0); }
+
+    if (npl) play_index(0);
+
+    running = 1;
+    t0 = SDL_GetPerformanceCounter(); tlast = t0;
+    freq = (double)SDL_GetPerformanceFrequency();
+#ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop(iter, 0, 1);
+#else
+    while (running) iter();
+#endif
     if (g_dev) SDL_CloseAudioDevice(g_dev);
     unload();
     SDL_GL_DeleteContext(ctx);

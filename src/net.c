@@ -23,6 +23,11 @@ int net_cache_dir(char *out, size_t cap) {
     return mkdir_p(out);
 }
 
+#ifdef __EMSCRIPTEN__
+/* Web-Version: kein Hilfsprozess curl */
+int net_have_curl(void) { return 0; }
+int net_get(const char *url, const char *dest, int timeout_s) { (void)url; (void)dest; (void)timeout_s; return -1; }
+#else
 static int run_curl(char *const argv[]) {
     pid_t pid = fork();
     if (pid < 0) return -1;
@@ -51,6 +56,8 @@ int net_get(const char *url, const char *dest, int timeout_s) {
     if (rename(part, dest)) { unlink(part); return -1; }
     return 0;
 }
+
+#endif
 
 int ma_download(int id, char *out, size_t cap) {
     char dir[900], url[160];

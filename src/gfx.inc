@@ -1,4 +1,10 @@
 /* ================================================================== OpenGL loader */
+#ifdef __EMSCRIPTEN__
+#include <GLES3/gl3.h>
+static int gl_load(void) { return 0; }
+#define GLSL_VERSION "#version 300 es\nprecision highp float;\nprecision highp int;\n"
+#else
+#define GLSL_VERSION "#version 330 core\n"
 
 typedef unsigned int GLuint;
 typedef int GLint;
@@ -89,6 +95,8 @@ static int gl_load(void) {
     return 0;
 }
 
+#endif
+
 /* ================================================================== batched 2D renderer */
 
 typedef struct { float r, g, b, a; } col;
@@ -104,7 +112,7 @@ static float view_w, view_h, view_scale = 1;
 static int glyph_idx[256];
 
 static const char *VS =
-    "#version 330 core\n"
+    GLSL_VERSION
     "layout(location=0) in vec2 pos; layout(location=1) in vec2 uv; layout(location=2) in vec4 col;"
     "layout(location=3) in vec4 par;\n"
     "uniform vec2 res; out vec2 vuv; out vec4 vcol; out vec4 vpar;\n"
@@ -112,7 +120,7 @@ static const char *VS =
     " gl_Position=vec4(pos.x/res.x*2.0-1.0, 1.0-pos.y/res.y*2.0, 0.0, 1.0); }\n";
 
 static const char *FS =
-    "#version 330 core\n"
+    GLSL_VERSION
     "in vec2 vuv; in vec4 vcol; in vec4 vpar; out vec4 o;\n"
     "uniform sampler2D tex; uniform float pxs;\n"
     "float sdbox(vec2 p, vec2 h, float r){ vec2 q=abs(p)-h+vec2(r); return length(max(q,0.0))+min(max(q.x,q.y),0.0)-r; }\n"

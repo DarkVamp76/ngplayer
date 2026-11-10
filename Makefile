@@ -37,7 +37,12 @@ install: build/ngplayer
 clean:
 	rm -rf build
 
-.PHONY: all install clean FORCE
+# WebAssembly-Build (braucht Emscripten und das Kit-Repo 'ngweb' neben diesem Ordner)
+NGWEB ?= ../ngweb
+web: build/version.h
+	$(MAKE) -f $(NGWEB)/ngweb.mk APPDIR=$(CURDIR) NAME=ngPlayer HINT="Drop MOD, S3M, XM, IT, DMF or TFMX files here (TFMX: mdat.* and smpl.* together)" SRC="$(SRC)"
+
+.PHONY: all install clean FORCE web
 
 build/nettest: tools/nettest.c src/net.c
 	@mkdir -p build
