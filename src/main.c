@@ -939,7 +939,11 @@ static void ma_start(void) {
     int id = ma_parse_id(ma_buf);
     if (!id) { snprintf(ma_msg, sizeof ma_msg, "No module ID found. Expected: a number or a modarchive link."); ma_msg_err = 1; return; }
 #ifdef __EMSCRIPTEN__
-    snprintf(ma_msg, sizeof ma_msg, "The Mod Archive browser is not available in the web version yet."); ma_msg_err = 1; return;
+    /* Web: der Download laeuft ueber die Webseite (fetch auf ma.php), Ergebnis kommt per ng_web_ma_done() zurueck */
+    dl_id = id; dl_state = 1;
+    snprintf(ma_msg, sizeof ma_msg, "Downloading module #%d ...", id); ma_msg_err = 0;
+    EM_ASM({ if (window.ngMaFetch) window.ngMaFetch($0); }, id);
+    return;
 #endif
     if (!net_have_curl()) { snprintf(ma_msg, sizeof ma_msg, "curl not found - please install it."); ma_msg_err = 1; return; }
     dl_id = id; dl_state = 1;
@@ -967,10 +971,12 @@ static void ma_key(const SDL_KeyboardEvent *k) {
     case SDLK_RETURN: case SDLK_KP_ENTER: ma_start(); break;
     case SDLK_BACKSPACE: if (ma_len > 0) ma_buf[--ma_len] = 0; break;
     case SDLK_v:
+#ifndef __EMSCRIPTEN__   /* Web: Einfuegen laeuft ueber das paste-Ereignis der Seite (ng_web_paste) */
         if (k->keysym.mod & KMOD_CTRL) {
             char *c = SDL_GetClipboardText();
             if (c) { for (char *p = c; *p && ma_len < (int)sizeof ma_buf - 1; p++) if (*p >= ' ') ma_buf[ma_len++] = *p; ma_buf[ma_len] = 0; SDL_free(c); }
         }
+#endif
         break;
     default: break;
     }
@@ -1202,6 +1208,20 @@ EMSCRIPTEN_KEEPALIVE void ng_web_add(const char *path) {
     int was = npl;
     add_path(path, 0);
     if (npl > was && (cur < 0 || !g_song)) play_index(was);
+}
+
+/* Ergebnis des Mod-Archive-Downloads (rc 0 = ok, Datei liegt unter path im virtuellen Dateisystem) */
+EMSCRIPTEN_KEEPALIVE void ng_web_ma_done(int id, int rc, const char *path) {
+    dl_id = id; dl_rc = rc;
+    if (path) snprintf(dl_path, sizeof dl_path, "%s", path);
+    dl_state = rc ? 3 : 2;
+}
+
+/* Text aus der Zwischenablage (paste-Ereignis) */
+EMSCRIPTEN_KEEPALIVE void ng_web_paste(const char *t) {
+    if (!ma_open || !t) return;
+    ma_eat = 0;
+    ma_text(t);
 }
 #endif
 
