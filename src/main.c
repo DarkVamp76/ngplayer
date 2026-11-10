@@ -108,7 +108,7 @@ static void audio_cb(void *ud, Uint8 *stream, int len) {
 }
 
 /* ================================================================== Playlist */
-typedef struct { char *path; char *key; char label[128]; } entry;   /* key: Sortierschluessel (Ordner + Anzeigename) */
+typedef struct { char *path; char *key; char label[128]; int ma_id; } entry;   /* key: Sortierschluessel (Ordner + Anzeigename) */
 static entry *pl;
 static int npl, cur = -1;
 static float list_scroll;
@@ -126,6 +126,7 @@ static int is_mod_name(const char *n) {
 static void add_file(const char *path) {
     pl = (entry *)realloc(pl, sizeof(entry) * (size_t)(npl + 1));
     pl[npl].path = strdup(path);
+    pl[npl].ma_id = 0;                           /* >0: stammt vom The Mod Archive (Modul-ID) */
     const char *b = strrchr(path, '/');
     const char *fn = b ? b + 1 : path;
     if (tfmx_is_song_name(fn)) {                 /* TFMX: Namensschema mdat.X / X.tfx ist kein sinnvoller Anzeigename */
@@ -194,6 +195,10 @@ static void play_index_sub(int idx, int sub) {
     Song *s = song_open_sub(pl[idx].path, g_rate, sub, err, sizeof err);
     unload();
     cur = idx;
+#ifdef __EMSCRIPTEN__
+    /* Adresszeile = teilbarer Link: #<ID> bei Mod-Archive-Titeln, sonst ohne Hash (replaceState loest kein hashchange aus) */
+    EM_ASM({ try { history.replaceState(null, '', $0 ? '#' + $0 : location.pathname + location.search); } catch (e) {} }, pl[idx].ma_id);
+#endif
     song_set_mute(0);
     list_follow = 1;
     g_frames = 0; g_ended = 0; g_paused = 0;
@@ -955,8 +960,10 @@ static void ma_poll(void) {
         SDL_WaitThread(dl_thr, NULL); dl_thr = NULL;
         if (dl_state == 2) {
             add_file(dl_path);
+            pl[npl - 1].ma_id = dl_id;
             snprintf(pl[npl - 1].label, sizeof pl[npl - 1].label, "ModArchive #%d", dl_id);
             play_index(npl - 1); list_follow = 1;
+            if (g_song) { const char *tt = song_title(g_song); if (tt && tt[0]) snprintf(pl[npl - 1].label, sizeof pl[npl - 1].label, "%s", tt); }   /* Titel des Lieds statt der ID anzeigen */
             ma_buf[0] = 0; ma_len = 0; ma_show(0);
         } else {
             const char *m = dl_rc == 100 ? "Server returned no module file (does the ID exist?)." : dl_rc == 22 ? "Module not found (server error)." : (dl_rc == 6 || dl_rc == 7 || dl_rc == 28) ? "Cannot reach the server." : "Download failed.";
@@ -1045,8 +1052,14 @@ static void draw_ui(double t) {
                 rrect(x + 8, yy + 5, 3, rh - 12, 1.5f, VC[0]);
             } else if (hv) rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(EDGE, 0.25f));
             char lab[160]; snprintf(lab, sizeof lab, "%s", pl[i].label);
-            fit_text(lab, w - 52, 14);
-            text(x + 20, yy + 5, 14, isc ? TXT : DIM, lab);
+            float tx = x + 20;
+            if (pl[i].ma_id) {      /* kleine Marke "MA": Titel stammt vom The Mod Archive */
+                rrect(tx, yy + 6, 24, 17, 4, alpha(VC[1], isc ? 0.32f : 0.20f));
+                text(tx + 4, yy + 8, 11, VC[1], "MA");
+                tx += 31;
+            }
+            fit_text(lab, w - 52 - (tx - (x + 20)), 14);
+            text(tx, yy + 5, 14, isc ? TXT : DIM, lab);
             if (clicked(x + 8, yy, w - 16, rh)) { play_index(i); click = 0; }
         }
         { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s  \xb7  Module player", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
