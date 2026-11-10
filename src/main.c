@@ -1217,6 +1217,9 @@ EMSCRIPTEN_KEEPALIVE void ng_web_ma_done(int id, int rc, const char *path) {
     dl_state = rc ? 3 : 2;
 }
 
+/* Modul-ID aus Eingabe (Zahl oder Link) fuer das HTML-Eingabefeld der Webseite; 0 = nicht erkannt */
+EMSCRIPTEN_KEEPALIVE int ng_web_parse_id(const char *t) { return ma_parse_id(t); }
+
 /* Text aus der Zwischenablage (paste-Ereignis) */
 EMSCRIPTEN_KEEPALIVE void ng_web_paste(const char *t) {
     if (!ma_open || !t) return;
@@ -1345,6 +1348,10 @@ int main(int argc, char **argv) {
             }
         }
     }
+#ifdef __EMSCRIPTEN__
+    /* Tastatur nur vom Canvas, damit HTML-Eingabefelder der Seite (Mod-Archive-Dialog) normal funktionieren */
+    SDL_SetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT, "#canvas");
+#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS)) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
 #ifdef __EMSCRIPTEN__
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
