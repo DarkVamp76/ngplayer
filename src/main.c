@@ -342,7 +342,7 @@ static void draw_pattern(float x, float y, float w, float h);
 static int g_orb;                       /* 1 = Orb statt Pattern-Ansicht (Taste V / Button) */
 /* Umschalter Pattern | Orb oben in der Karte (auch per Touch/Klick) */
 static void view_switch(float x, float y, float w) {
-    float cw = 62, bx = x + w / 2 - cw, by = y + 8;
+    float cw = 62, bx = g_portrait ? x + w - 14 - 2 * cw + 4 : x + w / 2 - cw, by = y + 8;
     for (int i = 0; i < 2; i++) {
         float xx = bx + i * cw;
         int on = (i == 1) == (g_orb != 0), hv = hit(xx, by, cw - 4, 20);
@@ -486,7 +486,7 @@ static void chan_scope(int c, float bx2, float mid2, float bw2, float sh2, float
 
 static void draw_pattern(float x, float y, float w, float h) {
     card(x, y, w, h, 0);
-    text(x + 18, y + 12, 12, DIM, "PATTERN");
+    if (!g_portrait) text(x + 18, y + 12, 12, DIM, "PATTERN");
     view_switch(x, y, w);
     if (!g_song) { text(x + 18, y + 44, 14, FAINT, "No song loaded."); return; }
     if (!g_view_valid) return;
@@ -494,7 +494,8 @@ static void draw_pattern(float x, float y, float w, float h) {
     int nch = song_channels(g_song);
     char hb[64];
     snprintf(hb, sizeof hb, "ORD %02d  PAT %02d  ROW %02d/%02d", sp.order + 1, sp.pattern, sp.row, sp.nrows);
-    text_right(x + w - 18, y + 12, 12, DIM, hb);
+    if (g_portrait) text(x + 18, y + 12, 12, DIM, hb);   /* Platz: Info links, Umschalter rechts */
+    else text_right(x + w - 18, y + 12, 12, DIM, hb);
 
     pat_disp = g_pos;
 
