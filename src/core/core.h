@@ -59,6 +59,8 @@ int  ptm_probe(const uint8_t *buf, size_t len);             /* 1 = Poly Tracker 
 int  xptm_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (PTM -> S3M replay) */
 int  ult_probe(const uint8_t *buf, size_t len);             /* 1 = UltraTracker file */
 int  xult_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (ULT -> S3M replay) */
+int  s669_probe(const uint8_t *buf, size_t len);            /* 1 = Composer 669 / UNIS 669 file */
+int  xs669_load(XSong *s, const uint8_t *buf, size_t len);  /* 0 = ok (669 -> S3M replay) */
 void xsong_free(XSong *s);
 
 typedef struct XPlayer XPlayer;
