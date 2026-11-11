@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* ngPlayer - OpenGL-3.3-Oberflaeche. Renderer-Schicht (gfx.inc) stammt aus ngSid.
  *
- *   ngplayer [--screenshot out.bmp [--frames N]] [datei.mod|s3m|xm|it | ordner ...]
+ *   ngplayer [--screenshot out.bmp [--frames N]] [datei.mod|s3m|stm|xm|it | ordner ...]
  *
  * Tasten: Leertaste Pause, Links/Rechts Subsong (TFMX) bzw. Order spulen, Strg+Links/Rechts Order spulen, Hoch/Runter Titel, +/- Lautstaerke, R Neustart,
  *         F/F11 Vollbild, Esc Ende. Maus: Playlist anklicken, Lautstaerkebalken ziehen.
@@ -120,7 +120,7 @@ static int is_mod_name(const char *n) {
     if (tfmx_is_song_name(n)) return 1;          /* mdat.NAME / NAME.tfx; smpl.* und .sam sind nur Sampledaten */
     const char *d = strrchr(n, '.');
     if (!d) return 0;
-    static const char *ext[] = { ".mod", ".s3m", ".xm", ".it", ".dmf", NULL };
+    static const char *ext[] = { ".mod", ".s3m", ".stm", ".xm", ".it", ".dmf", NULL };
     for (int i = 0; ext[i]; i++) if (!strcasecmp(d, ext[i])) return 1;
     return 0;
 }
@@ -1190,7 +1190,7 @@ static void draw_ui(double t) {
         { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s  \xb7  Module player", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
         if (!npl) {
             text(x + 18, y + 60, 14, DIM, "No files.");
-            text(x + 18, y + 84, 13, FAINT, "MOD, S3M, XM, IT, DMF or TFMX");
+            text(x + 18, y + 84, 13, FAINT, "MOD, S3M, STM, XM, IT, DMF or TFMX");
             text(x + 18, y + 102, 13, FAINT, "drop them on the window.");
         }
     }
@@ -1261,7 +1261,7 @@ static void draw_ui(double t) {
     draw_overview(ax, cy0, aw, oh);
     if (g_orb) draw_orb(ax, cy0 + oh + M, aw, avail - oh - M);
     else draw_pattern(ax, cy0 + oh + M, aw, avail - oh - M);
-    if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "IT"));
+    if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "IT"));
     float vuw = 300, spw = aw - vuw - M;
     draw_spectrum(ax, sy, spw, sh);
     draw_level(ax + spw + M, sy, vuw, sh);
@@ -1412,7 +1412,7 @@ static void draw_ui_portrait(float W, float H) {
     if (oh < 40) oh = 40;
     view_update();
     overview_update((float)g_dt);
-    if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "IT"));
+    if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "IT"));
     if (g_plopen) {
         draw_playlist_overlay(M, cy0, aw, sy + sh - cy0);   /* the transport bar below (LIST) still gets its click */
     } else {
