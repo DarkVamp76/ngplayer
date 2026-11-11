@@ -324,7 +324,7 @@ XPlayer *xplay_new(const XSong *s, int rate){
     XPlayer *p = calloc(1, sizeof *p);
     { const char*e=getenv("XQC"); g_qc = e ? atoi(e) : (s->fmt == 1 ? 2 : 0); }
     p->s = s; p->rate = rate; p->speed = s->speed; p->tempo = s->tempo; p->gvol = s->gvol ? s->gvol : 255;
-    for (int i = 0; i < NCH; i++) p->ch[i].pan5c = (s->fmt == 1) ? ((i % 4 == 0 || i % 4 == 3) ? 60 : 195) : (s->chpan[i] >= 0 ? s->chpan[i] : 128);
+    for (int i = 0; i < NCH; i++) p->ch[i].pan5c = (s->fmt == 1 && s->chpan[i] < 0) ? ((i % 4 == 0 || i % 4 == 3) ? 60 : 195) : (s->chpan[i] >= 0 ? s->chpan[i] : 128);
     p->tick = 0; p->acc = 0;
     p->lp = (s->fmt == 1 && s->amiga) ? 1 : 0;
     if (getenv("XLP") && !atoi(getenv("XLP"))) p->lp = 0;
