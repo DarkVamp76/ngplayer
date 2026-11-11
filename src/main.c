@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* ngPlayer - OpenGL-3.3-Oberflaeche. Renderer-Schicht (gfx.inc) stammt aus ngSid.
  *
- *   ngplayer [--screenshot out.bmp [--frames N]] [datei.mod|s3m|stm|ptm|ult|669|xm|it | ordner ...]
+ *   ngplayer [--screenshot out.bmp [--frames N]] [datei.mod|s3m|stm|ptm|ult|669|mtm|xm|it | ordner ...]
  *
  * Tasten: Leertaste Pause, Links/Rechts Subsong (TFMX) bzw. Order spulen, Strg+Links/Rechts Order spulen, Hoch/Runter Titel, +/- Lautstaerke, R Neustart,
  *         F/F11 Vollbild, Esc Ende. Maus: Playlist anklicken, Lautstaerkebalken ziehen.
@@ -120,7 +120,7 @@ static int is_mod_name(const char *n) {
     if (tfmx_is_song_name(n)) return 1;          /* mdat.NAME / NAME.tfx; smpl.* und .sam sind nur Sampledaten */
     const char *d = strrchr(n, '.');
     if (!d) return 0;
-    static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".xm", ".it", ".dmf", NULL };
+    static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".xm", ".it", ".dmf", NULL };
     for (int i = 0; ext[i]; i++) if (!strcasecmp(d, ext[i])) return 1;
     return 0;
 }
@@ -1190,7 +1190,7 @@ static void draw_ui(double t) {
         { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s  \xb7  Module player", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
         if (!npl) {
             text(x + 18, y + 60, 14, DIM, "No files.");
-            text(x + 18, y + 84, 13, FAINT, "MOD, S3M, STM, PTM, ULT, 669, XM, IT, DMF or TFMX");
+            text(x + 18, y + 84, 13, FAINT, "MOD, S3M, STM, PTM, ULT, 669, MTM, XM, IT, DMF or TFMX");
             text(x + 18, y + 102, 13, FAINT, "drop them on the window.");
         }
     }
