@@ -1414,8 +1414,7 @@ static void draw_ui_portrait(float W, float H) {
     overview_update((float)g_dt);
     if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "IT"));
     if (g_plopen) {
-        draw_playlist_overlay(M, cy0, aw, sy + sh - cy0);
-        click = 0;
+        draw_playlist_overlay(M, cy0, aw, sy + sh - cy0);   /* the transport bar below (LIST) still gets its click */
     } else {
         draw_overview(M, cy0, aw, oh);
         if (g_orb) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
@@ -1585,8 +1584,11 @@ static void iter(void) {
         SDL_GetWindowSize(win, &ww, &wh);
         SDL_GL_GetDrawableSize(win, &dw, &dh);
         /* Hochformat (Seitenverhaeltnis < 0,8) oder zu klein fuer das Querformat: schmales, gestapeltes Layout (virtuell 440 breit) */
-        g_portrait = dw * 10 < dh * 8 || dw < 640 || dh < 430;
-        if (g_portrait) view_scale = (float)dw / 440.0f;
+        g_portrait = dw * 10 < dh * 12 || dw < 640 || dh < 430;      /* aspect < 1.2: tablets upright, phones */
+        if (g_portrait) {                                              /* virtual width 440, but at least 640 high (tablets are wider than phones) */
+            view_scale = (float)dw / 440.0f;
+            if ((float)dh / 640.0f < view_scale) view_scale = (float)dh / 640.0f;
+        }
         else {
             view_scale = (float)dw / 1280.0f;
             if ((float)dh / 860.0f < view_scale) view_scale = (float)dh / 860.0f;
