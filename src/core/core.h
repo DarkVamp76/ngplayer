@@ -55,6 +55,8 @@ int  xxm_load(XSong *s, const uint8_t *buf, size_t len);    /* 0 = ok */
 int  xs3m_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok */
 int  stm_probe(const uint8_t *buf, size_t len);             /* 1 = Scream Tracker 2 file */
 int  xstm_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (STM -> S3M replay) */
+int  ptm_probe(const uint8_t *buf, size_t len);             /* 1 = Poly Tracker file */
+int  xptm_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (PTM -> S3M replay) */
 void xsong_free(XSong *s);
 
 typedef struct XPlayer XPlayer;
