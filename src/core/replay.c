@@ -198,6 +198,16 @@ static void retrig_q(XPlayer *p, Ch *c, int par, int tick){
     }
 }
 
+/* 669 (Composer / UNIS): slides run in Hz per tick, not in period steps. Period and frequency are linked by
+ * Hz = 14318184 * PK / period (see v->step). */
+static int hz_shift(int per, double dhz){
+    if (per <= 0) return per;
+    double hz = 14318184.0 * PK / per + dhz;
+    if (hz < 50.0) hz = 50.0;
+    if (hz > 64000.0) hz = 64000.0;
+    return (int)(14318184.0 * PK / hz);
+}
+
 static void do_effect(XPlayer *p, int chn, Ch *c, int tick){
     int e = c->eff, par = c->par, mx = p->s->maxvol;
     c->dcf = c->e0f = 0;
@@ -256,6 +266,18 @@ static void do_effect(XPlayer *p, int chn, Ch *c, int tick){
     case 0x18: c->trig = 0;
                if (tick || (p->s->fmt == 1 && getenv("XTP0"))) { c->p74 = c->pD4 = ngp_tporta_normal((p->s->fmt == 2 || (qmod() && p->s->fmt == 1)) ? qper(c->p74) : c->p74, c->p80, c->m7c * PK); }
                c->dcf = 1; break;
+    case 0x30: c->pD4 = hz_shift(c->pD4, par * 80.0); break;                          /* 669 slide up, every tick */
+    case 0x31: c->pD4 = hz_shift(c->pD4, -par * 80.0); break;                         /* 669 slide down */
+    case 0x32: c->trig = 0;                                                            /* 669 slide to the note on the line */
+               { int cur = c->p74 > 0 ? c->p74 : c->pD4;
+                 if (c->p80 > 0 && cur > 0) {
+                     double K = 14318184.0 * PK, ch = K / cur, th = K / c->p80, st = par * 40.0;
+                     if (ch < th) { ch += st; if (ch > th) ch = th; } else if (ch > th) { ch -= st; if (ch < th) ch = th; }
+                     c->p74 = c->pD4 = (int)(K / ch);
+                 } }
+               c->dcf = 1; break;
+    case 0x33: c->p74 = hz_shift(c->pD4, par * 80.0); c->dcf = 1; break;              /* 669 frequency adjust (constant offset) */
+    case 0x34: c->p74 = (tick & 1) ? hz_shift(c->pD4, par * 24.0) : c->pD4; c->dcf = 1; break;   /* 669 vibrato: two-state wobble */
     case 9: if (par) c->mcc = par << 8;
             c->start38 = (int)((uint32_t)c->mcc > c->len ? c->len : (uint32_t)c->mcc); break;
     default: break;
