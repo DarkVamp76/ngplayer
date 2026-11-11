@@ -112,6 +112,7 @@ typedef struct { char *path; char *key; char label[128]; int ma_id; } entry;   /
 static entry *pl;
 static int npl, cur = -1;
 static float list_scroll;
+static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
 static int list_follow;
 
 static int is_mod_name(const char *n) {
@@ -524,7 +525,8 @@ static void draw_pattern(float x, float y, float w, float h) {
      * ein Kopf-Raster mit je max. 16 pro Zeile (oben), das Pattern darunter scrollt mit Nummernleiste. */
     float hy = y + 34, hh = 54;
     int strip = nch > vis;
-    int per = nch <= 16 ? nch : 16, hrows = (nch + per - 1) / per;
+    int pmax = g_portrait ? 8 : 16;
+    int per = nch <= pmax ? nch : pmax, hrows = (nch + per - 1) / per;
     float boxh = hrows == 1 ? 54.0f : (hrows == 2 ? 46.0f : 38.0f);
     float gw = (w - 28) / per;
     float labh = 0;
@@ -765,10 +767,10 @@ static int ch_fxcls[64];
 static float ch_fxage[64], ch_noteage[64];
 static int ov_last_order = -1, ov_last_row = -1;
 
-static int overview_cols(int nch) { return nch <= 10 ? 1 : (nch <= 20 ? 2 : 3); }
+static int overview_cols(int nch) { if (g_portrait) return nch <= 8 ? 1 : 2; return nch <= 10 ? 1 : (nch <= 20 ? 2 : 3); }
 static float overview_height(int nch) {
     int cols = overview_cols(nch), rows = (nch + cols - 1) / cols;
-    float rh = cols == 1 ? 17.0f : 15.0f;
+    float rh = g_portrait ? 16.0f : (cols == 1 ? 17.0f : 15.0f);
     return 38.0f + rows * rh + 10.0f;
 }
 
@@ -816,11 +818,12 @@ static void draw_overview(float x, float y, float w, float h) {
     int nch = song_channels(g_song);
     if (nch > 64) nch = 64;
     int cols = overview_cols(nch), rows = (nch + cols - 1) / cols;
-    float rh = cols == 1 ? 17.0f : 15.0f, fs = cols == 1 ? 12.0f : 11.0f;
+    float rh = g_portrait ? 16.0f : (cols == 1 ? 17.0f : 15.0f), fs = cols == 1 ? 12.0f : 11.0f;
     text(x + 18, y + 10, 12, DIM, "CHANNELS");
     float cwid = (w - 36) / cols;
     float panw = cwid * 0.17f; if (panw < 54) panw = 54; if (panw > 150) panw = 150;
     float barw = cwid * 0.26f; if (barw < 64) barw = 64; if (barw > 300) barw = 300;
+    if (g_portrait) barw = cwid * (cols == 1 ? 0.55f : 0.48f);
     for (int c = 0; c < nch; c++) {
         int col_i = c / rows, row_i = c % rows;
         float cx = x + 18 + col_i * cwid, cy = y + 32 + row_i * rh;
@@ -842,6 +845,7 @@ static void draw_overview(float x, float y, float w, float h) {
         float nx = bx + barw + 10;
         float na = ch_noteage[c] < 0.25f ? 1.0f : 0.55f;
         text(nx, cy + 1, fs, ch_note[c][0] ? alpha(TXT, na) : alpha(FAINT, 0.4f), ch_note[c][0] ? ch_note[c] : "...");
+        if (g_portrait) continue;           /* Hochformat: ohne Effekttext und Panning */
         /* Effekt (blendet nach kurzer Zeit aus) */
         float ex = nx + text_width("C#4", fs) + 12, ew = cx + cwid - panw - 14 - ex;
         if (ch_fx[c][0]) {
@@ -1125,6 +1129,7 @@ static void draw_ma_dialog(double t) {
     else text(x + 24, y + 120, 12, FAINT, "Enter downloads  \xb7  Ctrl+V paste  \xb7  Esc close");
 }
 
+static void draw_ui_portrait(float W, float H);
 static void draw_ui(double t) {
     (void)t;
     float W = view_w, H = view_h;
@@ -1138,6 +1143,7 @@ static void draw_ui(double t) {
     blob(W * 0.92f, H * 0.9f, 380, alpha(VC[2], 0.04f + 0.03f * (glow_l + glow_r)));
     set_additive(0);
 
+    if (g_portrait) { draw_ui_portrait(W, H); return; }
     const float M = 16, SB = 288, BOT = 64;
     /* ---------------- Playlist */
     {
@@ -1296,6 +1302,168 @@ static void draw_ui(double t) {
     }
 }
 
+
+/* ================================================================== Hochformat (Handy)
+ * Virtuelle Breite 440: Kopf, Kanaluebersicht, Pattern/Orb, Spektrum + Pegel, Transport mit LIST-Knopf.
+ * Die Playlist erscheint als Overlay (Tippen waehlt, Ziehen scrollt). */
+static void draw_playlist_overlay(float x, float y, float w, float h) {
+    static int pd, moved, was_open;
+    static float py0, ls0;
+    const float rh = 34;
+    if (!was_open) { list_follow = 1; }
+    was_open = 1;
+    card(x, y, w, h, 0);
+    text(x + 16, y + 14, 13, TXT, "PLAYLIST");
+    char cnt[32]; snprintf(cnt, sizeof cnt, "%d", npl);
+    text(x + 16 + text_width("PLAYLIST", 13) + 12, y + 14, 13, DIM, cnt);
+    int tap = 0;
+    if (mouse_down) {
+        if (!pd) { pd = 1; py0 = my; ls0 = list_scroll; moved = 0; }
+        if (fabsf(my - py0) > 8) moved = 1;
+        if (moved) list_scroll = ls0 + (py0 - my) / rh;
+    } else if (pd) { pd = 0; if (!moved) tap = 1; }
+    float cbx = x + w - 92, cby = y + 8;
+    int hvc = hit(cbx, cby, 78, 28);
+    rrect(cbx, cby, 78, 28, 8, alpha(hvc ? VC[0] : EDGE, 0.35f));
+    text(cbx + (78 - text_width("CLOSE", 12)) / 2, cby + 7, 12, TXT, "CLOSE");
+    if (tap && mx >= cbx && mx < cbx + 78 && my >= cby && my < cby + 28) { g_plopen = 0; was_open = 0; return; }
+    float ry = y + 48, area = h - 48 - 8;
+    int vis_rows = (int)(area / rh), maxscroll = npl > vis_rows ? npl - vis_rows : 0;
+    if (list_follow && cur >= 0) {
+        if (cur < list_scroll) list_scroll = (float)cur;
+        if (cur >= list_scroll + vis_rows) list_scroll = (float)(cur - vis_rows + 1);
+        list_follow = 0;
+    }
+    if (list_scroll > maxscroll) list_scroll = (float)maxscroll;
+    if (list_scroll < 0) list_scroll = 0;
+    int first = (int)list_scroll;
+    for (int r = 0; r < vis_rows && first + r < npl; r++) {
+        int i = first + r;
+        float yy = ry + r * rh;
+        int isc = i == cur;
+        if (isc) {
+            rrect(x + 8, yy, w - 16, rh - 3, 8, alpha(VC[0], 0.16f));
+            rrect(x + 8, yy + 6, 3, rh - 15, 1.5f, VC[0]);
+        }
+        char lab[160]; snprintf(lab, sizeof lab, "%s", pl[i].label);
+        float tx = x + 20;
+        if (pl[i].ma_id) {
+            rrect(tx, yy + 8, 24, 17, 4, alpha(VC[1], isc ? 0.32f : 0.20f));
+            text(tx + 4, yy + 10, 11, VC[1], "MA");
+            tx += 31;
+        }
+        fit_text(lab, w - 40 - (tx - (x + 20)), 14);
+        text(tx, yy + 8, 14, isc ? TXT : DIM, lab);
+        if (tap && !moved && mx >= x + 8 && mx < x + w - 8 && my >= yy && my < yy + rh) { play_index(i); g_plopen = 0; was_open = 0; return; }
+    }
+    if (!npl) text(x + 16, y + 64, 14, DIM, "No files.");
+}
+
+static void draw_ui_portrait(float W, float H) {
+    const float M = 10, BOT = 64;
+    float aw = W - 2 * M;
+    /* ---------------- Kopf */
+    float hy = M, hh = 92;
+    card(M, hy, aw, hh, 0);
+    {
+        char title[160], sub[200];
+        if (g_song) {
+            const char *tt = song_title(g_song);
+            snprintf(title, sizeof title, "%s", tt[0] ? tt : (cur >= 0 ? pl[cur].label : ""));
+            snprintf(sub, sizeof sub, "%s", cur >= 0 ? pl[cur].label : "");
+        } else {
+            snprintf(title, sizeof title, "ngPlayer");
+            snprintf(sub, sizeof sub, "Module player for Linux");
+        }
+        float tmax = aw - 32 - 96;
+        float tsize = 22;
+        while (tsize > 15 && text_width(title, tsize) > tmax) tsize -= 1;
+        fit_text(title, tmax, tsize);
+        text(M + 16, hy + 10, tsize, TXT, title);
+        fit_text(sub, tmax, 13);
+        if (g_error[0]) text(M + 16, hy + 14 + tsize, 12, WARN, g_error);
+        else text(M + 16, hy + 14 + tsize, 13, DIM, sub);
+        char tb[32];
+        mmss(tb, sizeof tb, (double)g_frames / g_rate);
+        text_right(M + aw - 16, hy + 10, 28, TXT, tb);
+        if (g_song) {
+            int o = g_view_valid ? g_view.order : -1;
+            if (o >= 0) { char ob[48]; snprintf(ob, sizeof ob, "%d / %d", o + 1, song_norders(g_song)); text_right(M + aw - 16, hy + 44, 13, VC[0], ob); }
+            if (g_paused) text_right(M + aw - 16, hy + 62, 12, VC[2], "PAUSE");
+            else if (g_ended) text_right(M + aw - 16, hy + 62, 12, DIM, "ENDE");
+            float cx = M + 16, cy = hy + hh - 28;
+            char b[48];
+            cx += chip(cx, cy, song_format(g_song), VC[0], 1);
+            snprintf(b, sizeof b, "%d CH", song_channels(g_song));
+            cx += chip(cx, cy, b, VC[2], 1);
+            if (song_subsongs(g_song) > 1) { snprintf(b, sizeof b, "SONG %d/%d", song_subsong(g_song) + 1, song_subsongs(g_song)); cx += chip(cx, cy, b, VC[2], 1); }
+        }
+    }
+    /* ---------------- Mitte */
+    float by = H - M - BOT, sh = 96, sy = by - M - sh, cy0 = hy + hh + M;
+    float oh = g_song ? overview_height(song_channels(g_song) > 64 ? 64 : song_channels(g_song)) : 60.0f;
+    float avail = sy - M - cy0;
+    if (avail - oh - M < 200) oh = avail - M - 200;
+    if (oh < 40) oh = 40;
+    view_update();
+    overview_update((float)g_dt);
+    if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "IT"));
+    if (g_plopen) {
+        draw_playlist_overlay(M, cy0, aw, sy + sh - cy0);
+        click = 0;
+    } else {
+        draw_overview(M, cy0, aw, oh);
+        if (g_orb) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
+        else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
+        float vuw = 130, spw = aw - vuw - M;
+        draw_spectrum(M, sy, spw, sh);
+        draw_level(M + spw + M, sy, vuw, sh);
+    }
+    /* ---------------- Transport */
+    {
+        float bx = M, bw = aw;
+        card(bx, by, bw, BOT, 0);
+        float cy = by + BOT / 2, r = 20;
+        float bxs[3] = { bx + 12, bx + 62, bx + 112 };
+        for (int i = 0; i < 3; i++) {
+            float x = bxs[i];
+            int hv = hit(x, cy - r, 2 * r, 2 * r);
+            rrect(x, cy - r, 2 * r, 2 * r, r, alpha(hv ? VC[0] : EDGE, hv ? 0.30f : 0.35f));
+            col ic = hv ? TXT : DIM;
+            float ccx = x + r, ccy = cy;
+            if (i == 0) { tri(ccx + 6, ccy - 8, ccx + 6, ccy + 8, ccx - 6, ccy, ic); rect(ccx - 9, ccy - 8, 3, 16, ic); }
+            else if (i == 1) {
+                if (g_paused || g_ended) tri(ccx - 6, ccy - 9, ccx - 6, ccy + 9, ccx + 9, ccy, ic);
+                else { rect(ccx - 7, ccy - 8, 5, 16, ic); rect(ccx + 2, ccy - 8, 5, 16, ic); }
+            } else { tri(ccx - 6, ccy - 8, ccx - 6, ccy + 8, ccx + 6, ccy, ic); rect(ccx + 6, ccy - 8, 3, 16, ic); }
+            if (clicked(x, cy - r, 2 * r, 2 * r)) {
+                if (i == 0) next_prev(-1);
+                else if (i == 2) next_prev(1);
+                else if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); }
+                else g_paused = !g_paused;
+                click = 0;
+            }
+        }
+        {   /* Playlist-Overlay ein/aus */
+            float lx = bx + 166, lw = 58;
+            int hv = hit(lx, cy - 16, lw, 32);
+            rrect(lx, cy - 16, lw, 32, 9, alpha(g_plopen ? VC[2] : (hv ? VC[0] : EDGE), g_plopen ? 0.28f : 0.35f));
+            text(lx + (lw - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
+            if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; click = 0; }
+        }
+        float vx = bx + 250, vw = bw - 250 - 22;
+        rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
+        rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
+        float kx = vx + 3 + (vw - 6) * g_vol;
+        rrect(kx - 9, cy - 9, 18, 18, 9, TXT);
+        if (mouse_down && (hit(vx - 12, cy - 18, vw + 24, 36) || (click && clicked(vx - 12, cy - 18, vw + 24, 36)))) {
+            g_vol = (mx - vx - 3) / (vw - 6);
+            if (g_vol < 0) g_vol = 0;
+            if (g_vol > 1) g_vol = 1;
+        }
+    }
+}
+
 /* ================================================================== Start */
 static void save_screenshot(const char *file, int w, int h) {
     uint8_t *px = (uint8_t *)malloc((size_t)w * (size_t)h * 4), *fl = (uint8_t *)malloc((size_t)w * (size_t)h * 4);
@@ -1408,9 +1576,13 @@ static void iter(void) {
         int ww, wh, dw, dh;
         SDL_GetWindowSize(win, &ww, &wh);
         SDL_GL_GetDrawableSize(win, &dw, &dh);
-        view_scale = (float)dw / 1280.0f;
-        if ((float)dh / 860.0f < view_scale) view_scale = (float)dh / 860.0f;
-        if (view_scale < 0.5f) view_scale = 0.5f;
+        g_portrait = dw * 10 < dh * 8;      /* Hochformat: schmales, gestapeltes Layout (virtuell 440 breit) */
+        if (g_portrait) view_scale = (float)dw / 440.0f;
+        else {
+            view_scale = (float)dw / 1280.0f;
+            if ((float)dh / 860.0f < view_scale) view_scale = (float)dh / 860.0f;
+            if (view_scale < 0.5f) view_scale = 0.5f;
+        }
         view_w = (float)dw / view_scale;
         view_h = (float)dh / view_scale;
         int mxi, myi;
