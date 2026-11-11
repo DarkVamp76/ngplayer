@@ -22,6 +22,7 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | S3M (Scream Tracker 3) | supported |
 | STM (Scream Tracker 2) | supported (4 channels, played through the S3M engine) |
 | PTM (Poly Tracker) | supported (1-32 channels, 16-bit samples, played through the S3M engine) |
+| ULT (UltraTracker) | supported (1-32 channels, 8/16-bit samples, played through the S3M engine) |
 | XM (FastTracker 2) | supported |
 | IT (Impulse Tracker) | supported, still being completed |
 | DMF (X-Tracker, v8) | supported, some rare effects still missing |

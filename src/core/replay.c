@@ -418,6 +418,10 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
                 Voice *v = &p->v[i];
                 if ((xplay_solo >= 0 && i != xplay_solo) || ((xplay_mute >> i) & 1)) { if (v->on) v->pos += v->step; if (v->loop && v->on) { while (v->pos >= v->le) v->pos -= (v->le - v->ls); } else if (v->on && v->pos >= v->len) { v->on = 0; if (xlive_on()) { v->hold = 1; v->pos = v->len; } } continue; }
                 if (!v->on || !v->vol) { if (v->on) v->pos += v->step; continue; }
+                if (v->pos < 0 || v->pos >= v->len) {   /* a sample swap can leave pos behind a shorter sample: wrap into the loop or stop */
+                    if (v->pos >= 0 && v->loop && v->le > v->ls) { while (v->pos >= v->le) v->pos -= (v->le - v->ls); }
+                    else { v->on = 0; continue; }
+                }
                 uint32_t i0 = (uint32_t)v->pos;
                 double fr = v->pos - i0;
                 uint32_t i1 = i0 + 1;
