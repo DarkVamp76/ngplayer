@@ -337,6 +337,19 @@ static void mmss(char *buf, size_t cap, double sec) { int s = (int)sec; snprintf
 static float glow_l, glow_r;
 static double g_dt;
 static void draw_pattern(float x, float y, float w, float h);
+static int g_orb;                       /* 1 = Orb statt Pattern-Ansicht (Taste V / Button) */
+/* Umschalter Pattern | Orb oben in der Karte (auch per Touch/Klick) */
+static void view_switch(float x, float y, float w) {
+    float cw = 62, bx = x + w / 2 - cw, by = y + 8;
+    for (int i = 0; i < 2; i++) {
+        float xx = bx + i * cw;
+        int on = (i == 1) == (g_orb != 0), hv = hit(xx, by, cw - 4, 20);
+        rrect(xx, by, cw - 4, 20, 6, on ? alpha(VC[2], 0.25f) : alpha(FAINT, hv ? 0.30f : 0.16f));
+        const char *l = i ? "ORB" : "PATTERN";
+        text(xx + (cw - 4 - text_width(l, 11)) / 2, by + 4, 11, on ? VC[2] : alpha(DIM, 0.9f), l);
+        if (clicked(xx, by, cw - 4, 20)) { g_orb = i; click = 0; }
+    }
+}
 
 /* ---------------------------------------------------------------- Abspiel-Position fuer die Anzeige
  * Der Audio-Thread meldet jeden Zeilenwechsel mit der Sample-Position (evq). Hier wird daraus eine zeit-
@@ -432,9 +445,47 @@ static int resolve_row(const SongPos *sp, int vr, int *pat, int *row, int *other
     *pat = p; *row = r; *other = 1; return 1;
 }
 
+/* Scope einer Stimme: aufsteigender Nulldurchgang als Trigger; Zeichenflaeche bx..bx+bw, Mittellinie mid, Hoehe sh */
+static void chan_scope(int c, float bx2, float mid2, float bw2, float sh2, float lw) {
+    unsigned wp = song_scope_pos(g_song);
+    const float *sb = g_scope + (size_t)c * SCOPE_LEN;
+    enum { SPAN = 360, NP = 96 };
+    int start = SPAN;
+    float peak = 0;
+    for (int k = 1; k <= SPAN + 700; k++) { float v = sb[(wp - (unsigned)k) & (SCOPE_LEN - 1)]; if (fabsf(v) > peak) peak = fabsf(v); }
+    for (int k = SPAN + 1; k < SPAN + 700; k++) {
+        float a = sb[(wp - (unsigned)k) & (SCOPE_LEN - 1)], b = sb[(wp - (unsigned)k + 1) & (SCOPE_LEN - 1)];
+        if (a < 0 && b >= 0) { start = k; break; }
+    }
+    static float sgain[64];
+    float want = peak > 0.004f ? 0.85f / peak : 1.0f;
+    if (want > 10) want = 10;
+    if (want < 1) want = 1;
+    if (sgain[c] < 1) sgain[c] = 1;
+    sgain[c] += (want - sgain[c]) * (want < sgain[c] ? 0.5f : 0.08f);
+    float amp = sh2 * 0.46f;
+    int np = bw2 < 40 ? 32 : NP;
+    static float pts[NP * 2];
+    for (int j = 0; j < np; j++) {
+        float v = sb[(wp - (unsigned)start + (unsigned)((long)j * SPAN / np)) & (SCOPE_LEN - 1)] * sgain[c];
+        if (v > 1) v = 1;
+        if (v < -1) v = -1;
+        pts[2 * j] = bx2 + bw2 * j / (np - 1.0f);
+        pts[2 * j + 1] = mid2 - v * amp;
+    }
+    col lc = VC[c % 3];
+    float lvl = peak > 0.004f ? 1.0f : 0.35f;
+    rect(bx2, mid2, bw2, 1, alpha(FAINT, 0.25f));
+    set_additive(1);
+    polyline(pts, np, 3.4f * lw, 3.5f, alpha(lc, 0.20f * lvl));
+    set_additive(0);
+    polyline(pts, np, 1.0f * lw, 3.0f, alpha(mix(lc, C(1, 1, 1, 1), 0.3f), 0.35f + 0.65f * lvl));
+}
+
 static void draw_pattern(float x, float y, float w, float h) {
     card(x, y, w, h, 0);
     text(x + 18, y + 12, 12, DIM, "PATTERN");
+    view_switch(x, y, w);
     if (!g_song) { text(x + 18, y + 44, 14, FAINT, "No song loaded."); return; }
     if (!g_view_valid) return;
     SongPos sp = g_view;
@@ -449,10 +500,19 @@ static void draw_pattern(float x, float y, float w, float h) {
     float fs = wide ? 14.0f : (nch <= 8 ? 12.0f : 11.0f), rowh = wide ? 19.0f : (nch <= 8 ? 17.0f : 16.0f);
     float wn = text_width("C#4", fs), wi = text_width("00", fs), wv = text_width("v00", fs), wf = text_width("000", fs) + text_width("A", fs);
     float gap = fs * (nch > 8 ? 0.38f : 0.55f);
-    float cw = wn + wi + wv + wf + gap * 4 + 6;
     float rn_w = 34;
     float ax0 = x + 14 + rn_w, avail = w - 28 - rn_w;
-    int vis = (int)(avail / cw);
+    /* Detailstufe: 0 = Note Inst Vol Fx, 1 = ohne Vol, 2 = nur Note Inst. Wird eng, faellt erst Vol, dann Fx weg,
+     * damit moeglichst alle Stimmen in die Spalten passen. */
+    float cw = 0;
+    int vis = 1, lvl = 0, tryl;
+    for (tryl = 0; tryl < 3; tryl++) {
+        cw = wn + wi + (tryl < 1 ? wv : 0) + (tryl < 2 ? wf : 0) + gap * (4 - tryl) + 6;
+        if ((int)(avail / cw) >= nch) break;
+    }
+    lvl = tryl < 3 ? tryl : 2;      /* passt nichts komplett: kompakteste Stufe, damit moeglichst viele Stimmen sichtbar sind */
+    cw = wn + wi + (lvl < 1 ? wv : 0) + (lvl < 2 ? wf : 0) + gap * (4 - lvl) + 6;
+    vis = (int)(avail / cw);
     if (vis < 1) vis = 1;
     if (vis > nch) vis = nch;
     pat_visch = vis;
@@ -460,82 +520,68 @@ static void draw_pattern(float x, float y, float w, float h) {
     if (pat_ch0 < 0) pat_ch0 = 0;
     float used = cw * vis, ox = ax0 + (avail - used) / 2;
 
-    /* Kanalkoepfe (Platz fuer die Scopes pro Stimme) */
+    /* Kanalkoepfe (Scope + Panning je Stimme). Passen nicht alle Stimmen in die Pattern-Spalten, bekommen ALLE Stimmen
+     * ein Kopf-Raster mit je max. 16 pro Zeile (oben), das Pattern darunter scrollt mit Nummernleiste. */
     float hy = y + 34, hh = 54;
-    for (int i = 0; i < vis; i++) {
-        int c = pat_ch0 + i;
-        float cx = ox + i * cw;
-        rrect(cx + 2, hy, cw - 4, hh, 7, C(0.02f, 0.03f, 0.055f, 1));
-        /* Scope dieser Stimme: aufsteigender Nulldurchgang als Trigger */
-        {
-            unsigned wp = song_scope_pos(g_song);
-            const float *sb = g_scope + (size_t)c * SCOPE_LEN;
-            enum { SPAN = 360, NP = 96 };
-            int start = SPAN;                                   /* Abstand zur Schreibposition (neueste = 1) */
-            float peak = 0;
-            for (int k = 1; k <= SPAN + 700; k++) { float v = sb[(wp - (unsigned)k) & (SCOPE_LEN - 1)]; if (fabsf(v) > peak) peak = fabsf(v); }
-            for (int k = SPAN + 1; k < SPAN + 700; k++) {
-                float a = sb[(wp - (unsigned)k) & (SCOPE_LEN - 1)], b = sb[(wp - (unsigned)k + 1) & (SCOPE_LEN - 1)];
-                if (a < 0 && b >= 0) { start = k; break; }
+    int strip = nch > vis;
+    int per = nch <= 16 ? nch : 16, hrows = (nch + per - 1) / per;
+    float boxh = hrows == 1 ? 54.0f : (hrows == 2 ? 46.0f : 38.0f);
+    float gw = (w - 28) / per;
+    float labh = 0;
+    if (strip) { hh = hrows * (boxh + 4) - 4; labh = 16; }
+    {
+        unsigned long long mm = song_get_mute(), all = nch >= 64 ? ~0ULL : ((1ULL << nch) - 1);
+        int n_hdr = strip ? nch : vis;
+        for (int i = 0; i < n_hdr; i++) {
+            int c = strip ? i : pat_ch0 + i;
+            float bx0, by0, bwd, bht;
+            if (strip) { bx0 = x + 14 + (c % per) * gw + 2; by0 = hy + (c / per) * (boxh + 4); bwd = gw - 4; bht = boxh; }
+            else { bx0 = ox + i * cw + 2; by0 = hy; bwd = cw - 4; bht = hh; }
+            rrect(bx0, by0, bwd, bht, 7, C(0.02f, 0.03f, 0.055f, 1));
+            if (strip && c >= pat_ch0 && c < pat_ch0 + vis) rrect(bx0, by0, bwd, bht, 7, alpha(VC[0], 0.13f));
+            float sh2 = bht - 24, mid2 = by0 + 5 + sh2 / 2;
+            chan_scope(c, bx0 + 6, mid2, bwd - 12, sh2, 1.0f);
+            /* Panning in Echtzeit, links -> rechts */
+            {
+                static float pan_disp[64];
+                float pw = bwd - 12, px0 = bx0 + 6, py = by0 + bht - 13;
+                float pt = (float)song_chan_pan(g_song, c);
+                pan_disp[c] += (pt - pan_disp[c]) * 0.35f;
+                float pn = pan_disp[c] / 255.0f, mxp = px0 + pw * pn, midx = px0 + pw * 0.5f;
+                col lc2 = VC[c % 3];
+                rrect(px0, py + 3, pw, 4, 2, alpha(FAINT, 0.30f));
+                rect(midx - 0.5f, py, 1, 10, alpha(FAINT, 0.7f));
+                float fx0 = mxp < midx ? mxp : midx, fw = fabsf(mxp - midx);
+                if (fw > 1) rrect(fx0, py + 3, fw, 4, 2, alpha(lc2, 0.55f));
+                set_additive(1);
+                blob(mxp, py + 5, 9, alpha(lc2, 0.30f));
+                set_additive(0);
+                rrect(mxp - 4, py + 1, 8, 8, 4, mix(lc2, C(1, 1, 1, 1), 0.35f));
             }
-            static float sgain[64];
-            float want = peak > 0.004f ? 0.85f / peak : 1.0f;
-            if (want > 10) want = 10;
-            if (want < 1) want = 1;
-            if (sgain[c] < 1) sgain[c] = 1;
-            sgain[c] += (want - sgain[c]) * (want < sgain[c] ? 0.5f : 0.08f);
-            float bw2 = cw - 4 - 12, bx2 = cx + 8, sh2 = hh - 24, mid2 = hy + 5 + sh2 / 2, amp = sh2 * 0.46f;
-            static float pts[NP * 2];
-            for (int j = 0; j < NP; j++) {
-                float v = sb[(wp - (unsigned)start + (unsigned)((long)j * SPAN / NP)) & (SCOPE_LEN - 1)] * sgain[c];
-                if (v > 1) v = 1;
-                if (v < -1) v = -1;
-                pts[2 * j] = bx2 + bw2 * j / (NP - 1.0f);
-                pts[2 * j + 1] = mid2 - v * amp;
-            }
-            col lc = VC[c % 3];
-            float lvl = peak > 0.004f ? 1.0f : 0.35f;
-            rect(bx2, mid2, bw2, 1, alpha(FAINT, 0.25f));
-            set_additive(1);
-            polyline(pts, NP, 3.4f, 3.5f, alpha(lc, 0.20f * lvl));
-            set_additive(0);
-            polyline(pts, NP, 1.0f, 3.0f, alpha(mix(lc, C(1, 1, 1, 1), 0.3f), 0.35f + 0.65f * lvl));
-        }
-        /* Zeile 2: Panning in Echtzeit, links -> rechts */
-        {
-            static float pan_disp[64];
-            float pw = cw - 4 - 12, px0 = cx + 8, py = hy + hh - 13;
-            float pt = (float)song_chan_pan(g_song, c);
-            pan_disp[c] += (pt - pan_disp[c]) * 0.35f;
-            float pn = pan_disp[c] / 255.0f, mxp = px0 + pw * pn, midx = px0 + pw * 0.5f;
-            col lc2 = VC[c % 3];
-            rrect(px0, py + 3, pw, 4, 2, alpha(FAINT, 0.30f));
-            rect(midx - 0.5f, py, 1, 10, alpha(FAINT, 0.7f));
-            float fx0 = mxp < midx ? mxp : midx, fw = fabsf(mxp - midx);
-            if (fw > 1) rrect(fx0, py + 3, fw, 4, 2, alpha(lc2, 0.55f));
-            set_additive(1);
-            blob(mxp, py + 5, 9, alpha(lc2, 0.30f));
-            set_additive(0);
-            rrect(mxp - 4, py + 1, 8, 8, 4, mix(lc2, C(1, 1, 1, 1), 0.35f));
-            text(px0, py - 2, 8, alpha(FAINT, 0.9f), "");
-        }
-        char nb[16]; snprintf(nb, sizeof nb, "%02d", c + 1);
-        text(cx + 8, hy + 2, 10, alpha(FAINT, 1.0f), nb);
-        {   /* Klick: stumm/laut, Strg+Klick: Solo */
-            unsigned long long mm = song_get_mute(), all = nch >= 64 ? ~0ULL : ((1ULL << nch) - 1);
-            if (clicked(cx + 2, hy, cw - 4, hh)) {
+            char nb[16]; snprintf(nb, sizeof nb, "%02d", c + 1);
+            text(bx0 + 6, by0 + 2, 10, alpha(FAINT, 1.0f), nb);
+            /* Klick: stumm/laut, Strg+Klick: Solo */
+            if (clicked(bx0, by0, bwd, bht)) {
                 if (click_ctrl) mm = (mm == (all & ~(1ULL << c))) ? 0 : (all & ~(1ULL << c));
                 else mm ^= 1ULL << c;
                 song_set_mute(mm);
             }
-            if ((song_get_mute() >> c) & 1) {
-                rrect(cx + 2, hy, cw - 4, hh, 7, C(0.02f, 0.03f, 0.055f, 0.72f));
-                text(cx + cw - 4 - text_width("MUTE", 10) - 6, hy + 2, 10, WARN, "MUTE");
+            if ((mm >> c) & 1) {
+                rrect(bx0, by0, bwd, bht, 7, C(0.02f, 0.03f, 0.055f, 0.72f));
+                text(bx0 + bwd - text_width("MUTE", 10) - 6, by0 + 2, 10, WARN, "MUTE");
             }
         }
     }
+    if (strip) {   /* Nummernleiste der sichtbaren Pattern-Spalten */
+        for (int i = 0; i < vis; i++) {
+            char nb[16]; snprintf(nb, sizeof nb, "%02d", pat_ch0 + i + 1);
+            float lx = ox + i * cw + 2;
+            rrect(lx, hy + hh + 6, cw - 4, 14, 5, alpha(VC[0], 0.10f));
+            text(lx + 6, hy + hh + 8, 10, alpha(DIM, 1.0f), nb);
+        }
+    }
     /* Zeilenbereich */
-    float ry0 = hy + hh + 8, ry1 = y + h - 10;
+    float ry0 = hy + hh + 8 + labh, ry1 = y + h - 10;
     int nrows_vis = (int)((ry1 - ry0) / rowh);
     float mid = (ry0 + ry1) / 2 - rowh / 2;
     /* Playhead */
@@ -573,11 +619,15 @@ static void draw_pattern(float x, float y, float w, float h) {
             int hi = cell.inst[0] != '.';
             text(cx, yy + 2, fs, alpha(hi ? mix(DIM, VC[0], 0.5f) : alpha(FAINT, 0.75f), fade), cell.inst);
             cx += wi + gap;
-            int hv = cell.vol[0] != '.';
-            text(cx, yy + 2, fs, alpha(hv ? FXC[cell.volclass < 6 ? cell.volclass : 5] : alpha(FAINT, 0.75f), fade), cell.vol);
-            cx += wv + gap;
-            int hf = cell.fx[0] != '.';
-            text(cx, yy + 2, fs, alpha(hf ? FXC[cell.fxclass < 6 ? cell.fxclass : 5] : alpha(FAINT, 0.75f), fade), cell.fx);
+            if (lvl < 1) {
+                int hv = cell.vol[0] != '.';
+                text(cx, yy + 2, fs, alpha(hv ? FXC[cell.volclass < 6 ? cell.volclass : 5] : alpha(FAINT, 0.75f), fade), cell.vol);
+                cx += wv + gap;
+            }
+            if (lvl < 2) {
+                int hf = cell.fx[0] != '.';
+                text(cx, yy + 2, fs, alpha(hf ? FXC[cell.fxclass < 6 ? cell.fxclass : 5] : alpha(FAINT, 0.75f), fade), cell.fx);
+            }
         }
     }
     /* Kanal-Scrollleiste, wenn nicht alle Kanaele passen */
@@ -617,6 +667,70 @@ static void draw_spectrum(float x, float y, float w, float h) {
         float xx = bx + bw * (float)(log(AX[i].f / 40.0) / log(17000.0 / 40.0));
         text(xx - text_width(AX[i].l, 11) / 2, y + h - 18, 11, alpha(DIM, 0.8f), AX[i].l);
     }
+}
+
+/* ================================================================== Orb: Punktkugel, vom Spektrum verformt */
+#define ORB_RINGS 78                    /* Breitenkreise */
+#define ORB_LON 132                     /* Punkte am Aequator */
+#define ORB_MAX 8000
+static float orb_u[ORB_MAX][3];         /* Punkte auf der Einheitskugel, in Breitenkreisen: ergibt feine Linienstrukturen */
+static int orb_n;
+static float orb_bs[NBANDS];            /* geglaettetes Spektrum */
+
+static void draw_orb(float x, float y, float w, float h) {
+    static int init;
+    static float t, spin;
+    if (!init) {
+        for (int j = 0; j < ORB_RINGS && orb_n < ORB_MAX; j++) {
+            float th = 3.14159265f * (j + 0.5f) / ORB_RINGS, yy = cosf(th), rr = sinf(th);
+            int cnt = (int)(ORB_LON * rr + 0.5f);
+            if (cnt < 6) cnt = 6;
+            float off = (j & 1) ? 0.5f : 0.0f;                 /* Kreise gegeneinander versetzt */
+            for (int k = 0; k < cnt && orb_n < ORB_MAX; k++) {
+                float ph = 6.2831853f * (k + off) / cnt;
+                orb_u[orb_n][0] = cosf(ph) * rr; orb_u[orb_n][1] = yy; orb_u[orb_n][2] = sinf(ph) * rr;
+                orb_n++;
+            }
+        }
+        init = 1;
+    }
+    float dt = (float)g_dt;
+    if (dt > 0.1f) dt = 0.1f;
+    float beat = g_paused ? 0.0f : g_beat;
+    if (!g_paused) { t += dt; spin += dt * (0.20f + 0.45f * beat); }
+    card(x, y, w, h, 0);
+    text(x + 18, y + 10, 12, DIM, "ORB");
+    for (int b = 0; b < NBANDS; b++) {      /* Nachbarbaender mischen: weichere Wellen */
+        float l = band[b > 0 ? b - 1 : b], r = band[b < NBANDS - 1 ? b + 1 : b];
+        float v = 0.5f * band[b] + 0.25f * (l + r);
+        orb_bs[b] += (v - orb_bs[b]) * (v > orb_bs[b] ? 0.7f : 0.25f);
+    }
+    float cx = x + w / 2, cy = y + h / 2 + 6, R = 0.26f * (w < h ? w : h);
+    float ca = cosf(spin), sa = sinf(spin), ct = cosf(0.42f), st = sinf(0.42f), fz = 8.0f * R;
+    set_additive(1);
+    blob(cx, cy, R * (0.55f + 0.12f * beat), alpha(VC[0], 0.05f + 0.08f * beat));
+    for (int i = 0; i < orb_n; i++) {
+        float ux = orb_u[i][0], uy = orb_u[i][1], uz = orb_u[i][2];
+        float lat = fabsf(uy), bf = lat * (NBANDS - 1);      /* Aequator = Bass, Pole = Hoehen */
+        int b0 = (int)bf;
+        if (b0 > NBANDS - 2) b0 = NBANDS - 2;
+        float fr = bf - b0, lon = atan2f(uz, ux);
+        float e = (orb_bs[b0] * (1 - fr) + orb_bs[b0 + 1] * fr) * (0.65f + 0.35f * sinf(lon * 3.0f + t * 1.3f + lat * 5.0f));
+        if (e > 1) e = 1;
+        float rad = R * (1.0f + 0.07f * beat + 0.55f * e);
+        float px = ux * rad, py = uy * rad, pz = uz * rad;
+        float rx = px * ca + pz * sa, rz = -px * sa + pz * ca;
+        float ry = py * ct - rz * st, rz2 = py * st + rz * ct;
+        float sc = fz / (fz + rz2), sx = cx + rx * sc, sy = cy + ry * sc;
+        float dn = 0.5f - 0.5f * rz2 / (1.6f * R);            /* 1 = vorne, 0 = hinten */
+        if (dn < 0) dn = 0;
+        if (dn > 1) dn = 1;
+        col c = e < 0.5f ? mix(VC[0], VC[1], e * 2.0f) : mix(VC[1], VC[2], (e - 0.5f) * 2.0f);
+        c = mix(c, C(1, 1, 1, 1), 0.18f * dn);
+        blob(sx, sy, 0.60f + 0.75f * dn + 0.70f * e, alpha(c, (0.13f + 0.62f * dn) * (0.42f + 0.95f * e)));
+    }
+    set_additive(0);
+    view_switch(x, y, w);
 }
 
 /* Pegel: zwei waagerechte Balken */
@@ -1134,7 +1248,8 @@ static void draw_ui(double t) {
     view_update();
     overview_update((float)g_dt);
     draw_overview(ax, cy0, aw, oh);
-    draw_pattern(ax, cy0 + oh + M, aw, avail - oh - M);
+    if (g_orb) draw_orb(ax, cy0 + oh + M, aw, avail - oh - M);
+    else draw_pattern(ax, cy0 + oh + M, aw, avail - oh - M);
     if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "IT"));
     float vuw = 300, spw = aw - vuw - M;
     draw_spectrum(ax, sy, spw, sh);
@@ -1166,7 +1281,7 @@ static void draw_ui(double t) {
             }
         }
         text(bx + 190, cy - 20, 12, FAINT, "Space pause  \xb7  Left/Right seek (subsong)  \xb7  Up/Down track  \xb7  Shift+arrows channels");
-        { char lb[96]; snprintf(lb, sizeof lb, "O Mod Archive  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms  \xb7  Esc quit", g_lag_ms); text(bx + 190, cy + 2, 12, FAINT, lb); }
+        { char lb[96]; snprintf(lb, sizeof lb, "O Mod Archive  \xb7  V orb  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms  \xb7  Esc quit", g_lag_ms); text(bx + 190, cy + 2, 12, FAINT, lb); }
         float vx = bx + bw - 250, vw = 200;
         text(vx - 44, cy - 8, 12, DIM, "VOL");
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
@@ -1267,6 +1382,7 @@ static void iter(void) {
                 if (ma_open) { ma_key(&e.key); break; }
                 switch (e.key.keysym.sym) {
                 case SDLK_o: ma_show(1); break;
+                case SDLK_v: g_orb = !g_orb; break;
                 case SDLK_ESCAPE: running = 0; break;
                 case SDLK_SPACE: g_paused = !g_paused; break;
                 case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) > 0) play_index_sub(cur, song_subsong(g_song) - 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
