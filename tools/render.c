@@ -11,7 +11,7 @@ int main(int argc, char **argv){
     FILE *f = fopen(argv[1], "rb"); if (!f) { perror(argv[1]); return 1; }
     fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
     uint8_t *b = malloc(n); if (fread(b, 1, n, f) != (size_t)n) return 1; fclose(f);
-    XSong s; int r = mtm_probe(b, n) ? xmtm_load(&s, b, n) : s669_probe(b, n) ? xs669_load(&s, b, n) : ult_probe(b, n) ? xult_load(&s, b, n) : ptm_probe(b, n) ? xptm_load(&s, b, n) : stm_probe(b, n) ? xstm_load(&s, b, n) : (n > 0x30 && !memcmp(b + 0x2C, "SCRM", 4)) ? xs3m_load(&s, b, n) : (n > 80 && !memcmp(b, "Extended Module: ", 17)) ? xxm_load(&s, b, n) : xmod_load(&s, b, n);
+    XSong s; int r = med_probe(b, n) ? xmed_load(&s, b, n) : mtm_probe(b, n) ? xmtm_load(&s, b, n) : s669_probe(b, n) ? xs669_load(&s, b, n) : ult_probe(b, n) ? xult_load(&s, b, n) : ptm_probe(b, n) ? xptm_load(&s, b, n) : stm_probe(b, n) ? xstm_load(&s, b, n) : (n > 0x30 && !memcmp(b + 0x2C, "SCRM", 4)) ? xs3m_load(&s, b, n) : (n > 80 && !memcmp(b, "Extended Module: ", 17)) ? xxm_load(&s, b, n) : xmod_load(&s, b, n);
     if (r) { fprintf(stderr, "load failed (%d)\n", r); return 1; }
     ngp_it_tables_init();
     if (getenv("XSOLO")) xplay_solo = atoi(getenv("XSOLO"));

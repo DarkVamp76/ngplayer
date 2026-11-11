@@ -5,7 +5,7 @@ SDL_CFLAGS ?= $(shell sdl2-config --cflags)
 SDL_LIBS   ?= $(shell sdl2-config --libs)
 CFLAGS  += -w -Isrc -Isrc/core -Ibuild $(SDL_CFLAGS)
 LIBS     = $(SDL_LIBS) -lm
-CORE     = $(addprefix src/core/,replay.c mod_load.c s3m_load.c stm_load.c ptm_load.c ult_load.c s669_load.c mtm_load.c xm_load.c xm_replay.c it_load.c it_replay.c it_unpack.c period.c dmf_load.c dmf_replay.c tfmx_load.c tfmx_replay.c)
+CORE     = $(addprefix src/core/,replay.c mod_load.c s3m_load.c stm_load.c ptm_load.c ult_load.c s669_load.c mtm_load.c med_load.c xm_load.c xm_replay.c it_load.c it_replay.c it_unpack.c period.c dmf_load.c dmf_replay.c tfmx_load.c tfmx_replay.c)
 SRC      = src/main.c src/song.c src/net.c $(CORE)
 PREFIX  ?= /usr/local
 
@@ -40,7 +40,7 @@ clean:
 # WebAssembly-Build (braucht Emscripten und das Kit-Repo 'ngweb' neben diesem Ordner)
 NGWEB ?= ../ngweb
 web: build/version.h
-	$(MAKE) -f $(NGWEB)/ngweb.mk APPDIR=$(CURDIR) NAME=ngPlayer WEB_EXPORTS=_main,_ng_web_add,_ng_web_ma_done,_ng_web_paste,_ng_web_parse_id,_ng_web_size HINT="Drop MOD, S3M, STM, PTM, ULT, 669, MTM, XM, IT, DMF or TFMX files here (TFMX: mdat.* and smpl.* together)" SRC="$(SRC)"
+	$(MAKE) -f $(NGWEB)/ngweb.mk APPDIR=$(CURDIR) NAME=ngPlayer WEB_EXPORTS=_main,_ng_web_add,_ng_web_ma_done,_ng_web_paste,_ng_web_parse_id,_ng_web_size HINT="Drop MOD, S3M, STM, PTM, ULT, 669, MTM, MED, XM, IT, DMF or TFMX files here (TFMX: mdat.* and smpl.* together)" SRC="$(SRC)"
 
 .PHONY: all install clean FORCE web
 

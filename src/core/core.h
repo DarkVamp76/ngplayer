@@ -61,6 +61,8 @@ int  ult_probe(const uint8_t *buf, size_t len);             /* 1 = UltraTracker 
 int  xult_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (ULT -> S3M replay) */
 int  mtm_probe(const uint8_t *buf, size_t len);             /* 1 = MultiTracker file */
 int  xmtm_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (MTM -> MOD replay) */
+int  med_probe(const uint8_t *buf, size_t len);             /* 1 = OctaMED MMD0-MMD3 file */
+int  xmed_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (MED -> MOD replay) */
 int  s669_probe(const uint8_t *buf, size_t len);            /* 1 = Composer 669 / UNIS 669 file */
 int  xs669_load(XSong *s, const uint8_t *buf, size_t len);  /* 0 = ok (669 -> S3M replay) */
 void xsong_free(XSong *s);
