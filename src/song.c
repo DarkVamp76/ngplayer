@@ -129,6 +129,14 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
             s->nch = s->xs.nch; s->nord = s->xs.nord;
             s->xxp = xxm_new(&s->xs, rate);
         }
+    } else if (psm_probe(b, (size_t)n)) {
+        r = xpsm_load(&s->xs, b, (size_t)n);
+        if (!r) {
+            s->kind = K_MOD; s->fmt = "PSM";
+            snprintf(s->title, sizeof s->title, "%s", s->xs.title);
+            s->nch = s->xs.nch; s->nord = s->xs.nord;
+            s->xp = xplay_new(&s->xs, rate);
+        }
     } else if (med_probe(b, (size_t)n)) {
         r = xmed_load(&s->xs, b, (size_t)n);
         if (!r) {
