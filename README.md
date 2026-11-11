@@ -20,6 +20,7 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | --- | --- |
 | MOD (ProTracker and compatibles) | supported |
 | S3M (Scream Tracker 3) | supported |
+| STM (Scream Tracker 2) | supported (4 channels, played through the S3M engine) |
 | XM (FastTracker 2) | supported |
 | IT (Impulse Tracker) | supported, still being completed |
 | DMF (X-Tracker, v8) | supported, some rare effects still missing |
@@ -27,7 +28,7 @@ level of quality on Linux, together with an interface that is a joy to look at.
 
 Looking for DMF files to try? The [Radical Rhythms Archive](https://www.radicalrhythms.org/) collects tracks by a German tracker group from the mid-1990s, including DMF modules.
 
-Planned: MTM, 669, MDL, DSM, FAR, STM, PTM, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
+Planned: MTM, 669, MDL, DSM, FAR, PTM, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
 
 ## Features
 
