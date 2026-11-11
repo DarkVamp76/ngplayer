@@ -25,6 +25,7 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | ULT (UltraTracker) | supported (1-32 channels, 8/16-bit samples, played through the S3M engine) |
 | 669 (Composer 669 / UNIS 669) | supported (8 channels, linear-frequency slides, played through the S3M engine) |
 | MTM (MultiTracker) | supported (1-32 channels, played through the MOD engine) |
+| PSM (Epic MegaGames, PSM16 "PSM\xFE") | supported (Epic Pinball, Silverball; played through the MOD engine) |
 | MED / OctaMED (MMD0-MMD3) | supported (sample instruments, up to 32 tracks, played through the MOD engine; synth/hybrid instruments are silent) |
 | XM (FastTracker 2) | supported |
 | IT (Impulse Tracker) | supported, still being completed |
