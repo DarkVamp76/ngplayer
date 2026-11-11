@@ -1500,6 +1500,9 @@ static double freq;
 
 #ifdef __EMSCRIPTEN__
 /* Wird von der Webseite (Drag & Drop / Dateiauswahl) aufgerufen, nachdem die Datei ins virtuelle Dateisystem geschrieben wurde. */
+/* Canvas-Groesse in Pixeln (Hochformat auf dem Handy, siehe ngweb/shell.html) */
+EMSCRIPTEN_KEEPALIVE void ng_web_size(int w, int h) { if (win && w > 0 && h > 0) SDL_SetWindowSize(win, w, h); }
+
 EMSCRIPTEN_KEEPALIVE void ng_web_add(const char *path) {
     int was = npl;
     add_path(path, 0);
@@ -1576,7 +1579,8 @@ static void iter(void) {
         int ww, wh, dw, dh;
         SDL_GetWindowSize(win, &ww, &wh);
         SDL_GL_GetDrawableSize(win, &dw, &dh);
-        g_portrait = dw * 10 < dh * 8;      /* Hochformat: schmales, gestapeltes Layout (virtuell 440 breit) */
+        /* Hochformat (Seitenverhaeltnis < 0,8) oder zu klein fuer das Querformat: schmales, gestapeltes Layout (virtuell 440 breit) */
+        g_portrait = dw * 10 < dh * 8 || dw < 640 || dh < 430;
         if (g_portrait) view_scale = (float)dw / 440.0f;
         else {
             view_scale = (float)dw / 1280.0f;
@@ -1666,8 +1670,11 @@ int main(int argc, char **argv) {
     win = SDL_CreateWindow("ngPlayer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 860,
                                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!win) { fprintf(stderr, "Fenster: %s\n", SDL_GetError()); return 1; }
-    SDL_SetWindowMinimumSize(win, 900, 600);
+    SDL_SetWindowMinimumSize(win, 360, 480);      /* schmal erlaubt: dann greift das Hochformat-Layout */
     { SDL_Surface *ic = make_icon(64); if (ic) { SDL_SetWindowIcon(win, ic); SDL_FreeSurface(ic); } }
+#ifdef __EMSCRIPTEN__
+    EM_ASM({ if (window.ngFit) window.ngFit(); });
+#endif
     ctx = SDL_GL_CreateContext(win);
     if (!ctx) { fprintf(stderr, "OpenGL-3.3-Kontext: %s\n", SDL_GetError()); return 1; }
     if (gl_load()) return 1;
