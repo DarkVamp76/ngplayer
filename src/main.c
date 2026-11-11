@@ -112,6 +112,7 @@ typedef struct { char *path; char *key; char label[128]; int ma_id; } entry;   /
 static entry *pl;
 static int npl, cur = -1;
 static float list_scroll;
+static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
 static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
 static int list_follow;
 
@@ -657,8 +658,8 @@ static void draw_spectrum(float x, float y, float w, float h) {
         }
         if (bandpk[b] > 0.02f) rect(xx, base - bandpk[b] * bh - 3, barw, 2, alpha(top, 0.95f));
     }
-    set_additive(1);
-    for (int b = 0; b < NBANDS; b += 2) {
+    if (!g_mobile) set_additive(1);
+    for (int b = 0; !g_mobile && b < NBANDS; b += 2) {
         float u = (float)b / (NBANDS - 1);
         col lo = u < 0.5f ? mix(VC[0], VC[1], u * 2) : mix(VC[1], VC[2], (u - 0.5f) * 2);
         blob(bx + (b + 0.5f) * step, base - band[b] * bh, 12 + band[b] * 8, alpha(lo, 0.10f * band[b]));
@@ -711,7 +712,8 @@ static void draw_orb(float x, float y, float w, float h) {
     float ca = cosf(spin), sa = sinf(spin), ct = cosf(0.42f), st = sinf(0.42f), fz = 8.0f * R;
     set_additive(1);
     blob(cx, cy, R * (0.55f + 0.12f * beat), alpha(VC[0], 0.05f + 0.08f * beat));
-    for (int i = 0; i < orb_n; i++) {
+    int ostep = g_mobile ? 2 : 1;              /* Handy: jeder zweite Punkt, dafuer etwas groesser */
+    for (int i = 0; i < orb_n; i += ostep) {
         float ux = orb_u[i][0], uy = orb_u[i][1], uz = orb_u[i][2];
         float lat = fabsf(uy), bf = lat * (NBANDS - 1);      /* Aequator = Bass, Pole = Hoehen */
         int b0 = (int)bf;
@@ -729,7 +731,7 @@ static void draw_orb(float x, float y, float w, float h) {
         if (dn > 1) dn = 1;
         col c = e < 0.5f ? mix(VC[0], VC[1], e * 2.0f) : mix(VC[1], VC[2], (e - 0.5f) * 2.0f);
         c = mix(c, C(1, 1, 1, 1), 0.18f * dn);
-        blob(sx, sy, 0.60f + 0.75f * dn + 0.70f * e, alpha(c, (0.13f + 0.62f * dn) * (0.42f + 0.95f * e)));
+        blob(sx, sy, (0.60f + 0.75f * dn + 0.70f * e) * (g_mobile ? 1.3f : 1.0f), alpha(c, (0.13f + 0.62f * dn) * (0.42f + 0.95f * e)));
     }
     set_additive(0);
     view_switch(x, y, w);
@@ -1137,11 +1139,13 @@ static void draw_ui(double t) {
     float act = (g_song && !g_paused && !g_ended) ? 1.0f : 0.0f;
     glow_l += (act * (0.3f + vu[0]) - glow_l) * 0.12f;
     glow_r += (act * (0.3f + vu[1]) - glow_r) * 0.12f;
-    set_additive(1);
-    blob(W * 0.25f, -30, 380, alpha(VC[0], 0.06f + 0.05f * glow_l));
-    blob(W * 0.60f, -60, 420, alpha(VC[1], 0.05f + 0.05f * glow_r));
-    blob(W * 0.92f, H * 0.9f, 380, alpha(VC[2], 0.04f + 0.03f * (glow_l + glow_r)));
-    set_additive(0);
+    if (!g_mobile) {                       /* grosse Leuchtflecken kosten viel Fuellrate: auf dem Handy weglassen */
+        set_additive(1);
+        blob(W * 0.25f, -30, 380, alpha(VC[0], 0.06f + 0.05f * glow_l));
+        blob(W * 0.60f, -60, 420, alpha(VC[1], 0.05f + 0.05f * glow_r));
+        blob(W * 0.92f, H * 0.9f, 380, alpha(VC[2], 0.04f + 0.03f * (glow_l + glow_r)));
+        set_additive(0);
+    }
 
     if (g_portrait) { draw_ui_portrait(W, H); return; }
     const float M = 16, SB = 288, BOT = 64;
@@ -1718,6 +1722,9 @@ int main(int argc, char **argv) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+#ifdef __EMSCRIPTEN__
+    g_mobile = EM_ASM_INT({ return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 1 : 0; });
+#endif
     SDL_AudioSpec want, have;
     SDL_zero(want);
     want.freq = g_rate; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = AUDIO_SAMPLES; want.callback = audio_cb;
