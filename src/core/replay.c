@@ -46,6 +46,8 @@ typedef struct {
     int loop_row, loop_cnt;
     int is16, m168, mA4, mA8;
     int sd_on, sd_tick; XCell sd_cell;   /* S3M SDx: verzoegerte Zeile */
+    const XSyn *sy; int sv_pos, sv_cnt, sv_spd, sv_wait, sv_slide, sv_env, sv_envpos, sv_envloop, sv_halt, sv_vol;  /* MED synth volume table */
+    int sw_pos, sw_cnt, sw_spd, sw_wait, sw_halt, sw_wave, vib_d, vib_s, vib_ph;  /* MED synth waveform table + vibrato */
 } Ch;
 
 typedef struct { int on; int is16; double pos, step; const int8_t *data; uint32_t len, ls, le; int loop; int vol, pan; double volf; int hold; } Voice;
@@ -69,6 +71,70 @@ struct XPlayer {
 
 static int clampi(int v, int lo, int hi){ return v < lo ? lo : v > hi ? hi : v; }
 
+/* MED synth volume table: one command per step, a step every sv_spd ticks. 00-40 set, F0 speed, F1 wait, F2/F3 slide down/up,
+ * F4/F5 envelope (waveform xx as volume curve, once / looped), F6 stop envelope, FE jump, FF halt. */
+static void synth_init(Ch *c, const XSyn *sy){
+    c->sy = sy; c->sv_pos = 0; c->sv_cnt = 0; c->sv_spd = sy->vspd > 0 ? sy->vspd : 1; c->sv_wait = 0; c->sv_slide = 0;
+    c->sv_env = -1; c->sv_envpos = 0; c->sv_envloop = 0; c->sv_halt = 0; c->sv_vol = 64;
+    c->sw_pos = 0; c->sw_cnt = 0; c->sw_spd = sy->wspd > 0 ? sy->wspd : 1; c->sw_wait = 0; c->sw_halt = 0; c->sw_wave = -1; c->vib_d = 0; c->vib_s = 0; c->vib_ph = 0;
+}
+/* waveform table: 00-7F select waveform, F0 speed, F1 wait, F4 vibrato depth, F5 vibrato speed, FE jump, FF halt (F2,F3,F6,F7 skipped) */
+static void synth_wave_step(Ch *c){
+    const XSyn *sy = c->sy;
+    if (c->sw_cnt > 0) { c->sw_cnt--; return; }
+    c->sw_cnt = c->sw_spd - 1;
+    if (c->sw_wait > 0) { c->sw_wait--; return; }
+    for (int guard = 0; guard < 16 && !c->sw_halt && c->sw_pos < sy->wn && c->sw_pos < 128; guard++) {
+        int cmd = sy->wtab[c->sw_pos++], arg = c->sw_pos < 128 ? sy->wtab[c->sw_pos] : 0;
+        if (cmd < 0x80) {
+            if (cmd < sy->nwf && sy->wf[cmd] && cmd != c->sw_wave) {
+                c->sw_wave = cmd; c->data = sy->wf[cmd]; c->len = c->le = (uint32_t)sy->wl[cmd]; c->ls = 0; c->loop = 1; c->is16 = 0; c->swap = 1;
+            }
+            return;
+        }
+        switch (cmd) {
+        case 0xF0: c->sw_spd = arg > 0 ? arg : 1; c->sw_cnt = c->sw_spd - 1; c->sw_pos++; break;
+        case 0xF1: c->sw_wait = arg; c->sw_pos++; return;
+        case 0xF4: c->vib_d = arg; c->sw_pos++; break;
+        case 0xF5: c->vib_s = arg; c->sw_pos++; break;
+        case 0xFE: c->sw_pos = arg; break;
+        case 0xFF: c->sw_halt = 1; c->sw_pos--; return;
+        default: c->sw_pos++; break;
+        }
+    }
+}
+
+static void synth_step(Ch *c){
+    const XSyn *sy = c->sy; if (!sy) return;
+    synth_wave_step(c);
+    c->vib_ph = (c->vib_ph + c->vib_s) & 0xFF;
+    if (c->sv_cnt > 0) { c->sv_cnt--; return; }
+    c->sv_cnt = c->sv_spd - 1;
+    c->sv_vol += c->sv_slide;
+    if (c->sv_wait > 0) c->sv_wait--;
+    else if (!c->sv_halt && c->sv_pos < sy->vn && c->sv_pos < 128) {
+        int cmd = sy->vtab[c->sv_pos++], arg = c->sv_pos < 128 ? sy->vtab[c->sv_pos] : 0;
+        if (cmd <= 0x40) { c->sv_vol = cmd; c->sv_slide = 0; c->sv_env = -1; }
+        else switch (cmd) {
+        case 0xF0: c->sv_spd = arg > 0 ? arg : 1; c->sv_pos++; break;
+        case 0xF1: c->sv_wait = arg; c->sv_pos++; break;
+        case 0xF2: c->sv_slide = -arg; c->sv_pos++; break;
+        case 0xF3: c->sv_slide = arg; c->sv_pos++; break;
+        case 0xF4: case 0xF5: c->sv_env = arg < sy->nwf ? arg : -1; c->sv_envpos = 0; c->sv_envloop = cmd == 0xF5; c->sv_slide = 0; c->sv_pos++; break;
+        case 0xF6: c->sv_env = -1; c->sv_pos++; break;
+        case 0xFE: c->sv_pos = arg; break;
+        case 0xFF: c->sv_halt = 1; c->sv_pos--; break;
+        default: c->sv_pos++; break;
+        }
+    }
+    if (c->sv_env >= 0) {
+        int len = sy->wl[c->sv_env];
+        if (c->sv_envpos >= len) { if (c->sv_envloop) c->sv_envpos = 0; else c->sv_envpos = len - 1; }
+        if (len > 0) { int b = sy->wf[c->sv_env][c->sv_envpos++]; c->sv_vol = b < 0 ? 0 : b >> 1; }
+    }
+    c->sv_vol = clampi(c->sv_vol, 0, 64);
+}
+
 static void trigger_note(XPlayer *p, int chn, Ch *c, const XCell *x){
     const XSong *s = p->s; int note;
     if (x->note == 0x7f && c->inst) { p->v[chn].on = 0; c->vD8 = 0; c->vE8 = 0; c->trig = 0; return; }
@@ -86,6 +152,7 @@ static void trigger_note(XPlayer *p, int chn, Ch *c, const XCell *x){
           c->vE8 = c->v44; return; } }
     const XSmp *m = &s->smp[c->inst];
     c->smp = c->inst;
+    if (m->syn) { if (!(x->eff == 3 || x->eff == 5) || !c->sy) synth_init(c, m->syn); } else c->sy = NULL;
     if (inst_ok) {
         { const XSmp *mv = keepold ? &s->smp[x->inst] : m; if (mv->vol <= s->maxvol) c->vD8 = c->v44 = mv->vol; }
         c->c2spd = m->c2spd;
@@ -309,7 +376,7 @@ static void voice_update(XPlayer *p, int chn){
         if (v->hold && v->pos < v->len) { v->on = 1; v->hold = 0; }
     }
     { static int fv=-1; if(fv<0){const char*e=getenv("XFV"); fv=e?atoi(e):2;}
-      double ex = (double)c->v44 * p->gvol / p->s->maxvol; if (ex > 255) ex = 255; if (ex < 0) ex = 0;
+      double ex = (double)c->v44 * p->gvol / p->s->maxvol; if (c->sy) ex = ex * c->sv_vol / 64.0; if (ex > 255) ex = 255; if (ex < 0) ex = 0;
       int old = clampi(final_vol(c->v44, p->s->maxvol, p->gvol), 0, 255);
       if (fv == 1) { v->vol = (int)(ex + 0.5); v->volf = v->vol; }
       else if (fv == 2) { v->volf = ex; v->vol = (int)(ex + 0.5); }
@@ -317,6 +384,7 @@ static void voice_update(XPlayer *p, int chn){
       else { v->vol = old; v->volf = old; } }
     v->pan = clampi(c->pan5c, 0, 255);
     v->step = c->p74 > 0 ? hzq(14318184.0 * PK / c->p74) / p->rate : 0.0;
+    if (c->sy && c->vib_d && c->vib_s) v->step *= pow(2.0, sin(c->vib_ph * 6.283185307179586 / 256.0) * c->vib_d / 384.0);   /* MED synth vibrato (depth scale estimated) */
 }
 
 XPlayer *xplay_new(const XSong *s, int rate){
@@ -382,7 +450,7 @@ static void do_tick(XPlayer *p){
             trigger_note(p, i, c, &c->sd_cell);
             if (c->sd_cell.vol1 && c->sd_cell.vol1 - 1 <= s->maxvol) c->vD8 = c->v44 = c->vE8 = c->sd_cell.vol1 - 1;
         }
-        do_effect(p, i, c, p->tick); voice_update(p, i);
+        do_effect(p, i, c, p->tick); synth_step(c); voice_update(p, i);
     }
 }
 

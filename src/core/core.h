@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
+typedef struct XSyn {              /* MED synth instrument: volume table + waveforms (used as envelopes) */
+    uint8_t vtab[128], wtab[128]; int vn, vspd, wn, wspd;
+    int nwf; int8_t *wf[64]; int wl[64];
+} XSyn;
 typedef struct { uint8_t note, inst, eff, par, vol1; } XCell;   /* vol1: 0 = keine Volumenspalte, sonst Wert+1 */
 typedef struct {
     uint32_t len, ls, le;      /* in Samples */
@@ -13,6 +17,7 @@ typedef struct {
     int8_t *data;
     int pingpong;              /* XM: Loop-Typ 2 */
     int finetune, relnote, pan;/* XM: -128..127, -96..95, 0..255 */
+    XSyn *syn;                 /* MED synth: volume table (optional) */
 } XSmp;
 /* XM-Huellkurve */
 typedef struct {
