@@ -56,9 +56,9 @@ static void far_fx(XCell *x, int e, int p, FarSt *st, int *pv){
         else if (p == 4) st->newmode = 0;
         else if (p == 5) st->newmode = 1;
         break;
-    case 1: x->eff = 0x01; x->par = (uint8_t)(p * 4); break;              /* pitch up */
-    case 2: x->eff = 0x02; x->par = (uint8_t)(p * 4); break;              /* pitch down */
-    case 3: x->eff = 0x03; x->par = (uint8_t)(p ? 96 / p : 96); break;    /* tone portamento: p rows */
+    case 1: x->eff = 0x0E; x->par = (uint8_t)(0x10 | p); break;           /* pitch up: once per row (fine slide) */
+    case 2: x->eff = 0x0E; x->par = (uint8_t)(0x20 | p); break;           /* pitch down: once per row */
+    case 3: x->eff = 0x03; x->par = (uint8_t)(p < 2 ? 1 : (p + 1) / 2); break;         /* tone portamento: slow glide (tuned by ear) */
     case 4: if (x->note) { int iv = st->spd / (p ? p : 1); if (iv < 1) iv = 1; x->eff = 0x0E; x->par = (uint8_t)(0x90 | (iv > 15 ? 15 : iv)); } break;
     case 5: st->depth = p; break;
     case 6: case 9: {
