@@ -26,6 +26,7 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | 669 (Composer 669 / UNIS 669) | supported (8 channels, linear-frequency slides, played through the S3M engine) |
 | MTM (MultiTracker) | supported (1-32 channels, played through the MOD engine) |
 | PSM (Epic MegaGames, PSM16 "PSM\xFE") | supported (Epic Pinball, Silverball; played through the MOD engine) |
+| FAR (Farandole Composer) | supported (16 channels, 8/16-bit samples, played through the MOD engine; fine tempo D?/E?, slide-to-volume A? and note offset C? are not implemented) |
 | MED / OctaMED (MMD0-MMD3) | supported (sample instruments, up to 32 tracks, played through the MOD engine; synth/hybrid instruments are silent) |
 | XM (FastTracker 2) | supported |
 | IT (Impulse Tracker) | supported, still being completed |
@@ -34,7 +35,7 @@ level of quality on Linux, together with an interface that is a joy to look at.
 
 Looking for DMF files to try? The [Radical Rhythms Archive](https://www.radicalrhythms.org/) collects tracks by a German tracker group from the mid-1990s, including DMF modules.
 
-Planned: MDL, DSM, FAR, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
+Planned: MDL, DSM, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
 
 ## Features
 

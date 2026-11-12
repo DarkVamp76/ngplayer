@@ -35,6 +35,7 @@ static void conv_fx(XCell *x, int e, int p, int hexvol, int bpm, int rpb, const 
     case 0x01: case 0x02: case 0x03: case 0x04: case 0x05: case 0x06: case 0x07: case 0x0A:
         x->eff = (uint8_t)e; x->par = (uint8_t)p; break;
     case 0x09: if (p >= 1 && p <= 0x20) { x->eff = 0x0F; x->par = (uint8_t)p; } break;
+    case 0x0D: x->eff = 0x0A; x->par = (uint8_t)p; break;                              /* MED volume slide (same as 0A) */
     case 0x0B: x->eff = 0x0B; x->par = (uint8_t)(p < nmap ? map[p].first : p); break;
     case 0x0C: { int v = hexvol ? p : (p >> 4) * 10 + (p & 15); if (v > 64) v = 64; x->eff = 0x0C; x->par = (uint8_t)v; } break;
     case 0x0F:
@@ -178,6 +179,7 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
         if (eo && extsz >= 4 && (size_t)eo + (size_t)extn * extsz <= n) ext = b + eo;
         uint32_t no = be32(b + exo + 44), nl = be32(b + exo + 48);
         if (no && nl && no + nl <= n) { size_t l = nl > 20 ? 20 : nl; memcpy(s->title, b + no, l); s->title[l] = 0; }
+        if (!strcmp(s->title, "<unnamed>")) s->title[0] = 0;   /* OctaMED's default name: no real title */
     }
     s->nsmp = (int)nsmp;
     for (unsigned i = 0; i < nsmp; i++) {
