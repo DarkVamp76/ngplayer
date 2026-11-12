@@ -62,9 +62,9 @@ static void far_fx(XCell *x, int e, int p, FarSt *st, int *pv){
     case 4: if (x->note) { int iv = st->spd / (p ? p : 1); if (iv < 1) iv = 1; x->eff = 0x0E; x->par = (uint8_t)(0x90 | (iv > 15 ? 15 : iv)); } break;
     case 5: st->depth = p; break;
     case 6: case 9: {
-        int rate = p * 3 > 15 ? 15 : p * 3;
+        int rate = p > 15 ? 15 : p, dep = st->depth ? 1 : 0;        /* gentle vibrato, tuned by ear */
         if (!p) { *pv = 0; break; }
-        x->eff = 0x04; x->par = (uint8_t)((rate << 4) | (st->depth > 15 ? 15 : st->depth));
+        x->eff = 0x04; x->par = (uint8_t)((rate << 4) | dep);
         if (e == 9) *pv = x->par; else *pv = 0;
         break; }
     case 7: x->eff = 0x0E; x->par = (uint8_t)(0xA0 | (p * 4 > 15 ? 15 : p * 4)); break;   /* fine volume up */
