@@ -137,6 +137,14 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
             s->nch = s->xs.nch; s->nord = s->xs.nord;
             s->xp = xplay_new(&s->xs, rate);
         }
+    } else if (far_probe(b, (size_t)n)) {
+        r = xfar_load(&s->xs, b, (size_t)n);
+        if (!r) {
+            s->kind = K_MOD; s->fmt = "FAR";
+            snprintf(s->title, sizeof s->title, "%s", s->xs.title);
+            s->nch = s->xs.nch; s->nord = s->xs.nord;
+            s->xp = xplay_new(&s->xs, rate);
+        }
     } else if (med_probe(b, (size_t)n)) {
         r = xmed_load(&s->xs, b, (size_t)n);
         if (!r) {
