@@ -92,9 +92,8 @@ static void mdl_fx(XCell *x, int e, int p, int col2){
         case 0x0D: eff = 0x0D; par = (uint8_t)p; break;
         case 0x0E:
             switch (p >> 4) {
-            case 1: case 2: case 4: case 5: case 7: case 0x0A: case 0x0B: case 0x0C: case 0x0D: case 0x0E:
+            case 1: case 2: case 4: case 5: case 6: case 7: case 0x0A: case 0x0B: case 0x0C: case 0x0D: case 0x0E:
                 eff = 0x0E; par = (uint8_t)p; break;      /* ProTracker-style E commands the XM engine knows */
-            case 6: break;                                /* pattern loop: libopenmpt does not loop these consistently, so they are ignored */
             case 9: if (p & 15) { eff = 0x1B; par = (uint8_t)(p & 15); } break;
             default: break;
             }
@@ -295,7 +294,9 @@ int xmdl_load(XSong *s, const uint8_t *b, size_t n){
                 else if (note >= 1 + MDL_NOTE_OFF) { int xn = note - MDL_NOTE_OFF; x->note = (uint8_t)(xn > 96 ? 96 : xn); }
                 if (q[1] && q[1] <= ninst) x->inst = q[1];
                 if (q[2]) { int v = (q[2] * 64 + 127) / 255; x->vol1 = (uint8_t)(0x10 + (v > 64 ? 64 : v)); }
-                mdl_fx(x, q[3] & 15, q[4], 0);
+                { int e1 = q[3] & 15, e2 = q[3] >> 4;
+                  if (!(e1 == 14 && (q[4] >> 4) == 6 && e2 >= 1 && e2 <= 5))   /* like libopenmpt: E6x is dropped when column 2 holds a slide/retrigger/tremolo/tremor */
+                      mdl_fx(x, e1, q[4], 0); }
                 mdl_fx(x, q[3] >> 4, q[5], 1);
             }
         }
