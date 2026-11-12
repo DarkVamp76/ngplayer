@@ -914,6 +914,68 @@ static void draw_logo(float x, float y, float s) {
         rrect(x + LG_BAR[i][0] * k, y + LG_BAR[i][1] * k, 14 * k, LG_BAR[i][2] * k, 5 * k, (i & 1) ? pk : cy);
     rrect(x + 26 * k, y + 140 * k, 124 * k, 3 * k, 1.5f * k, alpha(cy, 0.35f));
 }
+#ifdef __EMSCRIPTEN__
+#define TAGLINE "Module player for the Web"
+#else
+#define TAGLINE "Module player for Linux"
+#endif
+/* ---------------------------------------------------------------- Wachssiegel (Meilenstein, oben rechts in der Logo-Box) */
+#define SEAL_TEXT "1.0"          /* Text im Siegel: hier aendern */
+#define SEAL_ROT 0.7854f         /* Drehung im Uhrzeigersinn (45 Grad) */
+static void seal_lobes(float cx, float cy, float r, col c) {
+    static const float lr[12] = { 1.00f, 0.93f, 1.05f, 0.96f, 1.02f, 0.92f, 1.04f, 0.97f, 1.01f, 0.94f, 1.06f, 0.95f };
+    rrect(cx - r * 0.84f, cy - r * 0.84f, r * 1.68f, r * 1.68f, r * 0.84f, c);
+    for (int i = 0; i < 12; i++) {
+        float a = i * 0.5236f + 0.3f + SEAL_ROT, d = r * 0.78f * lr[i], lrad = r * 0.24f * lr[(i + 5) % 12];
+        rrect(cx + cosf(a) * d - lrad, cy + sinf(a) * d - lrad, lrad * 2, lrad * 2, lrad, c);
+    }
+}
+static void draw_seal(float cx, float cy, float r, const char *label) {
+    static float age;                                                              /* Sekunden seit Programmstart */
+    age += (float)g_dt;
+    const float T1 = 0.30f;                                                        /* Dauer des Falls bis zum Aufschlag */
+    float since = age - T1, sc, al, heat;
+    if (age < T1) { float u = age / T1; sc = 1.0f + 1.0f * (1 - u) * (1 - u); al = u < 0.4f ? u / 0.4f : 1.0f; heat = 1.0f; }
+    else { sc = 1.0f - 0.10f * expf(-since * 9.0f) * sinf(since * 18.0f); al = 1.0f; heat = expf(-since * 1.1f); }
+    float beat = g_paused ? 0.0f : g_beat;
+    float gl = heat + 0.10f + 0.08f * (0.5f + 0.5f * sinf(age * 2.1f)) + 0.12f * beat;   /* Restglut + Puls im Takt */
+    col dk = mix(C(0.34f, 0.03f, 0.05f, 1), C(0.80f, 0.20f, 0.05f, 1), heat * 0.6f);
+    col md = mix(C(0.68f, 0.07f, 0.09f, 1), C(1.00f, 0.45f, 0.10f, 1), heat * 0.85f);
+    col lt = mix(C(0.90f, 0.26f, 0.22f, 1), C(1.00f, 0.88f, 0.45f, 1), heat);
+    r *= sc;
+    set_additive(1);                                                               /* Glut hinter dem Siegel */
+    blob(cx, cy, r * (0.85f + 0.35f * heat), alpha(C(1.0f, 0.32f, 0.06f, 1), 0.50f * gl * al));
+    set_additive(0);
+    blob(cx + 1.5f, cy + 3.0f, r * 0.55f, C(0, 0, 0, 0.55f * al));                 /* Schatten */
+    seal_lobes(cx + 0.8f, cy + 1.0f, r, alpha(dk, al));                            /* dunkler Rand unten rechts */
+    seal_lobes(cx - 0.4f, cy - 0.5f, r, alpha(md, al));                            /* Wachskoerper */
+    float ri = r * 0.70f;                                                          /* eingedrueckte Mulde */
+    rrect(cx - ri + 0.9f, cy - ri + 0.9f, ri * 2, ri * 2, ri, alpha(lt, 0.75f * al));
+    rrect(cx - ri - 0.9f, cy - ri - 0.9f, ri * 2, ri * 2, ri, alpha(dk, al));
+    rrect(cx - ri + 0.9f, cy - ri + 0.9f, (ri - 0.9f) * 2, (ri - 0.9f) * 2, ri - 0.9f, alpha(mix(md, dk, 0.12f), al));
+    float ts = r * 0.80f, tx = cx - text_width(label, ts) / 2, ty = cy - ts * 0.44f;
+    text_rot(cx + 0.8f, cy + 0.8f, SEAL_ROT, tx + 0.8f, ty + 0.8f, ts, alpha(dk, al), label);              /* erhabene Schrift, gedreht */
+    text_rot(cx - 0.5f, cy - 0.5f, SEAL_ROT, tx - 0.5f, ty - 0.5f, ts, alpha(lt, 0.85f * al), label);
+    text_rot(cx, cy, SEAL_ROT, tx, ty, ts, alpha(mix(md, lt, 0.35f), al), label);
+    set_additive(1);
+    blob(cx - r * 0.35f, cy - r * 0.42f, r * 0.30f, alpha(C(1, 0.9f, 0.8f, 1), 0.30f * al));   /* Glanz */
+    blob(cx, cy, r * 0.5f, alpha(C(1.0f, 0.55f, 0.15f, 1), 0.40f * heat * al));                /* heisses Wachs */
+    float gs = sinf(age * 1.3f);                                                   /* Glanzpunkt wandert am Rand entlang */
+    if (gs > 0) { float g6 = gs * gs * gs * gs * gs * gs, ga = age * 0.9f; blob(cx + cosf(ga) * r * 0.8f, cy + sinf(ga) * r * 0.8f, r * 0.16f, alpha(C(1, 0.85f, 0.7f, 1), 0.55f * g6)); }
+    if (since > 0 && since < 0.55f) {                                              /* Druckwelle beim Aufschlag */
+        float u = since / 0.55f, rr = r * (1.0f + 1.3f * u), pts[2 * 25];
+        for (int i = 0; i < 25; i++) { float an = i * 6.2832f / 24; pts[2 * i] = cx + cosf(an) * rr; pts[2 * i + 1] = cy + sinf(an) * rr; }
+        polyline(pts, 25, 2.0f, 3.0f, alpha(C(1.0f, 0.55f, 0.2f, 1), 0.55f * (1 - u) * (1 - u)));
+    }
+    if (since > 0 && since < 1.0f) {                                               /* Funken */
+        for (int i = 0; i < 12; i++) {
+            float an = i * 0.5236f + 0.4f + 0.3f * sinf(i * 2.7f), sp = r * (1.8f + (i % 4) * 0.55f);
+            float dd = sp * 0.35f * (1.0f - expf(-5.0f * since)), fa = 1.0f - since;
+            blob(cx + cosf(an) * dd, cy + sinf(an) * dd + 14.0f * since * since, 1.3f + 0.4f * (i % 3), alpha(C(1.0f, 0.7f, 0.25f, 1), 0.9f * fa * fa));
+        }
+    }
+    set_additive(0);
+}
 /* ---------------------------------------------------------------- Soundchips (Kopfzeile)
    Gezeichnet mit den vorhandenen Primitiven (Koordinaten im 320x200-Raster, Chip um 160,100). */
 #define BEATC C(0.133f, 0.827f, 0.933f, 1)      /* Akzentfarbe des Beat-Pulses (Cyan wie das Logo) */
@@ -1266,7 +1328,8 @@ static void draw_ui(double t) {
     logo_waves(ax + haw + M, hy, bw, hh);
     draw_logo(ax + haw + M + 18, hy + 19, 56);
     text(ax + haw + M + 88, hy + 22, 28, TXT, "ngPlayer");
-    text(ax + haw + M + 89, hy + 56, 12, DIM, "Module player for Linux");
+    text(ax + haw + M + 89, hy + 56, 12, DIM, TAGLINE);
+    draw_seal(ax + haw + M + bw - 12, hy + 14, 24, SEAL_TEXT);
     {
         char title[160], sub[200];
         if (g_song) {
@@ -1275,7 +1338,7 @@ static void draw_ui(double t) {
             snprintf(sub, sizeof sub, "%s", cur >= 0 ? pl[cur].label : "");
         } else {
             snprintf(title, sizeof title, "ngPlayer");
-            snprintf(sub, sizeof sub, "Module player for Linux");
+            snprintf(sub, sizeof sub, TAGLINE);
         }
         float chh = hh - 14, chw = chips_width(chh);      /* Soundchip-Grafik zwischen Titel und Zeit */
         float tmax = haw - 200 - (chw > 0 ? chw + 20 : 0);
@@ -1446,7 +1509,7 @@ static void draw_ui_portrait(float W, float H) {
             snprintf(sub, sizeof sub, "%s", cur >= 0 ? pl[cur].label : "");
         } else {
             snprintf(title, sizeof title, "ngPlayer");
-            snprintf(sub, sizeof sub, "Module player for Linux");
+            snprintf(sub, sizeof sub, TAGLINE);
         }
         float tmax = aw - 32 - 96;
         float tsize = 22;
