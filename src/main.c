@@ -120,7 +120,7 @@ static int is_mod_name(const char *n) {
     if (tfmx_is_song_name(n)) return 1;          /* mdat.NAME / NAME.tfx; smpl.* und .sam sind nur Sampledaten */
     const char *d = strrchr(n, '.');
     if (!d) return 0;
-    static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".med", ".psm", ".far", ".mmd0", ".mmd1", ".mmd2", ".mmd3", ".xm", ".it", ".dmf", NULL };
+    static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".med", ".psm", ".far", ".mdl", ".mmd0", ".mmd1", ".mmd2", ".mmd3", ".xm", ".it", ".dmf", NULL };
     for (int i = 0; ext[i]; i++) if (!strcasecmp(d, ext[i])) return 1;
     return 0;
 }
@@ -1023,12 +1023,12 @@ static void seek_order(int target) {
     Song *s = song_open_sub(pl[cur].path, g_rate, g_open_sub, err, sizeof err);
     if (!s) return;
     static int16_t tmp[128 * 2];
-    long long cap = (long long)g_rate * 3600;
+    long long cap = (long long)g_rate * 3600; unsigned long long adv = 0;
     for (SongPos p; ; ) {
         song_pos(s, &p);
         if (p.order >= target) break;
         int got = song_render(s, tmp, 128);
-        cap -= 128;
+        cap -= 128; adv += (unsigned)got;
         if (!got || cap < 0) { song_close(s); return; }   /* Songende/Schleife: Abbruch, alter Song laeuft weiter */
     }
     memset(g_scope, 0, sizeof g_scope);
@@ -1037,6 +1037,7 @@ static void seek_order(int target) {
     Song *old = g_song;
     g_song = s;
     g_rendered = 0; g_lastord = g_lastrow = -1; g_resync = 1;
+    g_frames = adv;                                   /* elapsed time = what was skipped over */
     g_ended = 0; g_paused = 0;
     if (g_dev) SDL_UnlockAudioDevice(g_dev);
     song_close(old);
@@ -1190,7 +1191,7 @@ static void draw_ui(double t) {
         { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s  \xb7  Module player", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
         if (!npl) {
             text(x + 18, y + 60, 14, DIM, "No files.");
-            text(x + 18, y + 84, 13, FAINT, "MOD, S3M, STM, PTM, ULT, 669, MTM, MED, PSM, FAR, XM, IT, DMF or TFMX");
+            text(x + 18, y + 84, 13, FAINT, "MOD, S3M, STM, PTM, ULT, 669, MTM, MED, PSM, FAR, MDL, XM, IT, DMF or TFMX");
             text(x + 18, y + 102, 13, FAINT, "drop them on the window.");
         }
     }

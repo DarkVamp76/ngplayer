@@ -72,6 +72,8 @@ int  med_probe(const uint8_t *buf, size_t len);             /* 1 = OctaMED MMD0-
 int  xmed_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (MED -> MOD replay) */
 int  far_probe(const uint8_t *buf, size_t len);             /* 1 = Farandole Composer file ("FAR\xFE") */
 int  xfar_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (FAR -> MOD replay) */
+int  mdl_probe(const uint8_t *buf, size_t len);             /* 1 = Digitrakker file ("DMDL") */
+int  xmdl_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (MDL -> XM replay) */
 int  s669_probe(const uint8_t *buf, size_t len);            /* 1 = Composer 669 / UNIS 669 file */
 int  xs669_load(XSong *s, const uint8_t *buf, size_t len);  /* 0 = ok (669 -> S3M replay) */
 void xsong_free(XSong *s);

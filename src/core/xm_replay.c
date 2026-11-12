@@ -180,6 +180,7 @@ static void do_row_cell(XXPlayer *p, int chn, XCh *c, const XCell *x){
     case 0xC: c->vol = clampi(par, 0, 64); c->vinst = 1; break;
     case 0xD: p->jump_ord = p->order + 1; p->jump_row = hi * 10 + lo; break;
     case 0x0F: if (par) { if (par < 32) p->speed = par; else p->tempo = par; } break;
+    case 0x22: if (par) p->speed = par; break;  /* any speed 1..255 (MDL) */
     case 0x10: p->gvol = clampi(par, 0, 64); break;
     case 0x11: if (par) c->m_gvs = par; break;
     case 0x14: if (par == 0) { c->keyon = 0; if (c->inst >= 1 && !s->inst[c->inst].venv.on) c->kopend = 1; } break;
