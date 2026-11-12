@@ -191,6 +191,21 @@ static float g_scope[64 * SCOPE_LEN];
 
 static int g_open_sub;   /* gewaehlter Subsong (TFMX), bleibt bei R/Spulen erhalten */
 
+/* List label: Mod Archive titles are cut to 20 characters + "..." and always get a separate "#ID" tag (drawn after the title,
+ * so fit_text can never cut it off), so the module can always be found again. tag stays empty for other entries. */
+static void list_label(char *dst, size_t cap, char *tag, size_t tcap, const entry *e) {
+    snprintf(dst, cap, "%s", e->label); tag[0] = 0;
+    if (e->ma_id <= 0) return;
+    char id[24]; snprintf(id, sizeof id, "#%d", e->ma_id);
+    size_t n = strlen(dst), il = strlen(id);
+    if (n >= il && !strcmp(dst + n - il, id)) return;       /* label is already "ModArchive #172325" */
+    snprintf(tag, tcap, " %s", id);
+    int chars = 0; size_t cut = 0;
+    for (size_t i = 0; i < n; i++) { if (((unsigned char)dst[i] & 0xC0) != 0x80) { if (chars == 20) { cut = i; break; } chars++; } }
+    if (!cut) return;
+    while (cut > 0 && dst[cut - 1] == ' ') cut--;
+    snprintf(dst + cut, cap - cut, "...");
+}
 static void play_index_sub(int idx, int sub) {
     if (idx < 0 || idx >= npl) return;
     char err[128] = "";
@@ -320,6 +335,12 @@ static void analyse(float dt) {
 /* ================================================================== UI-Helfer */
 static float mx, my;
 static int click, clickx, clicky, mouse_down, click_ctrl;
+static int rclick, rclickx, rclicky;                       /* right mouse button */
+static int ctx_idx = -1; static float ctx_x, ctx_y;        /* context menu ("Share") of a Mod Archive entry in the list */
+static float toast_t; static char toast_txt[48];
+#define CTX_W 120.0f
+#define CTX_H 62.0f
+#define CTX_ROW 30.0f
 static int hit(float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; }
 static int clicked(float x, float y, float w, float h) { return click && clickx >= x && clickx < x + w && clicky >= y && clicky < y + h; }
 
@@ -1177,15 +1198,23 @@ static void draw_ui(double t) {
                 rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(VC[0], 0.16f));
                 rrect(x + 8, yy + 5, 3, rh - 12, 1.5f, VC[0]);
             } else if (hv) rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(EDGE, 0.25f));
-            char lab[160]; snprintf(lab, sizeof lab, "%s", pl[i].label);
+            char lab[160], tg[24]; list_label(lab, sizeof lab, tg, sizeof tg, &pl[i]);
             float tx = x + 20;
             if (pl[i].ma_id) {      /* kleine Marke "MA": Titel stammt vom The Mod Archive */
                 rrect(tx, yy + 6, 24, 17, 4, alpha(VC[1], isc ? 0.32f : 0.20f));
                 text(tx + 4, yy + 8, 11, VC[1], "MA");
                 tx += 31;
             }
-            fit_text(lab, w - 52 - (tx - (x + 20)), 14);
+            float tgw = tg[0] ? text_width(tg, 14) : 0;
+            fit_text(lab, w - 52 - (tx - (x + 20)) - tgw, 14);
             text(tx, yy + 5, 14, isc ? TXT : DIM, lab);
+            if (tg[0]) text(tx + text_width(lab, 14), yy + 5, 14, VC[1], tg);
+            if (rclick && pl[i].ma_id && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {
+                ctx_idx = i; rclick = 0;
+                ctx_x = (float)rclickx; ctx_y = (float)rclicky;
+                if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
+                if (ctx_y + CTX_H > view_h - 4) ctx_y = view_h - 4 - CTX_H;
+            }
             if (clicked(x + 8, yy, w - 16, rh)) { play_index(i); click = 0; }
         }
         { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s  \xb7  Module player", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
@@ -1351,15 +1380,17 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
             rrect(x + 8, yy, w - 16, rh - 3, 8, alpha(VC[0], 0.16f));
             rrect(x + 8, yy + 6, 3, rh - 15, 1.5f, VC[0]);
         }
-        char lab[160]; snprintf(lab, sizeof lab, "%s", pl[i].label);
+        char lab[160], tg[24]; list_label(lab, sizeof lab, tg, sizeof tg, &pl[i]);
         float tx = x + 20;
         if (pl[i].ma_id) {
             rrect(tx, yy + 8, 24, 17, 4, alpha(VC[1], isc ? 0.32f : 0.20f));
             text(tx + 4, yy + 10, 11, VC[1], "MA");
             tx += 31;
         }
-        fit_text(lab, w - 40 - (tx - (x + 20)), 14);
+        float tgw = tg[0] ? text_width(tg, 14) : 0;
+        fit_text(lab, w - 40 - (tx - (x + 20)) - tgw, 14);
         text(tx, yy + 8, 14, isc ? TXT : DIM, lab);
+        if (tg[0]) text(tx + text_width(lab, 14), yy + 8, 14, VC[1], tg);
         if (tap && !moved && mx >= x + 8 && mx < x + w - 8 && my >= yy && my < yy + rh) { play_index(i); g_plopen = 0; was_open = 0; return; }
     }
     if (!npl) text(x + 16, y + 64, 14, DIM, "No files.");
@@ -1532,13 +1563,48 @@ EMSCRIPTEN_KEEPALIVE void ng_web_paste(const char *t) {
 }
 #endif
 
+/* ---- Share: right click on a Mod Archive entry -> menu "Share" copies https://ngplayer.org/player/#<ID> to the clipboard ---- */
+static void share_link(int idx) {
+    char url[96]; snprintf(url, sizeof url, "https://ngplayer.org/player/#%d", pl[idx].ma_id);
+    SDL_SetClipboardText(url);
+    snprintf(toast_txt, sizeof toast_txt, "Link copied"); toast_t = 2.0f;
+}
+/* Info: open the module page on The Mod Archive in the browser */
+static void info_open(int idx) {
+    char url[128]; snprintf(url, sizeof url, "https://modarchive.org/index.php?request=view_by_moduleid&query=%d", pl[idx].ma_id);
+#ifdef __EMSCRIPTEN__
+    EM_ASM({ window.open(UTF8ToString($0), '_blank'); }, url);
+#else
+    SDL_OpenURL(url);
+#endif
+}
+static void draw_ctx_menu(void) {
+    if (ctx_idx >= 0 && ctx_idx < npl) {
+        static const char *const item[2] = { "Share", "Info" };
+        rrect(ctx_x - 1, ctx_y - 1, CTX_W + 2, CTX_H + 2, 9, alpha(EDGE, 0.9f));
+        rrect(ctx_x, ctx_y, CTX_W, CTX_H, 8, CARDHI);
+        for (int j = 0; j < 2; j++) {
+            float iy = ctx_y + 1 + j * CTX_ROW;
+            int hv = mx >= ctx_x && mx < ctx_x + CTX_W && my >= iy && my < iy + CTX_ROW;
+            if (hv) rrect(ctx_x + 3, iy + 2, CTX_W - 6, CTX_ROW - 4, 6, alpha(VC[0], 0.22f));
+            text(ctx_x + 14, iy + 7, 14, hv ? TXT : DIM, item[j]);
+        }
+    }
+    if (toast_t > 0) {
+        toast_t -= (float)g_dt;
+        float w = text_width(toast_txt, 14) + 32, x = (view_w - w) / 2, y = view_h - 70;
+        rrect(x, y, w, 32, 10, alpha(CARDHI, 0.96f));
+        text(x + 16, y + 8, 14, OKC, toast_txt);
+    }
+}
 static void iter(void) {
         SDL_Event e;
-        click = 0;
+        click = 0; rclick = 0;
         while (SDL_PollEvent(&e)) {
             switch (e.type) {
             case SDL_QUIT: running = 0; break;
             case SDL_MOUSEBUTTONDOWN:
+                if (e.button.button == SDL_BUTTON_RIGHT) { rclick = 1; rclickx = (int)e.button.x; rclicky = (int)e.button.y; }
                 if (e.button.button == SDL_BUTTON_LEFT) { click = 1; clickx = (int)e.button.x; clicky = (int)e.button.y; click_ctrl = (SDL_GetModState() & KMOD_CTRL) != 0; }
                 break;
             case SDL_MOUSEWHEEL:
@@ -1603,6 +1669,14 @@ static void iter(void) {
         float k = ww ? (float)dw / (float)ww / view_scale : 1;
         mx = (float)mxi * k; my = (float)myi * k;
         if (click) { clickx = (int)(clickx * k); clicky = (int)(clicky * k); }
+        if (rclick) { rclickx = (int)(rclickx * k); rclicky = (int)(rclicky * k); }
+        if (ctx_idx >= 0 && click) {                         /* click on the open menu: copy the link; any click closes it */
+            if (clickx >= ctx_x && clickx < ctx_x + CTX_W && clicky >= ctx_y && clicky < ctx_y + CTX_H && ctx_idx < npl && pl[ctx_idx].ma_id) {
+                if (clicky < ctx_y + 1 + CTX_ROW) share_link(ctx_idx); else info_open(ctx_idx);
+            }
+            ctx_idx = -1; click = 0;
+        }
+        if (rclick && ctx_idx >= 0) ctx_idx = -1;
 
         Uint64 now = SDL_GetPerformanceCounter();
         double dt = (double)(now - tlast) / freq;
@@ -1626,6 +1700,7 @@ static void iter(void) {
         ma_poll();
         draw_ui((double)(now - t0) / freq);
         draw_ma_dialog((double)(now - t0) / freq);
+        draw_ctx_menu();
         set_additive(0);
         flush();
         if (shot && ++frame >= shot_frames) { save_screenshot(shot, dw, dh); running = 0; }
