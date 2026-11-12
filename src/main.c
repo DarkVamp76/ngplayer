@@ -117,6 +117,8 @@ static float list_scroll;
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
 static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
 static int list_follow;
+static int g_pltab;                      /* playlist tab: 0 = FILES (local), 1 = MOD ARCHIVE (online) */
+static int *pl_vis, nvis, cvis;        /* visible entries of the active tab, position of the playing song in it */
 
 static int is_mod_name(const char *n) {
     if (tfmx_is_song_name(n)) return 1;          /* mdat.NAME / NAME.tfx; smpl.* und .sam sind nur Sampledaten */
@@ -199,9 +201,13 @@ static void list_label(char *dst, size_t cap, char *tag, size_t tcap, const entr
     snprintf(dst, cap, "%s", e->label); tag[0] = 0;
     if (e->ma_id <= 0) return;
     char id[24]; snprintf(id, sizeof id, "#%d", e->ma_id);
+    { size_t b = 0; while (dst[b] == ' ' || dst[b] == '\t') b++; if (!dst[b]) snprintf(dst, cap, "ModArchive"); }   /* empty title */
     size_t n = strlen(dst), il = strlen(id);
-    if (n >= il && !strcmp(dst + n - il, id)) return;       /* label is already "ModArchive #172325" */
     snprintf(tag, tcap, " %s", id);
+    if (n >= il && !strcmp(dst + n - il, id)) {              /* no title found: label is "ModArchive #172325" -> ID flush right as well */
+        n -= il; while (n > 0 && dst[n - 1] == ' ') n--;
+        dst[n] = 0; return;
+    }
     int chars = 0; size_t cut = 0;
     for (size_t i = 0; i < n; i++) { if (((unsigned char)dst[i] & 0xC0) != 0x80) { if (chars == 20) { cut = i; break; } chars++; } }
     if (!cut) return;
@@ -220,6 +226,7 @@ static void play_index_sub(int idx, int sub) {
 #endif
     song_set_mute(0);
     list_follow = 1;
+    g_pltab = pl[idx].ma_id > 0;
     g_frames = 0; g_ended = 0; g_paused = 0;
     pat_last_order = -1; pat_disp = 0; pat_ch0 = 0;
     ov_reset = 1;
@@ -1005,12 +1012,39 @@ static SDL_Surface *make_icon(int n) {
     return su;
 }
 
-static void next_prev(int d) {
+static void next_prev(int d) {      /* stays inside the group (local files / Mod Archive) of the current song */
     if (npl <= 0) return;
-    int i = cur < 0 ? 0 : cur + d;
-    if (i < 0) i = npl - 1;
-    if (i >= npl) i = 0;
-    play_index(i);
+    int grp = cur >= 0 ? pl[cur].ma_id > 0 : g_pltab, i = cur < 0 ? -1 : cur;
+    for (int n = 0; n < npl; n++) {
+        i += d;
+        if (i < 0) i = npl - 1;
+        if (i >= npl) i = 0;
+        if ((pl[i].ma_id > 0) == grp) { play_index(i); return; }
+    }
+}
+
+/* playlist tabs: indices of the entries of the active tab */
+static int pl_count_tab(int tab) { int n = 0; for (int i = 0; i < npl; i++) if ((pl[i].ma_id > 0) == (tab == 1)) n++; return n; }
+static void pl_build_vis(void) {
+    pl_vis = (int *)realloc(pl_vis, sizeof(int) * (size_t)(npl > 0 ? npl : 1));
+    nvis = 0; cvis = -1;
+    for (int i = 0; i < npl; i++) if ((pl[i].ma_id > 0) == (g_pltab == 1)) { if (i == cur) cvis = nvis; pl_vis[nvis++] = i; }
+}
+/* FILES | MOD ARCHIVE tabs; tap_mode: use the tap flag instead of clicked() (touch overlay) */
+static void pl_tabs(float x, float y, float w, int tap_mode, int tap) {
+    const char *nm[2] = { "FILES", "MOD ARCHIVE" };
+    int ntab = pl_count_tab(1) > 0 ? 2 : 1;                 /* the MOD ARCHIVE tab appears once something was loaded from there */
+    if (ntab == 1) g_pltab = 0;
+    float bw = ntab == 2 ? (w - 36 - 8) / 2 : 120;
+    for (int t = 0; t < ntab; t++) {
+        float bx = x + 18 + t * (bw + 8), by = y;
+        char lb[48]; snprintf(lb, sizeof lb, "%s  %d", nm[t], pl_count_tab(t));
+        int on = g_pltab == t, hv = hit(bx, by, bw, 24);
+        rrect(bx, by, bw, 24, 7, on ? alpha(VC[2], 0.25f) : alpha(FAINT, hv ? 0.30f : 0.16f));
+        text(bx + (bw - text_width(lb, 11)) / 2, by + 6, 11, on ? VC[2] : alpha(DIM, 0.9f), lb);
+        int hitnow = tap_mode ? (tap && mx >= bx && mx < bx + bw && my >= by && my < by + 24) : clicked(bx, by, bw, 24);
+        if (hitnow) { g_pltab = t; list_scroll = 0; list_follow = 1; if (!tap_mode) click = 0; }
+    }
 }
 
 
@@ -1158,18 +1192,20 @@ static void draw_ui(double t) {
         text(x + 18, y + 14, 13, TXT, "PLAYLIST");
         char cnt[32]; snprintf(cnt, sizeof cnt, "%d", npl);
         text_right(x + w - 18, y + 14, 13, DIM, cnt);
-        float ry = y + 44, rh = 28, area = h - 44 - 40;
-        int vis_rows = (int)(area / rh), maxscroll = npl > vis_rows ? npl - vis_rows : 0;
-        if (list_follow && cur >= 0) {
-            if (cur < list_scroll) list_scroll = (float)cur;
-            if (cur >= list_scroll + vis_rows) list_scroll = (float)(cur - vis_rows + 1);
+        pl_build_vis();
+        if (npl) pl_tabs(x, y + 40, w, 0, 0);
+        float ry = y + (npl ? 76 : 44), rh = 28, area = h - (npl ? 76 : 44) - 40;
+        int vis_rows = (int)(area / rh), maxscroll = nvis > vis_rows ? nvis - vis_rows : 0;
+        if (list_follow && cvis >= 0) {
+            if (cvis < list_scroll) list_scroll = (float)cvis;
+            if (cvis >= list_scroll + vis_rows) list_scroll = (float)(cvis - vis_rows + 1);
             list_follow = 0;
-        }
+        } else if (list_follow) list_follow = 0;
         if (list_scroll > maxscroll) list_scroll = (float)maxscroll;
         if (list_scroll < 0) list_scroll = 0;
         int first = (int)list_scroll;
-        for (int r = 0; r < vis_rows + 1 && first + r < npl; r++) {
-            int i = first + r;
+        for (int r = 0; r < vis_rows + 1 && first + r < nvis; r++) {
+            int i = pl_vis[first + r];
             float yy = ry + r * rh;
             if (yy + rh > y + h - 36) break;
             int isc = i == cur, hv = hit(x + 8, yy, w - 16, rh);
@@ -1197,6 +1233,7 @@ static void draw_ui(double t) {
             if (clicked(x + 8, yy, w - 16, rh)) { play_index(i); click = 0; }
         }
         { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s  \xb7  Module player", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
+        if (npl && !nvis) text(x + 18, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
         if (!npl) {
             text(x + 18, y + 60, 14, DIM, "No files.");
             {   /* word-wrapped format list: the sidebar can be narrow */
@@ -1358,18 +1395,20 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
     rrect(cbx, cby, 78, 28, 8, alpha(hvc ? VC[0] : EDGE, 0.35f));
     text(cbx + (78 - text_width("CLOSE", 12)) / 2, cby + 7, 12, TXT, "CLOSE");
     if (tap && mx >= cbx && mx < cbx + 78 && my >= cby && my < cby + 28) { g_plopen = 0; was_open = 0; return; }
-    float ry = y + 48, area = h - 48 - 8;
-    int vis_rows = (int)(area / rh), maxscroll = npl > vis_rows ? npl - vis_rows : 0;
-    if (list_follow && cur >= 0) {
-        if (cur < list_scroll) list_scroll = (float)cur;
-        if (cur >= list_scroll + vis_rows) list_scroll = (float)(cur - vis_rows + 1);
+    pl_build_vis();
+    if (npl) pl_tabs(x, y + 46, w, 1, tap);
+    float ry = y + (npl ? 80 : 48), area = h - (npl ? 80 : 48) - 8;
+    int vis_rows = (int)(area / rh), maxscroll = nvis > vis_rows ? nvis - vis_rows : 0;
+    if (list_follow && cvis >= 0) {
+        if (cvis < list_scroll) list_scroll = (float)cvis;
+        if (cvis >= list_scroll + vis_rows) list_scroll = (float)(cvis - vis_rows + 1);
         list_follow = 0;
-    }
+    } else if (list_follow) list_follow = 0;
     if (list_scroll > maxscroll) list_scroll = (float)maxscroll;
     if (list_scroll < 0) list_scroll = 0;
     int first = (int)list_scroll;
-    for (int r = 0; r < vis_rows && first + r < npl; r++) {
-        int i = first + r;
+    for (int r = 0; r < vis_rows && first + r < nvis; r++) {
+        int i = pl_vis[first + r];
         float yy = ry + r * rh;
         int isc = i == cur;
         if (isc) {
@@ -1390,6 +1429,7 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
         if (tap && !moved && mx >= x + 8 && mx < x + w - 8 && my >= yy && my < yy + rh) { play_index(i); g_plopen = 0; was_open = 0; return; }
     }
     if (!npl) text(x + 16, y + 64, 14, DIM, "No files.");
+    else if (!nvis) text(x + 16, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
 }
 
 static void draw_ui_portrait(float W, float H) {
