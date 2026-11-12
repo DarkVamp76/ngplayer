@@ -562,10 +562,15 @@ static void draw_pattern(float x, float y, float w, float h) {
     float boxh = hrows == 1 ? 54.0f : (hrows == 2 ? 46.0f : 38.0f);
     float gw = (w - 28) / per;
     float labh = 0;
-    if (strip) { hh = hrows * (boxh + 4) - 4; labh = 16; }
+#ifdef __EMSCRIPTEN__
+    int noscope = strip && nch > 32;       /* Web, ueber 32 Stimmen: keine Scope-/Panning-Kacheln, der Platz gehoert dem Pattern */
+#else
+    int noscope = 0;                       /* nativ: Kacheln immer */
+#endif
+    if (strip) { hh = noscope ? 0.0f : hrows * (boxh + 4) - 4; labh = 16; }
     {
         unsigned long long mm = song_get_mute(), all = nch >= 64 ? ~0ULL : ((1ULL << nch) - 1);
-        int n_hdr = strip ? nch : vis;
+        int n_hdr = noscope ? 0 : (strip ? nch : vis);
         for (int i = 0; i < n_hdr; i++) {
             int c = strip ? i : pat_ch0 + i;
             float bx0, by0, bwd, bht;
@@ -610,8 +615,15 @@ static void draw_pattern(float x, float y, float w, float h) {
         for (int i = 0; i < vis; i++) {
             char nb[16]; snprintf(nb, sizeof nb, "%02d", pat_ch0 + i + 1);
             float lx = ox + i * cw + 2;
-            rrect(lx, hy + hh + 6, cw - 4, 14, 5, alpha(VC[0], 0.10f));
-            text(lx + 6, hy + hh + 8, 10, alpha(DIM, 1.0f), nb);
+            int c2 = pat_ch0 + i, muted = (int)((song_get_mute() >> c2) & 1);
+            rrect(lx, hy + hh + 6, cw - 4, 14, 5, alpha(muted ? WARN : VC[0], muted ? 0.22f : 0.10f));
+            text(lx + 6, hy + hh + 8, 10, muted ? WARN : alpha(DIM, 1.0f), nb);
+            if (noscope && clicked(lx, hy + hh + 6, cw - 4, 14)) {          /* ohne Kacheln: Klick auf die Nummer = stumm, Strg+Klick = Solo */
+                unsigned long long mm = song_get_mute(), all = nch >= 64 ? ~0ULL : ((1ULL << nch) - 1);
+                if (click_ctrl) mm = (mm == (all & ~(1ULL << c2))) ? 0 : (all & ~(1ULL << c2));
+                else mm ^= 1ULL << c2;
+                song_set_mute(mm);
+            }
         }
     }
     /* Zeilenbereich */
