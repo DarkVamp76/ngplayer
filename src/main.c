@@ -548,7 +548,7 @@ static void draw_pattern(float x, float y, float w, float h) {
      * ein Kopf-Raster mit je max. 16 pro Zeile (oben), das Pattern darunter scrollt mit Nummernleiste. */
     float hy = y + 34, hh = 54;
     int strip = nch > vis;
-    int pmax = g_portrait ? 8 : 16;
+    int pmax = g_portrait ? (nch > 16 ? 12 : 8) : 16;
     int per = nch <= pmax ? nch : pmax, hrows = (nch + per - 1) / per;
     float boxh = hrows == 1 ? 54.0f : (hrows == 2 ? 46.0f : 38.0f);
     float gw = (w - 28) / per;
@@ -791,7 +791,7 @@ static int ch_fxcls[64];
 static float ch_fxage[64], ch_noteage[64];
 static int ov_last_order = -1, ov_last_row = -1;
 
-static int overview_cols(int nch) { if (g_portrait) return nch <= 8 ? 1 : 2; return nch <= 10 ? 1 : (nch <= 20 ? 2 : 3); }
+static int overview_cols(int nch) { if (g_portrait) return nch <= 8 ? 1 : (nch <= 16 ? 2 : 3); return nch <= 10 ? 1 : (nch <= 20 ? 2 : 3); }
 static float overview_height(int nch) {
     int cols = overview_cols(nch), rows = (nch + cols - 1) / cols;
     float rh = g_portrait ? 16.0f : (cols == 1 ? 17.0f : 15.0f);
@@ -1437,10 +1437,11 @@ static void draw_ui_portrait(float W, float H) {
         }
     }
     /* ---------------- Mitte */
-    float by = H - M - BOT, sh = 96, sy = by - M - sh, cy0 = hy + hh + M;
+    int nosp = g_song && song_channels(g_song) > 8;      /* many voices: drop spectrum/level, the room goes to channels + pattern */
+    float by = H - M - BOT, sh = nosp ? 0 : 96, sy = nosp ? by : by - M - sh, cy0 = hy + hh + M;
     float oh = g_song ? overview_height(song_channels(g_song) > 64 ? 64 : song_channels(g_song)) : 60.0f;
     float avail = sy - M - cy0;
-    if (avail - oh - M < 200) oh = avail - M - 200;
+    if (avail - oh - M < 150) oh = avail - M - 150;   /* channel list keeps priority, the pattern may shrink */
     if (oh < 40) oh = 40;
     view_update();
     overview_update((float)g_dt);
@@ -1452,8 +1453,7 @@ static void draw_ui_portrait(float W, float H) {
         if (g_orb) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
         else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
         float vuw = 130, spw = aw - vuw - M;
-        draw_spectrum(M, sy, spw, sh);
-        draw_level(M + spw + M, sy, vuw, sh);
+        if (!nosp) { draw_spectrum(M, sy, spw, sh); draw_level(M + spw + M, sy, vuw, sh); }
     }
     /* ---------------- Transport */
     {
