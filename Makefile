@@ -40,7 +40,7 @@ clean:
 # WebAssembly-Build (braucht Emscripten und das Kit-Repo 'ngweb' neben diesem Ordner)
 NGWEB ?= ../ngweb
 web: build/version.h
-	$(MAKE) -f $(NGWEB)/ngweb.mk APPDIR=$(CURDIR) NAME=ngPlayer WEB_EXPORTS=_main,_ng_web_add,_ng_web_ma_done,_ng_web_paste,_ng_web_parse_id,_ng_web_size HINT="Drop MOD, S3M, STM, PTM, ULT, 669, MTM, MED, PSM, FAR, XM, IT, DMF or TFMX files here (TFMX: mdat.* and smpl.* together)" SRC="$(SRC)"
+	$(MAKE) -f $(NGWEB)/ngweb.mk APPDIR=$(CURDIR) NAME=ngPlayer WEB_EXPORTS=_main,_ng_web_add,_ng_web_ma_done,_ng_web_paste,_ng_web_parse_id,_ng_web_size HINT="Drop MOD, S3M, STM, PTM, ULT, 669, MTM, MED, PSM, FAR, MDL, XM, IT, DMF or TFMX files here (TFMX: mdat.* and smpl.* together)" SRC="$(SRC)"
 
 .PHONY: all install clean FORCE web
 
