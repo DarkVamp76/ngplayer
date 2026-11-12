@@ -1208,7 +1208,7 @@ static void draw_ui(double t) {
             float tgw = tg[0] ? text_width(tg, 14) : 0;
             fit_text(lab, w - 52 - (tx - (x + 20)) - tgw, 14);
             text(tx, yy + 5, 14, isc ? TXT : DIM, lab);
-            if (tg[0]) text(tx + text_width(lab, 14), yy + 5, 14, VC[1], tg);
+            if (tg[0]) text_right(x + w - 22, yy + 5, 14, VC[1], tg);      /* #ID flush right */
             if (rclick && pl[i].ma_id && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {
                 ctx_idx = i; rclick = 0;
                 ctx_x = (float)rclickx; ctx_y = (float)rclicky;
@@ -1390,7 +1390,7 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
         float tgw = tg[0] ? text_width(tg, 14) : 0;
         fit_text(lab, w - 40 - (tx - (x + 20)) - tgw, 14);
         text(tx, yy + 8, 14, isc ? TXT : DIM, lab);
-        if (tg[0]) text(tx + text_width(lab, 14), yy + 8, 14, VC[1], tg);
+        if (tg[0]) text_right(x + w - 20, yy + 8, 14, VC[1], tg);      /* #ID flush right */
         if (tap && !moved && mx >= x + 8 && mx < x + w - 8 && my >= yy && my < yy + rh) { play_index(i); g_plopen = 0; was_open = 0; return; }
     }
     if (!npl) text(x + 16, y + 64, 14, DIM, "No files.");
