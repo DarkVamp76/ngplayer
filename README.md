@@ -27,6 +27,7 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | MTM (MultiTracker) | supported (1-32 channels, played through the MOD engine) |
 | PSM (Epic MegaGames, PSM16 "PSM\xFE") | supported (Epic Pinball, Silverball; played through the MOD engine) |
 | FAR (Farandole Composer) | supported (16 channels, 8/16-bit samples, played through the MOD engine; fine tempo D?/E?, slide-to-volume A? and note offset C? are not implemented) |
+| MDL (Digitrakker) | supported (up to 32 channels, 8/16-bit and packed samples, volume/panning envelopes and fadeout, played through the XM engine; frequency envelopes, auto vibrato, instrument panning and pattern-loop E6x are not implemented) |
 | MED / OctaMED (MMD0-MMD3) | supported (sample instruments, up to 32 tracks, played through the MOD engine; synth/hybrid instruments are silent) |
 | XM (FastTracker 2) | supported |
 | IT (Impulse Tracker) | supported, still being completed |
