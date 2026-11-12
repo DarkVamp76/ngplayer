@@ -1199,8 +1199,24 @@ static void draw_ui(double t) {
         { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s  \xb7  Module player", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
         if (!npl) {
             text(x + 18, y + 60, 14, DIM, "No files.");
-            text(x + 18, y + 84, 13, FAINT, "MOD, S3M, STM, PTM, ULT, 669, MTM, MED, PSM, FAR, MDL, XM, IT, DMF or TFMX");
-            text(x + 18, y + 102, 13, FAINT, "drop them on the window.");
+            {   /* word-wrapped format list: the sidebar can be narrow */
+                const char *fl = "MOD, S3M, STM, PTM, ULT, 669, MTM, MED, PSM, FAR, MDL, XM, IT, DMF or TFMX";
+                float ly = y + 84, maxw = w - 36;
+                char ln[160]; int ll = 0; const char *p = fl;
+                while (*p) {
+                    const char *e = p; while (*e && *e != ' ') e++;
+                    int wl = (int)(e - p);
+                    char t[160]; int tl = ll;
+                    memcpy(t, ln, (size_t)tl); if (tl && tl + 1 + wl < 158) t[tl++] = ' ';
+                    if (tl + wl < 159) memcpy(t + tl, p, (size_t)wl);
+                    t[tl + wl < 159 ? tl + wl : 159] = 0;
+                    if (ll && text_width(t, 13) > maxw) { ln[ll] = 0; text(x + 18, ly, 13, FAINT, ln); ly += 18; ll = 0; if (wl < 158) { memcpy(ln, p, (size_t)wl); ll = wl; } }
+                    else { memcpy(ln, t, (size_t)strlen(t)); ll = (int)strlen(t); }
+                    p = *e ? e + 1 : e;
+                }
+                if (ll) { ln[ll] = 0; text(x + 18, ly, 13, FAINT, ln); ly += 18; }
+                text(x + 18, ly + 2, 13, FAINT, "drop them on the window.");
+            }
         }
     }
 
