@@ -1,6 +1,7 @@
 /* OctaMED / MED loader (MMD0, MMD1, MMD2, MMD3). The effects are ProTracker-like, so the song is handed to the MOD replayer
  * (fmt 1). Blocks longer than 64 lines are split into several 64-row patterns, shorter ones get a pattern break.
- * Synth and hybrid instruments and multi-octave sample sets are not supported (silent). GPL-3.0-or-later */
+ * Synth/hybrid instruments are baked into a looping single-cycle sample (first waveform of the waveform table, first volume of the
+ * volume table, two octaves below the sample pitch scale); the volume table is run by the replayer (set, wait, slide, envelope), the waveform table is run as well (wave morphing, vibrato). Multi-octave sample sets are not supported (silent). GPL-3.0-or-later */
 #include "core.h"
 #include "tables.h"
 #include <math.h>
@@ -38,6 +39,7 @@ static void conv_fx(XCell *x, int e, int p, int hexvol, int bpm, int rpb, const 
     case 0x0C: { int v = hexvol ? p : (p >> 4) * 10 + (p & 15); if (v > 64) v = 64; x->eff = 0x0C; x->par = (uint8_t)v; } break;
     case 0x0F:
         if (p == 0) { x->eff = 0x0D; x->par = 0; }
+        else if (!bpm && p <= 10) { x->eff = 0x0F; x->par = (uint8_t)p; }                /* non-BPM mode: 1..10 = ticks per row */
         else if (p <= 0xF0) { x->eff = 0x0F; x->par = (uint8_t)conv_tempo(p, bpm, rpb); }
         else if (p == 0xFF) { x->eff = 0x0C; x->par = 0; }
         else if (p == 0xF1) { x->eff = 0x0E; x->par = 0x93; }          /* play note twice (approx.: retrigger every 3 ticks) */
@@ -191,7 +193,44 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
         uint32_t io = be32(b + po);
         if (!io || io + 6 > n) continue;
         uint32_t len = be32(b + io); int type = (int16_t)be16(b + io + 4);
-        if (type < 0 || (type & 0x0F) || (type & 0xC0)) continue;      /* synth/hybrid, multi-octave, delta, packed: unsupported */
+        if (type < 0) {                                                /* synth (-2) / hybrid (-1): bake first waveform */
+            const uint8_t *sy = b + io + 6;
+            if (io + 6 + 276 > n) continue;
+            unsigned nwf = be16(sy + 14), vtl = be16(sy + 8), wtl = be16(sy + 10);
+            if (!nwf || nwf > 64 || io + 6 + 272 + 4 * nwf > n) continue;
+            unsigned wi = 0, wv = 0x40;
+            for (unsigned k = 0; k < wtl && k < 128; k++) { int c = sy[144 + k]; if (c < 0x80) { wi = (unsigned)c; break; } if (c == 0xFF) break; if (c >= 0xF0) k++; }   /* skip command parameters */
+            if (wi >= nwf) wi = 0;
+            for (unsigned k = 0; k < vtl && k < 128; k++) { int c = sy[16 + k]; if (c <= 0x40) { wv = (unsigned)c; break; } if (c == 0xFF) break; }
+            uint32_t wo = io + be32(sy + 272 + 4 * wi);
+            if (wo + 2 > n) continue;
+            uint32_t wl = be16(b + wo) * 2u;
+            if (!wl || wo + 2 + wl > n) continue;
+            m->len = wl; m->is16 = 0;
+            m->data = calloc((size_t)wl + 4, 1);
+            if (!m->data) return -5;
+            memcpy(m->data, b + wo + 2, wl);
+            m->ls = 0; m->le = wl; m->loop = 1;
+            m->vol = (int)(vol > 64 ? 64 : vol);
+            m->syn = calloc(1, sizeof(XSyn));
+            if (!m->syn) return -5;
+            m->syn->vn = (int)(vtl > 128 ? 128 : vtl); m->syn->vspd = sy[12];
+            memcpy(m->syn->vtab, sy + 16, 128);
+            m->syn->wn = (int)(wtl > 128 ? 128 : wtl); m->syn->wspd = sy[13]; memcpy(m->syn->wtab, sy + 144, 128);
+            for (unsigned k = 0; k < nwf; k++) {
+                uint32_t o2 = io + be32(sy + 272 + 4 * k);
+                if (o2 + 2 > n) break;
+                uint32_t l2 = be16(b + o2) * 2u;
+                if (!l2 || o2 + 2 + l2 > n) break;
+                m->syn->wf[k] = malloc(l2);
+                if (!m->syn->wf[k]) return -5;
+                memcpy(m->syn->wf[k], b + o2 + 2, l2); m->syn->wl[k] = (int)l2; m->syn->nwf = (int)k + 1;
+            }
+            (void)wv;
+            m->c2spd = (uint32_t)(m->c2spd * 0.25 + 0.5);                 /* synth notes sound two octaves lower than the sample scale */
+            continue;
+        }
+        if ((type & 0x0F) || (type & 0xC0)) continue;                  /* multi-octave, delta, packed: unsupported */
         int is16 = (type & 0x10) != 0, stereo = (type & 0x20) != 0;
         size_t avail = (size_t)io + 6 < n ? n - io - 6 : 0;
         if (len > avail) len = (uint32_t)avail;

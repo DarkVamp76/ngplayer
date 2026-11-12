@@ -81,7 +81,7 @@ int xmod_load(XSong *s, const uint8_t *b, size_t len){
     return 0;
 }
 void xsong_free(XSong *s){
-    for (int i = 0; i < 100; i++) free(s->smp[i].data);
+    for (int i = 0; i < 100; i++) { free(s->smp[i].data); if (s->smp[i].syn) { for (int k = 0; k < s->smp[i].syn->nwf; k++) free(s->smp[i].syn->wf[k]); free(s->smp[i].syn); } }
     for (int i = 0; i < s->nxsmp; i++) free(s->xsmp[i].data);
     free(s->xsmp); free(s->inst); free(s->prows);
     free(s->pat); memset(s, 0, sizeof *s);
