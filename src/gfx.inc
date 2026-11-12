@@ -32,6 +32,7 @@ typedef long GLintptr;
 #define GL_R8 0x8229
 #define GL_RGBA 0x1908
 #define GL_UNSIGNED_BYTE 0x1401
+#define GL_UNSIGNED_SHORT_5_5_5_1 0x8034
 #define GL_FLOAT 0x1406
 #define GL_TRIANGLES 4
 #define GL_ARRAY_BUFFER 0x8892
@@ -72,6 +73,7 @@ typedef long GLintptr;
     X(void, glUniform1i, (GLint, GLint)) \
     X(void, glUniform1f, (GLint, GLfloat)) \
     X(void, glUniform2f, (GLint, GLfloat, GLfloat)) \
+    X(void, glUniform4fv, (GLint, GLsizei, const GLfloat *)) \
     X(void, glGenVertexArrays, (GLsizei, GLuint *)) \
     X(void, glBindVertexArray, (GLuint)) \
     X(void, glGenBuffers, (GLsizei, GLuint *)) \
@@ -107,7 +109,7 @@ static vtx *vb;
 static int nv;
 static int add_blend;
 static GLuint prog, vao, vbo, fonttex;
-static GLint u_res, u_pxs, u_tex;
+static GLint u_res, u_pxs, u_tex, u_rip, u_rt;
 static float view_w, view_h, view_scale = 1;
 static int glyph_idx[256];
 
@@ -122,7 +124,7 @@ static const char *VS =
 static const char *FS =
     GLSL_VERSION
     "in vec2 vuv; in vec4 vcol; in vec4 vpar; out vec4 o;\n"
-    "uniform sampler2D tex; uniform float pxs;\n"
+    "uniform sampler2D tex; uniform float pxs; uniform vec4 rip[16]; uniform float rt;\n"
     "float sdbox(vec2 p, vec2 h, float r){ vec2 q=abs(p)-h+vec2(r); return length(max(q,0.0))+min(max(q.x,q.y),0.0)-r; }\n"
     "void main(){\n"
     " int m=int(vpar.x+0.5);\n"
@@ -130,6 +132,15 @@ static const char *FS =
     " else if(m==1){ float a=texture(tex,vuv).r; o=vec4(vcol.rgb,vcol.a*a); }\n"
     " else if(m==2){ float d=sdbox(vuv,vpar.yz,vpar.w); o=vec4(vcol.rgb,vcol.a*clamp(0.5-d*pxs,0.0,1.0)); }\n"
     " else if(m==3){ float t=abs(vuv.y); o=vec4(vcol.rgb,vcol.a*exp(-t*t*vpar.y)); }\n"
+    " else if(m==7){ float d0=sdbox(vuv,vpar.yz,vpar.w); float mk=clamp(0.5-d0*pxs,0.0,1.0);\n"
+    "  float s=0.0, e=0.0;\n"
+    "  for(int i=0;i<16;i++){ vec4 r=rip[i]; if(r.z>0.001){ vec2 q=(vuv-r.xy)*vec2(1.0,1.5); float d=length(q);\n"
+    "   s+=sin(d*0.62-rt*4.0+r.w)*exp(-d*0.05)*r.z; e+=exp(-d*d*0.02)*r.z; } }\n"
+    "  float v=clamp(0.5+0.55*s,0.0,1.0);\n"
+    "  vec3 c=vec3(0.015,0.03,0.24)+vec3(0.08,0.26,0.70)*v*v+vec3(0.25,0.45,0.55)*clamp(e*0.30,0.0,1.0)*v;\n"
+    "  float sl=0.84+0.16*step(1.0,mod(floor(vuv.y),2.0));\n"
+    "  o=vec4(c*sl*vcol.rgb,vcol.a*mk); }\n"
+    " else if(m==8){ vec4 t=texture(tex,vuv); o=vec4(t.rgb*vcol.rgb,t.a*vcol.a); }\n"
     " else if(m==5){ float d=sdbox(vuv,vpar.yz,vpar.w); float a=clamp(1.0-d/vpar.w,0.0,1.0); o=vec4(vcol.rgb,vcol.a*a*a); }\n"
     " else { o=vec4(vcol.rgb,vcol.a*exp(-dot(vuv,vuv)/(2.0*vpar.y*vpar.y))); }\n"
     "}\n";
@@ -185,6 +196,25 @@ static void blob(float cx, float cy, float sigma, col c) {
 }
 static void tri(float x0, float y0, float x1, float y1, float x2, float y2, col c) {
     V(x0, y0, 0, 0, c, 0, 0, 0, 0); V(x1, y1, 0, 0, c, 0, 0, 0, 0); V(x2, y2, 0, 0, c, 0, 0, 0, 0);
+}
+
+/* XTC-style water ripples: 16 sources (x, y offset from the box centre, amplitude, phase), time t; rounded box x,y,w,h,r */
+static void ripples(float x, float y, float w, float h, float r, float t, const float *src) {
+    flush();
+    glUniform4fv(u_rip, 16, src);
+    glUniform1f(u_rt, t);
+    sdf_quad(x, y, w, h, 1.0f, C(1, 1, 1, 1), 7, w / 2, h / 2, r);
+    flush();
+}
+
+/* textured quad (own texture, drawn with the main sampler): photo of a sound card */
+static void tex_quad(GLuint t, float x, float y, float w, float h, col c) {
+    flush();
+    glBindTexture(GL_TEXTURE_2D, t);
+    V(x, y, 0, 0, c, 8, 0, 0, 0); V(x + w, y, 1, 0, c, 8, 0, 0, 0); V(x, y + h, 0, 1, c, 8, 0, 0, 0);
+    V(x + w, y, 1, 0, c, 8, 0, 0, 0); V(x + w, y + h, 1, 1, c, 8, 0, 0, 0); V(x, y + h, 0, 1, c, 8, 0, 0, 0);
+    flush();
+    glBindTexture(GL_TEXTURE_2D, fonttex);
 }
 
 /* soft anti-aliased polyline, xy = n points; w half width in px, k = falloff */

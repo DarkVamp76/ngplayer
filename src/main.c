@@ -31,6 +31,8 @@
 #endif
 
 #include "gfx.inc"
+#include "card_data.h"
+static GLuint card_tex[2];
 
 /* ================================================================== Palette */
 static const col BG0 = { 0.035f, 0.043f, 0.078f, 1 };
@@ -927,55 +929,6 @@ static void chip_dip(float x, float y, float h, float beat) {            /* Paul
     z = chip_tsz(17, k); text(cx - text_width("8364R7", z) / 2, y + 57 * k - z * 0.8f, z, ink, "8364R7");
     z = chip_tsz(14, k); text(cx - text_width("1589  27", z) / 2, y + 77 * k - z * 0.8f, z, ink, "1589  27");
 }
-static void chip_gf1(float x, float y, float h, float beat) {            /* Forte GF1, PLCC im Sockel; h = Hoehe */
-    float k = h / 180.0f, ox = x - 70 * k, oy = y - 10 * k;
-    col sock = C(0.29f, 0.31f, 0.33f, 1), tooth = mix(C(0.56f, 0.57f, 0.60f, 1), BEATC, 0.55f * beat), body = C(0.23f, 0.24f, 0.26f, 1), ink = mix(C(0.79f, 0.80f, 0.83f, 1), C(1, 1, 1, 1), 0.5f * beat);
-    float cx = 160, cy = 100, hs = 90, bh = 62, ch = 22, pw = 134.0f / 25.0f;
-    rect(ox + (cx - hs) * k, oy + (cy - hs) * k, 2 * hs * k, 2 * hs * k, sock);
-    rect(ox + (cx - hs) * k, oy + (cy - hs) * k, 2 * hs * k, 2 * hs * k, C(0, 0, 0, 0.12f));
-    tri(ox + (cx + hs - ch) * k, oy + (cy - hs) * k, ox + (cx + hs) * k, oy + (cy - hs) * k, ox + (cx + hs) * k, oy + (cy - hs + ch) * k, C(0.06f, 0.07f, 0.08f, 1));
-    for (int i = 0; i < 25; i++) {
-        float o = -67 + pw * i + pw * 0.15f, tw = pw * 0.6f, tl = hs - bh - 6;
-        if (cx + o + tw < cx + hs - ch - 1)
-            rect(ox + (cx + o) * k, oy + (cy - hs + 4) * k, tw * k, tl * k, tooth);
-        rect(ox + (cx + o) * k, oy + (cy + bh + 2) * k, tw * k, tl * k, tooth);
-        rect(ox + (cx - hs + 4) * k, oy + (cy + o) * k, tl * k, tw * k, tooth);
-        if (cy + o > cy - hs + ch)
-            rect(ox + (cx + bh + 2) * k, oy + (cy + o) * k, tl * k, tw * k, tooth);
-    }
-    rect(ox + (cx - bh) * k, oy + (cy - bh) * k, 2 * bh * k, 2 * bh * k, body);
-    tri(ox + (cx + bh - 10) * k, oy + (cy - bh) * k, ox + (cx + bh) * k, oy + (cy - bh) * k, ox + (cx + bh) * k, oy + (cy - bh + 10) * k, sock);
-    float tx = ox + (cx - bh + 12) * k, z = chip_tsz(14, k);
-    text(tx, oy + (cy - 36) * k, z, ink, "FORTE GF1");
-    z = chip_tsz(11, k);
-    rect(tx, oy + (cy - 12) * k, 28 * k, 1.2f, ink); rect(tx, oy + (cy + 24) * k, 28 * k, 1.2f, ink);
-    rect(tx, oy + (cy - 12) * k, 1.2f, 36 * k, ink);  rect(tx + 28 * k - 1.2f, oy + (cy - 12) * k, 1.2f, 36 * k, ink);
-    text(tx + 38 * k, oy + (cy - 12) * k, z, ink, "ICS11614");
-    text(tx + 38 * k, oy + (cy + 3) * k, z, ink, "9245");
-    text(tx + 38 * k, oy + (cy + 18) * k, z, ink, "AH222616");
-}
-static void chip_iw(float x, float y, float h, float beat) {             /* AMD InterWave, QFP-160; h = Hoehe */
-    float k = h / 176.0f, ox = x - 72 * k, oy = y - 12 * k;
-    col pin = mix(C(0.62f, 0.65f, 0.70f, 1), BEATC, 0.55f * beat), body = C(0.21f, 0.22f, 0.24f, 1), ink = mix(C(0.79f, 0.80f, 0.83f, 1), C(1, 1, 1, 1), 0.5f * beat), dimple = C(0.15f, 0.16f, 0.17f, 1);
-    float cx = 160, cy = 100, hb = 76, pl = 12, pw = 152.0f / 40.0f;
-    for (int i = 0; i < 40; i++) {
-        float o = -hb + pw * i + pw * 0.25f, w = pw * 0.45f;
-        rect(ox + (cx + o) * k, oy + (cy - hb - pl) * k, w * k, pl * k, pin);
-        rect(ox + (cx + o) * k, oy + (cy + hb) * k, w * k, pl * k, pin);
-        rect(ox + (cx - hb - pl) * k, oy + (cy + o) * k, pl * k, w * k, pin);
-        rect(ox + (cx + hb) * k, oy + (cy + o) * k, pl * k, w * k, pin);
-    }
-    rrect(ox + (cx - hb) * k, oy + (cy - hb) * k, 2 * hb * k, 2 * hb * k, 3 * k, body);
-    for (int a = -1; a <= 1; a += 2) for (int b = -1; b <= 1; b += 2)
-        rrect(ox + (cx + a * (hb - 12) - 4.5f) * k, oy + (cy + b * (hb - 12) - 4.5f) * k, 9 * k, 9 * k, 4.5f * k, dimple);
-    float tx = ox + (cx - hb + 26) * k, z = chip_tsz(15, k);
-    text(tx + text(tx, oy + (cy - 20) * k, z, ink, "InterWave"), oy + (cy - 20) * k, z * 0.5f, ink, "TM");
-    z = chip_tsz(12, k);
-    text(tx, oy + (cy - 2) * k, z, ink, "AM78C201KC");
-    z = chip_tsz(11, k);
-    text(tx, oy + (cy + 15) * k, z, ink, "9539BGA  B2");
-    text(tx, oy + (cy + 31) * k, z, ink, "\xa9 1995 AMD");
-}
 /* Welcher Chip: 0 = Paula (TFMX, MOD bis 4 Kanaele), 1 = GF1 (bis 14 Kanaele), 2 = InterWave (ab 15 Kanaelen) */
 static int chip_kind(void) {
     const char *f = song_format(g_song);
@@ -985,7 +938,9 @@ static int chip_kind(void) {
 }
 static float chips_width(float h) {                       /* Breite des Chipbereichs (0 = keiner) */
     if (!g_song) return 0;
-    return chip_kind() == 0 ? 5.0f * h * 0.5f : h * 1.02f;       /* Paula: flacher Streifen (5:1), in halber Hoehe */
+    int k = chip_kind();
+    if (k == 0) return 5.0f * h * 0.5f;                            /* Paula: flacher Streifen (5:1), in halber Hoehe */
+    return k == 1 ? h * ((float)CARD_GUS_W / CARD_GUS_H) : h * ((float)CARD_IW_W / CARD_IW_H);   /* photo of the sound card */
 }
 static void draw_chips(float x, float y, float h) {
     if (!g_song) return;
@@ -1000,7 +955,31 @@ static void draw_chips(float x, float y, float h) {
     }
     float hh = h * sc;                                    /* leicht wachsen, um die Mitte */
     float xx = x - (cw * sc - cw) / 2, yy = y - (hh - h) / 2;
-    if (k == 0) chip_dip(xx, yy + hh * 0.08f, hh * 0.5f, beat); else if (k == 1) chip_gf1(xx, yy, hh, beat); else chip_iw(xx, yy, hh, beat);
+    if (k == 0) chip_dip(xx, yy + hh * 0.08f, hh * 0.5f, beat);
+    else { float b = 1.0f + 0.30f * beat, f = 0.88f; tex_quad(card_tex[k - 1], xx + cw * sc * (1 - f) / 2, yy + hh * 0.15f, cw * sc * f, hh * f, C(b, b, b, 1)); }   /* a bit smaller and lower: clear of the top edge */
+}
+/* XTC-style water ripples behind the logo: one source per channel, amplitude follows the channel level */
+static void logo_waves(float x, float y, float w, float h) {
+    static float wt;
+    wt += (float)g_dt;
+    float src[16 * 4];
+    int n = g_song ? song_channels(g_song) : 8;
+    if (n > 16) n = 16;
+    if (n < 1) n = 1;
+    for (int i = 0; i < 16; i++) {
+        float *p = src + 4 * i;
+        p[0] = p[1] = p[2] = p[3] = 0;
+        if (i >= n) continue;
+        float lv;
+        if (g_song) lv = g_paused ? 0.0f : ch_lvl[i];
+        else lv = 0.35f + 0.35f * sinf(wt * 1.1f + i * 1.7f);          /* idle: gentle pulsing */
+        if (lv < 0) lv = 0;
+        p[0] = (n > 1 ? (i - (n - 1) * 0.5f) * (w - 40) / 15.0f : 0.0f);
+        p[1] = h * 0.14f;
+        p[2] = powf(lv, 0.7f);
+        p[3] = i * 1.3f;
+    }
+    ripples(x + 1, y + 1, w - 2, h - 2, 13, wt, src);
 }
 static int lg_inside(float px, float py, float x, float y, float w, float h, float r) {
     float cx = px < x + r ? x + r : (px > x + w - r ? x + w - r : px);
@@ -1231,6 +1210,7 @@ static void draw_ui(double t) {
     float hy = M, hh = 94, bw = 270, haw = aw - bw - M;
     card(ax, hy, haw, hh, 0);
     card(ax + haw + M, hy, bw, hh, 0);
+    logo_waves(ax + haw + M, hy, bw, hh);
     draw_logo(ax + haw + M + 18, hy + 19, 56);
     text(ax + haw + M + 88, hy + 22, 28, TXT, "ngPlayer");
     text(ax + haw + M + 89, hy + 56, 12, DIM, "Module player for Linux");
@@ -1775,6 +1755,8 @@ int main(int argc, char **argv) {
     u_res = glGetUniformLocation(prog, "res");
     u_pxs = glGetUniformLocation(prog, "pxs");
     u_tex = glGetUniformLocation(prog, "tex");
+    u_rip = glGetUniformLocation(prog, "rip");
+    u_rt = glGetUniformLocation(prog, "rt");
 
     vb = (vtx *)malloc(sizeof(vtx) * MAXV);
     glGenVertexArrays(1, &vao);
@@ -1798,6 +1780,17 @@ int main(int argc, char **argv) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenTextures(2, card_tex);
+    for (int i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, card_tex[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, i ? CARD_IW_W : CARD_GUS_W, i ? CARD_IW_H : CARD_GUS_H, 0, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, i ? (const void *)card_iw : (const void *)card_gus);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    glBindTexture(GL_TEXTURE_2D, fonttex);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
