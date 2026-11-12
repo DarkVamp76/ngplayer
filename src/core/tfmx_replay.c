@@ -29,6 +29,7 @@ typedef struct {
     int pd, pc, pskip, pv;                   /* Portamento */
     int abl, abc, abd;                       /* AddBegin */
     int rstart, rlen;                        /* Paula-Register (Start in Bytes, Laenge in Worten) */
+    int sl, slv;                             /* remembered length (words): a deferred DMA-off writes len=1 to Paula only; DMA-on reloads the macro's length */
     int cs, cl; double pos; int dma;         /* laufende Wiedergabe: Start, Laenge (Bytes), Position */
 } Chan;
 
@@ -102,10 +103,11 @@ static void macro_run(TfmxPlayer *p, Chan *c) {
         case 0: case 0x13:
             if (op == 0) clear_fx(c);
             c->dma = 0; c->defer = defer = (a != 0);
-            if (defer) { c->per = 4; c->rlen = 1; }
+            if (defer) { if (!c->slv) { c->sl = c->rlen; c->slv = 1; } c->per = 4; c->rlen = 1; }
             if (b || e) c->vol = (int8_t)((b ? 0 : c->rel * 3) + e);
             break;
         case 1:
+            if (c->slv) { c->rlen = c->sl; c->slv = 0; }
             c->dmaint = 0; c->cs = c->rstart; c->cl = (c->rlen < 1 ? 1 : c->rlen) * 2; c->pos = 0.0; c->dma = 1;
             /* Heuristik (gegen die Referenz abgeglichen, Jim Power): Wurde DMA-aus verzoegert (Parameter != 0) und steht das Makro in einem
              * Unterprogramm (Goto), das mit einem Wait weitergeht, beendet das DMA-an den Tick. Die allgemeine Regel ist noch unbekannt. */
@@ -113,7 +115,7 @@ static void macro_run(TfmxPlayer *p, Chan *c) {
             c->defer = defer = 0;
             break;
         case 2: c->abl = 0; c->rstart = a << 16 | w; break;
-        case 3: c->rlen = w; break;
+        case 3: c->rlen = w; c->slv = 0; break;
         case 4: c->wait = w; brk = 1; break;
         case 0x10: if (c->keyup) break; /* fall through */
         case 5:
@@ -122,7 +124,10 @@ static void macro_run(TfmxPlayer *p, Chan *c) {
             break;
         case 6: c->mo = a & 127; c->step = w; c->loop = 0xFF; break;
         case 7: c->run = 0; c->step--; return;
-        case 8: set_note(c, c->note + a, w); brk = 1; break;
+        case 8:
+            set_note(c, c->note + a, w);
+            if (c->ref > 0 && c->ref < 113) { c->ref = 113; if (!c->pd) c->per = 113; }   /* Paula cannot play periods below 113 (Jim Power macro 51 asks for 56) */
+            brk = 1; break;
         case 9: set_note_f(c, a, w, c->v1 ? 0 : c->fine); brk = 1; break;     /* v1: SetNote ignoriert die Feinstimmung der Note */
         case 0xA: clear_fx(c); break;
         case 0xB:
@@ -139,7 +144,7 @@ static void macro_run(TfmxPlayer *p, Chan *c) {
             break;
         case 0xF: c->env_d = a; c->env_c = c->env_s = b; c->env_e = S8(e); break;
         case 0x11: c->abl = c->abc = a; c->abd = S16(w); c->rstart += c->abd; break;
-        case 0x12: c->rlen = (c->rlen + S16(w)) & 0xFFFF; break;
+        case 0x12: c->rlen = (c->rlen + S16(w)) & 0xFFFF; c->slv = 0; break;
         case 0x14:
             if (c->keyup || c->loop == 0) { c->loop = 0xFF; break; }
             if (c->loop == 0xFF) c->loop = (uint8_t)e;
@@ -147,7 +152,7 @@ static void macro_run(TfmxPlayer *p, Chan *c) {
         case 0x15: c->ret_mo = c->mo; c->ret_step = c->step; c->mo = a & 127; c->step = w; break;
         case 0x16: c->mo = c->ret_mo; c->step = c->ret_step; break;
         case 0x17: c->ref = w; if (!c->pd) c->per = c->ref; break;
-        case 0x18: c->rstart += w & 0xFFFE; c->rlen = (c->rlen - w / 2) & 0xFFFF; break;
+        case 0x18: c->rstart += w & 0xFFFE; c->rlen = (c->rlen - w / 2) & 0xFFFF; c->slv = 0; break;
         case 0x19: c->abl = 0; c->rstart = 0; c->rlen = 1; break;
         case 0x1A: c->dmaint = w + 1; c->run = 0; brk = 1; break;
         case 0x1C: if (c->note > a) c->step = w; break;
@@ -281,6 +286,16 @@ static void advance_patterns(TfmxPlayer *p) {
     }
 }
 
+/* sample at position q relative to the current segment start; beyond its end the loop (rstart, rlen) continues */
+static inline float tf_at(const TfmxSong *s, const Chan *c, long q) {
+    long idx;
+    if (q >= c->cl) { long ll = (c->rlen < 1 ? 1 : c->rlen) * 2; idx = c->rstart + (q - c->cl) % ll; }
+    else idx = c->cs + q;
+    if (idx < 0) idx = 0;
+    if ((size_t)idx >= s->nsmpl) idx = (long)s->nsmpl - 1;
+    return (float)s->smpl[idx];
+}
+
 static void gen_ch(TfmxPlayer *p, Chan *c, float *o, int n, int mute) {
     const TfmxSong *s = p->s;
     for (int i = 0; i < n; i++) o[i] = 0.0f;
@@ -299,15 +314,27 @@ static void gen_ch(TfmxPlayer *p, Chan *c, float *o, int n, int mute) {
         for (int j = 0; j < k; j++) {
             double fp = c->pos + j * step;
             long ip = (long)fp;
-            long idx = c->cs + ip;
-            if (idx < 0) idx = 0;
-            if ((size_t)idx >= s->nsmpl) idx = (long)s->nsmpl - 1;
-            float v = (float)s->smpl[idx];
-            if (p->interp) {                 /* naechster Wert: im Durchlauf oder - am Ende - der Schleifenanfang */
-                long i1 = ip + 1 < c->cl ? c->cs + ip + 1 : c->rstart;
-                if (i1 < 0) i1 = 0;
-                if ((size_t)i1 >= s->nsmpl) i1 = (long)s->nsmpl - 1;
-                v += ((float)s->smpl[i1] - v) * (float)(fp - (double)ip);
+            float v;
+            if (step > 1.0) {
+                /* Paula plays far above the output rate (e.g. a 2-byte loop at period 56 = 31 kHz): point sampling would fold that
+                 * into audible aliasing (whistling). Average the held sample values over the output interval instead (box filter). */
+                double a = fp, win = 2.0 * step, e = fp + win, acc = 0;     /* window of two output intervals: first zero at fs/2 */
+                for (long q = (long)a; (double)q < e; q++) {
+                    double lo = (double)q > a ? (double)q : a, hi = (double)(q + 1) < e ? (double)(q + 1) : e;
+                    acc += tf_at(s, c, q) * (hi - lo);
+                }
+                v = (float)(acc / win);
+            } else {
+                long idx = c->cs + ip;
+                if (idx < 0) idx = 0;
+                if ((size_t)idx >= s->nsmpl) idx = (long)s->nsmpl - 1;
+                v = (float)s->smpl[idx];
+                if (p->interp) {                 /* naechster Wert: im Durchlauf oder - am Ende - der Schleifenanfang */
+                    long i1 = ip + 1 < c->cl ? c->cs + ip + 1 : c->rstart;
+                    if (i1 < 0) i1 = 0;
+                    if ((size_t)i1 >= s->nsmpl) i1 = (long)s->nsmpl - 1;
+                    v += ((float)s->smpl[i1] - v) * (float)(fp - (double)ip);
+                }
             }
             o[filled + j] = mute ? 0.0f : v / 128.0f * (float)vol / 64.0f;
         }
