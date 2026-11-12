@@ -67,6 +67,7 @@ struct XPlayer {
     int gvol, fix_e8;
     int done; double acc;
     int lp; double lpa, lpl, lpr;    /* Paula-Tiefpass (A500: RC ca. 4,9 kHz): an/aus, Koeffizient, Zustand L/R */
+    int led, led_force; double lb0, lb1, lb2, la1, la2, lz[2][4];   /* A500 LED filter (E00 on / E01 off): 2-pole low-pass 3275 Hz, state per side: x1 x2 y1 y2 */
 };
 
 static int clampi(int v, int lo, int hi){ return v < lo ? lo : v > hi ? hi : v; }
@@ -202,6 +203,7 @@ static void trem_step(XPlayer *p, Ch *c, int tick){
 static void e_sub(XPlayer *p, int chn, Ch *c, int par, int tick){
     int h = par >> 4, x = par & 15, mx = p->s->maxvol;
     switch (h) {
+    case 0: if (!tick && p->s->fmt == 1) p->led = !(x & 1); break;   /* MOD E00 = LED filter on, E01 = off */
     case 1: if (!tick) c->pD4 -= (x << 2) * PK; break;
     case 2: if (!tick) c->pD4 += (x << 2) * PK; break;
     case 4: c->mb0 = (c->mb0 & 0xf0) | x; break;
@@ -395,8 +397,11 @@ XPlayer *xplay_new(const XSong *s, int rate){
     for (int i = 0; i < NCH; i++) p->ch[i].pan5c = (s->fmt == 1 && s->chpan[i] < 0) ? ((i % 4 == 0 || i % 4 == 3) ? 60 : 195) : (s->chpan[i] >= 0 ? s->chpan[i] : 128);
     p->tick = 0; p->acc = 0;
     p->lp = (s->fmt == 1 && s->amiga) ? 1 : 0;
-    if (getenv("XLP") && !atoi(getenv("XLP"))) p->lp = 0;
+    if (getenv("XLP")) p->lp = atoi(getenv("XLP")) ? (s->fmt == 1) : 0;   /* XLP=0 off, XLP=1 force on (MOD/MED family) */
     p->lpa = 1.0 - exp(-6.283185307179586 * 4900.0 / rate);
+    { double w0 = 6.283185307179586 * 3275.0 / rate, al = sin(w0) / (2.0 * 0.7071067811865476), co = cos(w0), a0 = 1.0 + al;
+      p->lb0 = (1.0 - co) / 2.0 / a0; p->lb1 = (1.0 - co) / a0; p->lb2 = p->lb0; p->la1 = -2.0 * co / a0; p->la2 = (1.0 - al) / a0;
+      p->led = 0; { const char *e = getenv("XLED"); p->led_force = e ? atoi(e) : 0; } }
     return p;
 }
 void xplay_free(XPlayer *p){ if (XFMT4(p)) { xxm_free((XXPlayer *)p); return; } free(p); }
@@ -482,7 +487,30 @@ static void advance(XPlayer *p){
 }
 
 static double xpos_t = 0;
+/* Interpolation (XINT env: 0 = linear, 1 = cubic, 2 = 8-tap windowed sinc) */
+static int g_int = -1;
+static float sinc_tab[257][8];
+static void interp_init(void) {
+    const char *e = getenv("XINT"); g_int = e ? atoi(e) : 0;
+    for (int f = 0; f <= 256; f++) {
+        double fr = f / 256.0, sum = 0, w[8];
+        for (int k = 0; k < 8; k++) {
+            double x = (k - 3) - fr, sc = fabs(x) < 1e-9 ? 1.0 : sin(3.141592653589793 * x) / (3.141592653589793 * x);
+            double hw = 0.5 + 0.5 * cos(3.141592653589793 * x / 4.0);   /* Hann window over +-4 samples */
+            w[k] = sc * hw; sum += w[k];
+        }
+        for (int k = 0; k < 8; k++) sinc_tab[f][k] = (float)(w[k] / sum);
+    }
+}
+static inline double smp_at(const Voice *v, int64_t i) {
+    if (v->loop && v->le > v->ls && i >= (int64_t)v->le) i = v->ls + (i - v->le) % (v->le - v->ls);
+    if (i < 0) i = 0;
+    if (i >= (int64_t)v->len) i = (int64_t)v->len - 1;
+    if (i < 0) return 0;
+    return v->is16 ? ((const int16_t *)v->data)[i] / 32768.0 : v->data[i] / 128.0;
+}
 int xplay_render(XPlayer *p, int16_t *out, int n){
+    if (g_int < 0) interp_init();
     if (XFMT4(p)) return xxm_render((XXPlayer *)p, out, n);
     int done_frames = 0;
     const XSong *s = p->s;
@@ -514,12 +542,24 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
                 }
                 uint32_t i0 = (uint32_t)v->pos;
                 double fr = v->pos - i0;
-                uint32_t i1 = i0 + 1;
-                if (v->loop && i1 >= v->le) i1 = v->ls + (i1 - v->le);
-                double s0, s1;
-                if (v->is16) { const int16_t *d16 = (const int16_t *)v->data; s0 = d16[i0] / 32768.0; s1 = (i1 < v->len) ? d16[i1] / 32768.0 : s0; }
-                else { s0 = v->data[i0] / 128.0; s1 = (i1 < v->len) ? v->data[i1] / 128.0 : s0; }
-                double sm = (s0 + (s1 - s0) * fr) * (v->volf / 255.0);
+                double sm;
+                if (g_int == 0) {
+                    uint32_t i1 = i0 + 1;
+                    if (v->loop && i1 >= v->le) i1 = v->ls + (i1 - v->le);
+                    double s0, s1;
+                    if (v->is16) { const int16_t *d16 = (const int16_t *)v->data; s0 = d16[i0] / 32768.0; s1 = (i1 < v->len) ? d16[i1] / 32768.0 : s0; }
+                    else { s0 = v->data[i0] / 128.0; s1 = (i1 < v->len) ? v->data[i1] / 128.0 : s0; }
+                    sm = (s0 + (s1 - s0) * fr) * (v->volf / 255.0);
+                } else if (g_int == 1) {   /* cubic (Catmull-Rom) */
+                    double a = smp_at(v, (int64_t)i0 - 1), b = smp_at(v, i0), c = smp_at(v, (int64_t)i0 + 1), d = smp_at(v, (int64_t)i0 + 2);
+                    double c1 = 0.5 * (c - a), c2 = a - 2.5 * b + 2.0 * c - 0.5 * d, c3 = 0.5 * (d - a) + 1.5 * (b - c);
+                    sm = (((c3 * fr + c2) * fr + c1) * fr + b) * (v->volf / 255.0);
+                } else {                   /* windowed sinc, 8 taps */
+                    const float *w = sinc_tab[(int)(fr * 256.0 + 0.5)];
+                    double acc = 0;
+                    for (int k = 0; k < 8; k++) acc += w[k] * smp_at(v, (int64_t)i0 - 3 + k);
+                    sm = acc * (v->volf / 255.0);
+                }
                 cs[i] = sm;
                 { double pr = (1.0 + 30.0 * v->pan / 255.0) / 32.0;   /* S3M gemessen: R = (2n+1)/32, n=pan>>4; MOD vorlaeufig */
                   pr = pr < 0 ? 0 : pr > 1 ? 1 : pr;
@@ -531,6 +571,14 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
             if (p->scb) { unsigned w = p->scn & (unsigned)(p->scl - 1); for (int i = 0; i < s->nch; i++) p->scb[(size_t)i * p->scl + w] = (float)(cs[i] * master * 2.0); p->scn++; }
             l *= master * 32767; r *= master * 32767;
             if (p->lp) { p->lpl += p->lpa * (l - p->lpl); p->lpr += p->lpa * (r - p->lpr); l = p->lpl; r = p->lpr; }
+            if (p->lp && (p->led || p->led_force)) {
+                for (int sd = 0; sd < 2; sd++) {
+                    double *z = p->lz[sd], x0 = sd ? r : l;
+                    double y = p->lb0 * x0 + p->lb1 * z[0] + p->lb2 * z[1] - p->la1 * z[2] - p->la2 * z[3];
+                    z[1] = z[0]; z[0] = x0; z[3] = z[2]; z[2] = y;
+                    if (sd) r = y; else l = y;
+                }
+            }
             out[(done_frames + f)*2]     = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l);
             out[(done_frames + f)*2 + 1] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : r);
         }
