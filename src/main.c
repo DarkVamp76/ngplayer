@@ -115,6 +115,7 @@ static entry *pl;
 static int npl, cur = -1;
 static float list_scroll;
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
+static int g_orb;                     /* 1 = Orb statt Pattern-Ansicht (Taste V / Button) */
 static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
 static int list_follow;
 static int g_pltab;                      /* playlist tab: 0 = FILES (local), 1 = MOD ARCHIVE (online) */
@@ -239,6 +240,7 @@ static void play_index_sub(int idx, int sub) {
     g_song = s;
     g_rendered = 0; g_lastord = g_lastrow = -1; g_resync = 1;
     if (g_dev) SDL_UnlockAudioDevice(g_dev);
+    if (g_portrait && g_mobile && song_channels(s) > 8) g_orb = 1;      /* phone, portrait, more than 8 voices: Orb view (scopes are too heavy) */
     view_reset = 1;
     g_open_sub = s ? song_subsong(s) : 0;
 }
@@ -369,7 +371,6 @@ static void mmss(char *buf, size_t cap, double sec) { int s = (int)sec; snprintf
 static float glow_l, glow_r;
 static double g_dt;
 static void draw_pattern(float x, float y, float w, float h);
-static int g_orb;                       /* 1 = Orb statt Pattern-Ansicht (Taste V / Button) */
 /* Umschalter Pattern | Orb oben in der Karte (auch per Touch/Klick) */
 static void view_switch(float x, float y, float w) {
     float cw = 62, bx = g_portrait ? x + w - 14 - 2 * cw + 4 : x + w / 2 - cw, by = y + 8;
@@ -1561,6 +1562,7 @@ static void draw_ui_portrait(float W, float H) {
         draw_playlist_overlay(M, cy0, aw, sy + sh - cy0);   /* the transport bar below (LIST) still gets its click */
     } else {
         draw_overview(M, cy0, aw, oh);
+        draw_seal(M + aw - 12, cy0 + 6, 17, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
         if (g_orb) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
         else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
         float vuw = 130, spw = aw - vuw - M;
