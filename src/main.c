@@ -716,35 +716,74 @@ static void draw_spectrum(float x, float y, float w, float h) {
     }
 }
 
-/* ================================================================== Orb: Punktkugel, vom Spektrum verformt */
-#define ORB_RINGS 78                    /* Breitenkreise */
-#define ORB_LON 132                     /* Punkte am Aequator */
-#define ORB_MAX 8000
-static float orb_u[ORB_MAX][3];         /* Punkte auf der Einheitskugel, in Breitenkreisen: ergibt feine Linienstrukturen */
-static int orb_n;
+/* ================================================================== Orb: Geodaetennetz, vom Spektrum verformt
+ * Ikosaeder, zweimal unterteilt (162 Knoten, 480 Kanten, 320 Dreiecke), leicht verrauscht. Knoten und Dreiecke werden vom
+ * Spektrum nach aussen gedrueckt und leuchten auf; Aequator = Bass, Pole = Hoehen. */
+#define OB_V 162
+#define OB_F 320
+#define OB_E 480
+static float ob_u[OB_V][3];
+static int ob_f[OB_F][3], ob_e[OB_E][2], ob_nv, ob_nf, ob_ne;
 static float orb_bs[NBANDS];            /* geglaettetes Spektrum */
+
+static int ob_mid(int a, int b) {       /* Mittelpunkt zweier Knoten (mit Nachschlagen, damit Knoten nicht doppelt entstehen) */
+    float m[3];
+    for (int k = 0; k < 3; k++) m[k] = 0.5f * (ob_u[a][k] + ob_u[b][k]);
+    float l = sqrtf(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+    for (int k = 0; k < 3; k++) m[k] /= l;
+    for (int i = 0; i < ob_nv; i++)
+        if (fabsf(ob_u[i][0] - m[0]) + fabsf(ob_u[i][1] - m[1]) + fabsf(ob_u[i][2] - m[2]) < 1e-4f) return i;
+    for (int k = 0; k < 3; k++) ob_u[ob_nv][k] = m[k];
+    return ob_nv++;
+}
+static void ob_init(void) {
+    const float g = 1.61803399f;
+    static const float iv[12][3] = { {-1, 1, 0}, {1, 1, 0}, {-1, -1, 0}, {1, -1, 0}, {0, -1, 1}, {0, 1, 1}, {0, -1, -1}, {0, 1, -1}, {1, 0, -1}, {1, 0, 1}, {-1, 0, -1}, {-1, 0, 1} };
+    static const int itri[20][3] = { {0,11,5},{0,5,1},{0,1,7},{0,7,10},{0,10,11},{1,5,9},{5,11,4},{11,10,2},{10,7,6},{7,1,8},
+                                     {3,9,4},{3,4,2},{3,2,6},{3,6,8},{3,8,9},{4,9,5},{2,4,11},{6,2,10},{8,6,7},{9,8,1} };
+    (void)g;
+    ob_nv = 12; ob_nf = 20;
+    for (int i = 0; i < 12; i++) {
+        float l = sqrtf(iv[i][0] * iv[i][0] + iv[i][1] * iv[i][1] + iv[i][2] * iv[i][2]);
+        for (int k = 0; k < 3; k++) ob_u[i][k] = iv[i][k] / l;
+    }
+    for (int i = 0; i < 20; i++) for (int k = 0; k < 3; k++) ob_f[i][k] = itri[i][k];
+    for (int pass = 0; pass < 2; pass++) {
+        static int nf2[OB_F][3];
+        int n2 = 0;
+        for (int i = 0; i < ob_nf; i++) {
+            int a = ob_f[i][0], b = ob_f[i][1], c = ob_f[i][2];
+            int ab = ob_mid(a, b), bc = ob_mid(b, c), ca = ob_mid(c, a);
+            int t[4][3] = { {a, ab, ca}, {b, bc, ab}, {c, ca, bc}, {ab, bc, ca} };
+            for (int k = 0; k < 4; k++) { nf2[n2][0] = t[k][0]; nf2[n2][1] = t[k][1]; nf2[n2][2] = t[k][2]; n2++; }
+        }
+        for (int i = 0; i < n2; i++) for (int k = 0; k < 3; k++) ob_f[i][k] = nf2[i][k];
+        ob_nf = n2;
+    }
+    unsigned seed = 12345u;                              /* leichtes Rauschen: wirkt organischer als das glatte Raster */
+    for (int i = 0; i < ob_nv; i++) {
+        for (int k = 0; k < 3; k++) { seed = seed * 1664525u + 1013904223u; ob_u[i][k] += ((float)(seed >> 8) / 16777216.0f - 0.5f) * 0.10f; }
+        float l = sqrtf(ob_u[i][0] * ob_u[i][0] + ob_u[i][1] * ob_u[i][1] + ob_u[i][2] * ob_u[i][2]);
+        for (int k = 0; k < 3; k++) ob_u[i][k] /= l;
+    }
+    ob_ne = 0;                                           /* Kanten: jede Seite eines Dreiecks einmal */
+    for (int i = 0; i < ob_nf; i++)
+        for (int k = 0; k < 3; k++) {
+            int a = ob_f[i][k], b = ob_f[i][(k + 1) % 3], dup = 0;
+            if (a > b) { int tmp = a; a = b; b = tmp; }
+            for (int j = 0; j < ob_ne; j++) if (ob_e[j][0] == a && ob_e[j][1] == b) { dup = 1; break; }
+            if (!dup && ob_ne < OB_E) { ob_e[ob_ne][0] = a; ob_e[ob_ne][1] = b; ob_ne++; }
+        }
+}
 
 static void draw_orb(float x, float y, float w, float h) {
     static int init;
     static float t, spin;
-    if (!init) {
-        for (int j = 0; j < ORB_RINGS && orb_n < ORB_MAX; j++) {
-            float th = 3.14159265f * (j + 0.5f) / ORB_RINGS, yy = cosf(th), rr = sinf(th);
-            int cnt = (int)(ORB_LON * rr + 0.5f);
-            if (cnt < 6) cnt = 6;
-            float off = (j & 1) ? 0.5f : 0.0f;                 /* Kreise gegeneinander versetzt */
-            for (int k = 0; k < cnt && orb_n < ORB_MAX; k++) {
-                float ph = 6.2831853f * (k + off) / cnt;
-                orb_u[orb_n][0] = cosf(ph) * rr; orb_u[orb_n][1] = yy; orb_u[orb_n][2] = sinf(ph) * rr;
-                orb_n++;
-            }
-        }
-        init = 1;
-    }
+    if (!init) { ob_init(); init = 1; }
     float dt = (float)g_dt;
     if (dt > 0.1f) dt = 0.1f;
     float beat = g_paused ? 0.0f : g_beat;
-    if (!g_paused) { t += dt; spin += dt * (0.20f + 0.45f * beat); }
+    if (!g_paused) { t += dt; spin += dt * (0.16f + 0.35f * beat); }
     card(x, y, w, h, 0);
     text(x + 18, y + 10, 12, DIM, "ORB");
     for (int b = 0; b < NBANDS; b++) {      /* Nachbarbaender mischen: weichere Wellen */
@@ -752,30 +791,52 @@ static void draw_orb(float x, float y, float w, float h) {
         float v = 0.5f * band[b] + 0.25f * (l + r);
         orb_bs[b] += (v - orb_bs[b]) * (v > orb_bs[b] ? 0.7f : 0.25f);
     }
-    float cx = x + w / 2, cy = y + h / 2 + 6, R = 0.26f * (w < h ? w : h);
+    float cx = x + w / 2, cy = y + h / 2 + 6, R = 0.30f * (w < h ? w : h);
     float ca = cosf(spin), sa = sinf(spin), ct = cosf(0.42f), st = sinf(0.42f), fz = 8.0f * R;
-    set_additive(1);
-    blob(cx, cy, R * (0.55f + 0.12f * beat), alpha(VC[0], 0.05f + 0.08f * beat));
-    int ostep = g_mobile ? 2 : 1;              /* Handy: jeder zweite Punkt, dafuer etwas groesser */
-    for (int i = 0; i < orb_n; i += ostep) {
-        float ux = orb_u[i][0], uy = orb_u[i][1], uz = orb_u[i][2];
+    static float sx[OB_V], sy[OB_V], dn[OB_V], ev[OB_V];
+    for (int i = 0; i < ob_nv; i++) {
+        float ux = ob_u[i][0], uy = ob_u[i][1], uz = ob_u[i][2];
         float lat = fabsf(uy), bf = lat * (NBANDS - 1);      /* Aequator = Bass, Pole = Hoehen */
         int b0 = (int)bf;
         if (b0 > NBANDS - 2) b0 = NBANDS - 2;
         float fr = bf - b0, lon = atan2f(uz, ux);
         float e = (orb_bs[b0] * (1 - fr) + orb_bs[b0 + 1] * fr) * (0.65f + 0.35f * sinf(lon * 3.0f + t * 1.3f + lat * 5.0f));
         if (e > 1) e = 1;
-        float rad = R * (1.0f + 0.07f * beat + 0.55f * e);
+        ev[i] = e;
+        float rad = R * (1.0f + 0.06f * beat + 0.40f * e);
         float px = ux * rad, py = uy * rad, pz = uz * rad;
         float rx = px * ca + pz * sa, rz = -px * sa + pz * ca;
         float ry = py * ct - rz * st, rz2 = py * st + rz * ct;
-        float sc = fz / (fz + rz2), sx = cx + rx * sc, sy = cy + ry * sc;
-        float dn = 0.5f - 0.5f * rz2 / (1.6f * R);            /* 1 = vorne, 0 = hinten */
-        if (dn < 0) dn = 0;
-        if (dn > 1) dn = 1;
+        float sc = fz / (fz + rz2);
+        sx[i] = cx + rx * sc; sy[i] = cy + ry * sc;
+        float d = 0.5f - 0.5f * rz2 / (1.5f * R);             /* 1 = vorne, 0 = hinten */
+        dn[i] = d < 0 ? 0 : (d > 1 ? 1 : d);
+    }
+    set_additive(1);
+    blob(cx, cy, R * (0.60f + 0.12f * beat), alpha(VC[0], 0.05f + 0.08f * beat));
+    for (int f = 0; f < ob_nf; f++) {                        /* halbtransparente Flaechen, je nach Energie der drei Knoten */
+        int a = ob_f[f][0], b = ob_f[f][1], c = ob_f[f][2];
+        float e = (ev[a] + ev[b] + ev[c]) * (1.0f / 3.0f), d = (dn[a] + dn[b] + dn[c]) * (1.0f / 3.0f);
+        float al = (0.012f + 0.30f * e * e) * (0.25f + 0.75f * d);
+        if (al < 0.01f) continue;
+        col col0 = e < 0.5f ? mix(VC[0], VC[1], e * 2.0f) : mix(VC[1], VC[2], (e - 0.5f) * 2.0f);
+        tri(sx[a], sy[a], sx[b], sy[b], sx[c], sy[c], alpha(mix(col0, C(1, 1, 1, 1), 0.25f), al));
+    }
+    for (int k = 0; k < ob_ne; k++) {                        /* Kanten */
+        int a = ob_e[k][0], b = ob_e[k][1];
+        float e = 0.5f * (ev[a] + ev[b]), d = 0.5f * (dn[a] + dn[b]);
         col c = e < 0.5f ? mix(VC[0], VC[1], e * 2.0f) : mix(VC[1], VC[2], (e - 0.5f) * 2.0f);
-        c = mix(c, C(1, 1, 1, 1), 0.18f * dn);
-        blob(sx, sy, (0.60f + 0.75f * dn + 0.70f * e) * (g_mobile ? 1.3f : 1.0f), alpha(c, (0.13f + 0.62f * dn) * (0.42f + 0.95f * e)));
+        c = mix(c, C(1, 1, 1, 1), 0.45f);
+        float xy[4] = { sx[a], sy[a], sx[b], sy[b] };
+        polyline(xy, 2, 0.55f + 0.5f * d, 3.0f, alpha(c, (0.10f + 0.50f * d) * (0.55f + 0.9f * e)));
+    }
+    for (int i = 0; i < ob_nv; i++) {                        /* Knoten: heller Kern plus Leuchten */
+        float e = ev[i], d = dn[i];
+        col c = e < 0.5f ? mix(VC[0], VC[1], e * 2.0f) : mix(VC[1], VC[2], (e - 0.5f) * 2.0f);
+        c = mix(c, C(1, 1, 1, 1), 0.55f);
+        float rr = 0.9f + 1.5f * d + 1.6f * e;
+        rrect(sx[i] - rr, sy[i] - rr, rr * 2, rr * 2, rr, alpha(c, 0.25f + 0.70f * d));
+        if (e > 0.12f) blob(sx[i], sy[i], 3.0f + 5.0f * e, alpha(c, 0.30f * e * (0.3f + 0.7f * d)));
     }
     set_additive(0);
     view_switch(x, y, w);
