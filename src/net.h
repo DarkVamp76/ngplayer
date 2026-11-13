@@ -14,3 +14,5 @@ int net_have_curl(void);
 int ma_download(int id, char *out, size_t cap);
 /* Modul-ID aus Eingabe: reine Zahl oder Link mit "moduleid=", "?request=view_by_moduleid&query=" bzw. ".../module/..._<id>". 0 = nicht erkannt */
 int ma_parse_id(const char *s);
+/* The Mod Archive: ID of a random module (asks the "random" page, can be slow). 0 = failed. Not available in the web build (done by ma.php there). */
+int ma_random_id(void);

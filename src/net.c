@@ -88,3 +88,28 @@ int ma_parse_id(const char *s) {
     if (u && strstr(s, "modarchive")) { v = strtol(u + 1, &e, 10); if (v > 0) return (int)v; }
     return 0;
 }
+
+int ma_random_id(void) {
+#ifdef __EMSCRIPTEN__
+    return 0;
+#else
+    char dir[900], page[1000];
+    if (net_cache_dir(dir, sizeof dir)) return 0;
+    snprintf(page, sizeof page, "%s/random.html", dir);
+    if (net_get("https://modarchive.org/index.php?request=view_random", page, 25)) return 0;
+    FILE *f = fopen(page, "rb");
+    if (!f) return 0;
+    char *buf = (char *)malloc(1 << 20);
+    size_t n = buf ? fread(buf, 1, (1 << 20) - 1, f) : 0;
+    fclose(f);
+    unlink(page);
+    int id = 0;
+    if (buf) {
+        buf[n] = 0;
+        const char *p = strstr(buf, "moduleid=");                  /* the module of the random page; the first link is the one to download */
+        if (p) id = (int)strtol(p + 9, NULL, 10);
+        free(buf);
+    }
+    return id > 0 ? id : 0;
+#endif
+}
