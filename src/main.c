@@ -1750,7 +1750,22 @@ EMSCRIPTEN_KEEPALIVE void ng_web_paste(const char *t) {
 /* ---- Share: right click on a Mod Archive entry -> menu "Share" copies https://ngplayer.org/player/#<ID> to the clipboard ---- */
 static void share_link(int idx) {
     char url[96]; snprintf(url, sizeof url, "https://ngplayer.org/player/#%d", pl[idx].ma_id);
+#ifdef __EMSCRIPTEN__
+    /* SDL's clipboard does not reach the browser clipboard from the main loop: use the async API, with an execCommand fallback */
+    EM_ASM({
+        var t = UTF8ToString($0);
+        var fb = function () {
+            var a = document.createElement('textarea');
+            a.value = t; a.style.position = 'fixed'; a.style.opacity = '0';
+            document.body.appendChild(a); a.focus(); a.select();
+            try { document.execCommand('copy'); } catch (e) {}
+            document.body.removeChild(a);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).catch(fb); else fb();
+    }, url);
+#else
     SDL_SetClipboardText(url);
+#endif
     snprintf(toast_txt, sizeof toast_txt, "Link copied"); toast_t = 2.0f;
 }
 /* Info: open the module page on The Mod Archive in the browser */
