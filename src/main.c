@@ -1491,9 +1491,19 @@ static void draw_ui(double t) {
                 click = 0;
             }
         }
-        text(bx + 190, cy - 20, 12, FAINT, "Space pause  \xb7  Left/Right seek (subsong)  \xb7  Up/Down track  \xb7  Shift+arrows channels");
-        { char lb[96]; snprintf(lb, sizeof lb, "O Mod Archive  \xb7  V orb  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms  \xb7  Esc quit", g_lag_ms); text(bx + 190, cy + 2, 12, FAINT, lb); }
         float vx = bx + bw - 250, vw = 200;
+        float hmax = (vx - 56) - (bx + 190);        /* free room for the hints, left of the VOL label */
+        {
+            char l1[160] = "Space pause  \xb7  Left/Right seek (subsong)  \xb7  Up/Down track  \xb7  Shift+arrows channels", l2[160];
+#ifdef __EMSCRIPTEN__
+            snprintf(l2, sizeof l2, "O Mod Archive  \xb7  V orb  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms", g_lag_ms);
+#else
+            snprintf(l2, sizeof l2, "O Mod Archive  \xb7  V orb  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms  \xb7  Esc quit", g_lag_ms);
+#endif
+            fit_text(l1, hmax, 12); fit_text(l2, hmax, 12);
+            text(bx + 190, cy - 20, 12, FAINT, l1);
+            text(bx + 190, cy + 2, 12, FAINT, l2);
+        }
         text(vx - 44, cy - 8, 12, DIM, "VOL");
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
         rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
