@@ -791,7 +791,7 @@ static void draw_orb(float x, float y, float w, float h) {
         float v = 0.5f * band[b] + 0.25f * (l + r);
         orb_bs[b] += (v - orb_bs[b]) * (v > orb_bs[b] ? 0.7f : 0.25f);
     }
-    float cx = x + w / 2, cy = y + h / 2 + 6, R = 0.30f * (w < h ? w : h);
+    float cx = x + w / 2, cy = y + h / 2 + 6, R = 0.34f * (w < h ? w : h);
     float ca = cosf(spin), sa = sinf(spin), ct = cosf(0.42f), st = sinf(0.42f), fz = 8.0f * R;
     static float sx[OB_V], sy[OB_V], dn[OB_V], ev[OB_V];
     for (int i = 0; i < ob_nv; i++) {
@@ -803,7 +803,7 @@ static void draw_orb(float x, float y, float w, float h) {
         float e = (orb_bs[b0] * (1 - fr) + orb_bs[b0 + 1] * fr) * (0.65f + 0.35f * sinf(lon * 3.0f + t * 1.3f + lat * 5.0f));
         if (e > 1) e = 1;
         ev[i] = e;
-        float rad = R * (1.0f + 0.06f * beat + 0.40f * e);
+        float rad = R * (1.0f + 0.06f * beat + 0.36f * e);
         float px = ux * rad, py = uy * rad, pz = uz * rad;
         float rx = px * ca + pz * sa, rz = -px * sa + pz * ca;
         float ry = py * ct - rz * st, rz2 = py * st + rz * ct;
@@ -1623,7 +1623,7 @@ static void draw_ui_portrait(float W, float H) {
         draw_playlist_overlay(M, cy0, aw, sy + sh - cy0);   /* the transport bar below (LIST) still gets its click */
     } else {
         draw_overview(M, cy0, aw, oh);
-        draw_seal(M + aw - 12, cy0 + 6, 17, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
+        draw_seal(M + aw - 12, cy0 + 6, 21, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
         if (g_orb) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
         else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
         float vuw = 130, spw = aw - vuw - M;
