@@ -1215,14 +1215,115 @@ static void seek_order(int target) {
 }
 
 
+/* ---------------------------------------------------------------- Dice: random module from The Mod Archive
+ * A little 3D die at the bottom of the playlist. A click rolls it (it tumbles while the module is fetched) and it settles on a face. */
+static void ma_random(void);
+static int ma_busy(void);
+static int dice_roll, dice_stop_req;         /* rolling / the module has arrived, stop as soon as the roll was long enough */
+static float dice_t, dice_since, dice_hop, dice_ang[3], dice_vel[3];
+
+static void dice_start(void) {
+    dice_roll = 1; dice_stop_req = 0; dice_since = 0;
+    dice_vel[0] = 7.5f; dice_vel[1] = -9.5f; dice_vel[2] = 5.5f;
+}
+static void m3_mul(float r[3][3], const float a[3][3], const float b[3][3]) {
+    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) r[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+}
+static void m3_rot(float m[3][3], int axis, float a) {
+    float c = cosf(a), s = sinf(a);
+    memset(m, 0, 9 * sizeof(float));
+    int i = (axis + 1) % 3, j = (axis + 2) % 3;
+    m[axis][axis] = 1; m[i][i] = c; m[i][j] = -s; m[j][i] = s; m[j][j] = c;
+}
+static void draw_dice(float cx, float cy, float s) {
+    static const float F[6][3][3] = {           /* face: normal, u, v (value 1..6, opposite faces add up to 7) */
+        { {0, 0, 1}, {1, 0, 0}, {0, 1, 0} },   { {1, 0, 0}, {0, 0, -1}, {0, 1, 0} },   { {0, 1, 0}, {1, 0, 0}, {0, 0, -1} },
+        { {0, -1, 0}, {1, 0, 0}, {0, 0, 1} },  { {-1, 0, 0}, {0, 0, 1}, {0, 1, 0} },   { {0, 0, -1}, {-1, 0, 0}, {0, 1, 0} } };
+    static const signed char PIP[6][6][2] = {
+        { {0, 0} }, { {-1, 1}, {1, -1} }, { {-1, 1}, {0, 0}, {1, -1} }, { {-1, -1}, {-1, 1}, {1, -1}, {1, 1} },
+        { {-1, -1}, {-1, 1}, {0, 0}, {1, -1}, {1, 1} }, { {-1, -1}, {-1, 0}, {-1, 1}, {1, -1}, {1, 0}, {1, 1} } };
+    static const int NPIP[6] = { 1, 2, 3, 4, 5, 6 };
+    float dt = (float)g_dt > 0.1f ? 0.1f : (float)g_dt;
+    dice_t += dt;
+    if (dice_roll) {
+        dice_since += dt;
+        for (int k = 0; k < 3; k++) dice_ang[k] += dice_vel[k] * dt;
+        if (dice_stop_req && dice_since > 1.1f) dice_roll = 0;
+    } else {
+        float damp = expf(-dt * 4.5f), q = 1.5707963f;
+        for (int k = 0; k < 3; k++) {
+            dice_vel[k] *= damp;
+            dice_ang[k] += dice_vel[k] * dt;
+            if (fabsf(dice_vel[k]) < 2.5f) dice_ang[k] += (roundf(dice_ang[k] / q) * q - dice_ang[k]) * (dt * 10 > 1 ? 1 : dt * 10);   /* come to rest on a face */
+        }
+    }
+    dice_hop += ((dice_roll ? 1.0f : 0.0f) - dice_hop) * (dt * 8 > 1 ? 1 : dt * 8);
+    int hv = hit(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f);
+    float sc0 = s * (hv && !dice_roll ? 1.14f : 1.0f);
+    float hop = dice_roll ? fabsf(sinf(dice_since * 9.0f)) * s * 0.9f * dice_hop : 0;
+
+    float Rx[3][3], Ry[3][3], Rz[3][3], T1[3][3], T2[3][3], R[3][3], V1[3][3], V2[3][3], M[3][3];
+    m3_rot(Rz, 2, dice_ang[2]); m3_rot(Ry, 1, dice_ang[1]); m3_rot(Rx, 0, dice_ang[0]);
+    m3_mul(T1, Ry, Rz); m3_mul(R, Rx, T1);
+    m3_rot(V1, 0, 0.55f + 0.05f * sinf(dice_t * 0.9f)); m3_rot(V2, 1, -0.65f + 0.10f * sinf(dice_t * 1.1f));
+    m3_mul(T2, V1, V2); m3_mul(M, T2, R);
+
+    float py = cy - hop;
+    rrect(cx - sc0 * 1.15f, cy + s * 1.55f, sc0 * 2.3f, s * 0.38f, s * 0.19f, C(0, 0, 0, 0.30f * (1.0f - 0.45f * dice_hop)));   /* shadow */
+    struct { float x[4], y[4]; float nz, sh; int v; } fc[6];
+    const float lx = -0.40f, ly = 0.70f, lz = 0.59f;
+    for (int f = 0; f < 6; f++) {
+        float n[3], u[3], v[3];
+        for (int k = 0; k < 3; k++) {
+            n[k] = M[k][0] * F[f][0][0] + M[k][1] * F[f][0][1] + M[k][2] * F[f][0][2];
+            u[k] = M[k][0] * F[f][1][0] + M[k][1] * F[f][1][1] + M[k][2] * F[f][1][2];
+            v[k] = M[k][0] * F[f][2][0] + M[k][1] * F[f][2][1] + M[k][2] * F[f][2][2];
+        }
+        fc[f].nz = n[2]; fc[f].v = n[2] > 0.02f;
+        float dl = n[0] * lx + n[1] * ly + n[2] * lz;
+        fc[f].sh = 0.30f + 0.70f * (dl > 0 ? dl : 0);
+        if (!fc[f].v) continue;
+        static const signed char CS[4][2] = { {-1, 1}, {1, 1}, {1, -1}, {-1, -1} };
+        for (int c = 0; c < 4; c++) {
+            float X = n[0] + CS[c][0] * u[0] + CS[c][1] * v[0], Y = n[1] + CS[c][0] * u[1] + CS[c][1] * v[1], Z = n[2] + CS[c][0] * u[2] + CS[c][1] * v[2];
+            float pz = 1.0f / (1.0f - 0.10f * Z);
+            fc[f].x[c] = cx + X * sc0 * pz; fc[f].y[c] = py - Y * sc0 * pz;
+        }
+        col body = mix(C(0.06f, 0.08f, 0.16f, 0.97f), mix(C(0.20f, 0.27f, 0.46f, 0.97f), VC[0], 0.22f), fc[f].sh);
+        tri(fc[f].x[0], fc[f].y[0], fc[f].x[1], fc[f].y[1], fc[f].x[2], fc[f].y[2], body);
+        tri(fc[f].x[0], fc[f].y[0], fc[f].x[2], fc[f].y[2], fc[f].x[3], fc[f].y[3], body);
+        col pc = mix(VC[0], C(1, 1, 1, 1), 0.75f);
+        for (int p = 0; p < NPIP[f]; p++) {
+            float gx = PIP[f][p][0] * 0.55f, gy = PIP[f][p][1] * 0.55f;
+            float X = n[0] + gx * u[0] + gy * v[0], Y = n[1] + gx * u[1] + gy * v[1], Z = n[2] + gx * u[2] + gy * v[2];
+            float pz = 1.0f / (1.0f - 0.10f * Z), r = sc0 * pz * 0.17f * (0.45f + 0.55f * n[2]);
+            rrect(cx + X * sc0 * pz - r, py - Y * sc0 * pz - r, 2 * r, 2 * r, r, alpha(pc, 0.55f + 0.45f * fc[f].sh));
+        }
+    }
+    set_additive(1);                                          /* glow, edges and pip light */
+    blob(cx, py, s * 1.5f, alpha(VC[0], 0.10f + 0.16f * dice_hop + (hv ? 0.10f : 0.0f)));
+    for (int f = 0; f < 6; f++) {
+        if (!fc[f].v) continue;
+        float xy[10] = { fc[f].x[0], fc[f].y[0], fc[f].x[1], fc[f].y[1], fc[f].x[2], fc[f].y[2], fc[f].x[3], fc[f].y[3], fc[f].x[0], fc[f].y[0] };
+        polyline(xy, 5, 0.9f, 3.0f, alpha(mix(VC[0], C(1, 1, 1, 1), 0.35f), 0.30f + 0.55f * fc[f].sh));
+    }
+    set_additive(0);
+    if (!ma_busy() && clicked(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f)) { ma_random(); click = 0; }
+}
+
 /* ---------------------------------------------------------------- The-Mod-Archive-Dialog (Download per ID oder Link) */
 static int ma_open, ma_eat;
 static char ma_buf[256]; static int ma_len;
 static char ma_msg[160]; static int ma_msg_err;
 static volatile int dl_state;              /* 0 leer, 1 laedt, 2 fertig, 3 Fehler */
-static int dl_id, dl_rc; static char dl_path[1100]; static SDL_Thread *dl_thr;
+static int dl_id, dl_rc, dl_random; static char dl_path[1100]; static SDL_Thread *dl_thr;   /* dl_random: the dice asked for it, dl_id 0 = ID not known yet */
+static int ma_busy(void) { return dl_state == 1; }
 
 static int dl_thread(void *p) {
+    if (!dl_id) {                                          /* random module: ask The Mod Archive for an ID first */
+        dl_id = ma_random_id();
+        if (!dl_id) { dl_rc = 28; dl_state = 3; return 0; }
+    }
     dl_rc = ma_download(dl_id, dl_path, sizeof dl_path);
     dl_state = dl_rc ? 3 : 2;
     return 0;
@@ -1247,9 +1348,25 @@ static void ma_start(void) {
     snprintf(ma_msg, sizeof ma_msg, "Downloading module #%d ...", id); ma_msg_err = 0;
     dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
 }
+static void ma_random(void) {
+    if (dl_state == 1) return;
+#ifdef __EMSCRIPTEN__
+    dl_id = 0; dl_random = 1; dl_state = 1; dice_start();
+    EM_ASM({ if (window.ngMaRandom) window.ngMaRandom(); });          /* the page asks ma.php for an ID, then fetches the module */
+    return;
+#endif
+    if (!net_have_curl()) { snprintf(toast_txt, sizeof toast_txt, "curl not found - please install it"); toast_t = 3.0f; return; }
+    dl_id = 0; dl_random = 1; dl_state = 1; dice_start();
+    dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
+}
 static void ma_poll(void) {
     if (dl_state == 2 || dl_state == 3) {
         SDL_WaitThread(dl_thr, NULL); dl_thr = NULL;
+        if (dl_random) {
+            dice_stop_req = 1;                                     /* the dice settles */
+            if (dl_state == 3) { snprintf(toast_txt, sizeof toast_txt, "Mod Archive did not answer"); toast_t = 3.0f; }
+            dl_random = 0;
+        }
         if (dl_state == 2) {
             add_file(dl_path);
             pl[npl - 1].ma_id = dl_id;
@@ -1269,6 +1386,7 @@ static void ma_key(const SDL_KeyboardEvent *k) {
     case SDLK_ESCAPE: ma_show(0); break;
     case SDLK_RETURN: case SDLK_KP_ENTER: ma_start(); break;
     case SDLK_BACKSPACE: if (ma_len > 0) ma_buf[--ma_len] = 0; break;
+    case SDLK_r: if (k->keysym.mod & KMOD_CTRL) { ma_show(0); ma_random(); } break;
     case SDLK_v:
 #ifndef __EMSCRIPTEN__   /* Web: Einfuegen laeuft ueber das paste-Ereignis der Seite (ng_web_paste) */
         if (k->keysym.mod & KMOD_CTRL) {
@@ -1300,7 +1418,7 @@ static void draw_ma_dialog(double t) {
     text(bx + 12, by + 9, 15, TXT, s);
     if (dl_state != 1 && ((int)(t * 2) & 1)) rect(bx + 12 + text_width(s, 15) + 2, by + 8, 2, 20, VC[0]);
     if (ma_msg[0]) text(x + 24, y + 120, 13, ma_msg_err ? WARN : VC[0], ma_msg);
-    else text(x + 24, y + 120, 12, FAINT, "Enter downloads  \xb7  Ctrl+V paste  \xb7  Esc close");
+    else text(x + 24, y + 120, 12, FAINT, "Enter downloads  \xb7  Ctrl+V paste  \xb7  Ctrl+R random  \xb7  Esc close");
 }
 
 static void draw_ui_portrait(float W, float H);
@@ -1330,7 +1448,7 @@ static void draw_ui(double t) {
         text_right(x + w - 18, y + 14, 13, DIM, cnt);
         pl_build_vis();
         if (npl) pl_tabs(x, y + 40, w, 0, 0);
-        float ry = y + (npl ? 76 : 44), rh = 28, area = h - (npl ? 76 : 44) - 40;
+        float ry = y + (npl ? 76 : 44), rh = 28, area = h - (npl ? 76 : 44) - 66;
         int vis_rows = (int)(area / rh), maxscroll = nvis > vis_rows ? nvis - vis_rows : 0;
         if (list_follow && cvis >= 0) {
             if (cvis < list_scroll) list_scroll = (float)cvis;
@@ -1343,7 +1461,7 @@ static void draw_ui(double t) {
         for (int r = 0; r < vis_rows + 1 && first + r < nvis; r++) {
             int i = pl_vis[first + r];
             float yy = ry + r * rh;
-            if (yy + rh > y + h - 36) break;
+            if (yy + rh > y + h - 62) break;
             int isc = i == cur, hv = hit(x + 8, yy, w - 16, rh);
             if (isc) {
                 rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(VC[0], 0.16f));
@@ -1368,7 +1486,8 @@ static void draw_ui(double t) {
             }
             if (clicked(x + 8, yy, w - 16, rh)) { play_index(i); click = 0; }
         }
-        { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s  \xb7  Module player", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
+        { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
+        draw_dice(x + w - 44, y + h - 33, 12.5f);
         if (npl && !nvis) text(x + 18, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
         if (!npl) {
             text(x + 18, y + 60, 14, DIM, "No files.");
