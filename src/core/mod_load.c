@@ -11,6 +11,22 @@ static int period_to_note(int per){
     return 84 + 0x17;
 }
 
+/* A file without a "M.K."-style tag is only accepted as an old 15-sample MOD when its header looks like one: printable sample names,
+ * finetune <= 15, volume <= 64 on used samples, a sane song length and order list, and room for at least the first pattern. */
+static int mod15_plausible(const uint8_t *b, size_t len){
+    if (len < 600 + 1024) return 0;
+    for (int i = 0; i < 15; i++) {
+        const uint8_t *p = b + 20 + i * 30;
+        int end = 0;
+        for (int k = 0; k < 22; k++) { if (!p[k]) end = 1; else if (end || p[k] < 0x20 || p[k] > 0x7E) { if (p[k] < 0x20 || end) return 0; } }
+        unsigned l = (p[22] << 8) | p[23];
+        if (l && ((p[24] & 0xf0) || p[25] > 64)) return 0;
+    }
+    if (b[470] < 1 || b[470] > 128) return 0;
+    for (int i = 0; i < 128; i++) if (b[472 + i] > 0x7F) return 0;
+    return 1;
+}
+
 int xmod_load(XSong *s, const uint8_t *b, size_t len){
     memset(s, 0, sizeof *s); s->fmt = 1; s->gvol = 255; for (int i = 0; i < 32; i++) { s->chpan[i] = -1; s->chen[i] = 1; }
     s->maxvol = 0x40; s->speed = 6; s->tempo = 0x7d;
@@ -24,6 +40,7 @@ int xmod_load(XSong *s, const uint8_t *b, size_t len){
         else if (!memcmp(g,"FLT8",4)||!memcmp(g,"OCTA",4)||!memcmp(g,"CD81",4)) nch = 4;  /* Original: 4 Kanaele */
         else nsm = 15;   /* kein Kennwort -> altes 15-Sample-MOD */
     }
+    if (nsm == 15 && !mod15_plausible(b, len)) return -9;   /* not a MOD at all (e.g. an AMF or another unsupported format): do not play garbage */
     if (nsm == 15) ami = 1;                  /* alte 15-Sample-MODs stammen vom Amiga */
     s->amiga = ami;
     if (nch < 1 || nch > 32) return -1;
