@@ -38,7 +38,7 @@ typedef struct ITPlayer {
     int speed, tempo, gvol, tick_count, row_count, process_row, process_order, cur_order, cur_pat, row, break_row, frame_delay, firsttick;
     V ch[192];
     uint8_t *visited; int ended;
-    int tk_left, tk_len; double K; int jumped;
+    int tk_left, tk_len; double tk_frac; double K; int jumped;
     double *tkbuf; int16_t *tkout; int tkcap; int solo; long long nsamp;
     float *scb; int scl; unsigned scn;   /* Scope-Ringpuffer je Kanal */
     float *tksc; int tkscap;             /* Scope des laufenden Ticks: [64][tk_len] */
@@ -830,7 +830,11 @@ int itp_render(ITPlayer *p, int16_t *out, int n){
             if (!process_tick(p)) { p->ended = 1; break; }
             if (p->firsttick && getenv("ITPOS")) fprintf(stderr, "POS %.2f %d %d sp%d tp%d\n", (double)p->nsamp / p->rate, p->cur_order, p->row, p->speed, p->tempo);
             update_channels(p);
-            p->tk_len = p->tk_left = (int)(p->rate * 5 / (p->tempo * 2)); if (p->tk_left < 1) p->tk_left = p->tk_len = 1;
+            /* tick length: rate * 2.5 / tempo. IT files use the truncated whole number of samples (checked bit-exact against libopenmpt
+             * at 44.1 kHz on 20 files). OpenMPT's own MPTM format (cmwt 0x888) uses the exact fractional length instead: carry the remainder. */
+            if (p->s->cmwt == 0x888) { double tl = (double)p->rate * 2.5 / p->tempo + p->tk_frac; p->tk_len = p->tk_left = (int)tl; p->tk_frac = tl - p->tk_len; }
+            else p->tk_len = p->tk_left = (int)(p->rate * 5 / (p->tempo * 2));
+            if (p->tk_left < 1) p->tk_left = p->tk_len = 1;
             if (p->tkcap < p->tk_len * 2) { p->tkcap = p->tk_len * 2; p->tkbuf = realloc(p->tkbuf, sizeof(double) * p->tkcap); p->tkout = realloc(p->tkout, sizeof(int16_t) * p->tkcap); }
             memset(p->tkbuf, 0, sizeof(double) * 2 * p->tk_len);
             if (p->scb) { if (p->tkscap < p->tk_len) { p->tkscap = p->tk_len; p->tksc = realloc(p->tksc, sizeof(float) * 64 * (size_t)p->tkscap); } memset(p->tksc, 0, sizeof(float) * 64 * (size_t)p->tk_len); }
