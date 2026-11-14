@@ -801,6 +801,10 @@ ITPlayer *itp_new(const ITSong *s, int rate){
     p->tick_count = 1; p->row_count = 0; p->process_row = NEXT_ORDER; p->process_order = -1; p->break_row = 0;
     p->visited = calloc((size_t)(s->nord + 1) * 256, 1);
     p->K = 1.0 / 65536.0;     /* gegen libopenmpt kalibriert (Faktor 4 gegenueber Schism-Skalierung) */
+    /* Files saved by ModPlug Tracker 1.17/1.18 (cwtv 0x217, cmwt 0x200): libopenmpt mixes them with its older mix levels, which are
+     * normalised by the number of channels. Measured on 4 files (8, 12, 12, 14 channels; mv 32..100): gain ~ 5.5 / channels,
+     * independent of the mix volume. */
+    if (s->cwt == 0x217 && s->cmwt == 0x200 && s->nch > 0) p->K *= 5.5 / s->nch;
     { const char *e = getenv("ITGAIN"); if (e) p->K *= atof(e); }
     for (int i = 0; i < 64; i++) {
         V *c = &p->ch[i];
