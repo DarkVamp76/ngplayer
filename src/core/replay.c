@@ -58,7 +58,7 @@ unsigned long long xplay_mute = 0;   /* Bit n = Kanal n stumm (alle Formate) */
 struct XPlayer {
     const XSong *s; int rate;
     Ch ch[NCH]; Voice v[NCH];
-    int order, row, tick, speed, tempo;
+    int order, row, tick, speed, tempo; double tempof;   /* tempof: tempo as a fraction (0 = use tempo) */
     int d_ord, d_row;                /* Anzeigeposition: Zeile, die gerade gespielt wird */
     float *scb; int scl; unsigned scn;   /* Scope-Ringpuffer je Kanal (scb[ch*scl + pos]) */
     int delay_cnt, in_delay;
@@ -287,10 +287,10 @@ static void do_effect(XPlayer *p, int chn, Ch *c, int tick){
                volslide(p, c, par, tick); c->vE8 = c->vD8; par = c->par; break;
     case 0x0C: { int v = par > mx ? mx : par; c->vD8 = c->vE8 = v; } break;
     case 0x0E: e_sub(p, chn, c, par, tick); break;
-    case 0x0F: if (!tick && !p->in_delay && par) { if (par <= 0x20) p->speed = par; else p->tempo = par; } break;
+    case 0x0F: if (!tick && !p->in_delay && par) { if (par <= 0x20) p->speed = par; else { p->tempo = par; p->tempof = 0; } } break;
     case 0x10: if (!tick && !p->in_delay && (par & 0x7f)) p->speed = par & 0x7f; break;
     case 0x11: case 0x17: case 0x18: dslide(p, c, par, tick); c->vE8 = c->vD8; break;
-    case 0x16: if (!tick && !p->in_delay && par >= 0x20) p->tempo = par; break;
+    case 0x16: if (!tick && !p->in_delay && par >= 0x20) { p->tempo = par; p->tempof = 0; } break;
     case 0x1A: if (!tick) p->gvol = par > 255 ? 255 : par; break;
     case 0x24: break;   /* gemessen: Zxx hat im Original keine Wirkung */
     default: break;
@@ -393,7 +393,7 @@ XPlayer *xplay_new(const XSong *s, int rate){
     if (s->fmt == 4) return (XPlayer *)xxm_new(s, rate);
     XPlayer *p = calloc(1, sizeof *p);
     { const char*e=getenv("XQC"); g_qc = e ? atoi(e) : (s->fmt == 1 ? 2 : 0); }
-    p->s = s; p->rate = rate; p->speed = s->speed; p->tempo = s->tempo; p->gvol = s->gvol ? s->gvol : 255;
+    p->s = s; p->rate = rate; p->speed = s->speed; p->tempo = s->tempo; p->tempof = s->tempo_exact; p->gvol = s->gvol ? s->gvol : 255;
     for (int i = 0; i < NCH; i++) p->ch[i].pan5c = (s->fmt == 1 && s->chpan[i] < 0) ? ((i % 4 == 0 || i % 4 == 3) ? 60 : 195) : (s->chpan[i] >= 0 ? s->chpan[i] : 128);
     p->tick = 0; p->acc = 0;
     p->lp = (s->fmt == 1 && s->amiga) ? 1 : 0;
@@ -527,7 +527,7 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
             do_tick(p);
             if (p->done) break;
             { static int tk=-1; if(tk<0){const char*e=getenv("XTK"); tk=e?atoi(e):1;}
-              double t = p->rate * 2.5 / p->tempo;
+              double t = p->rate * 2.5 / (p->tempof > 0 ? p->tempof : (double)p->tempo);
               p->acc += tk==1 ? (double)(long)t : tk==2 ? (double)(long)(t+0.5) : t; }
             advance(p);
         }
