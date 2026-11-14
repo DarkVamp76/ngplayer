@@ -29,7 +29,8 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | FAR (Farandole Composer) | supported (16 channels, 8/16-bit samples, played through the MOD engine; fine tempo D?/E?, slide-to-volume A? and note offset C? are not implemented) |
 | MDL (Digitrakker) | supported (up to 32 channels, 8/16-bit and packed samples, volume/panning envelopes and fadeout, played through the XM engine; frequency envelopes, auto vibrato, instrument panning and pattern-loop E6x are not implemented) |
 | MED / OctaMED (MMD0-MMD3) | supported (sample instruments, up to 32 tracks, played through the MOD engine; synth/hybrid instruments are silent) |
-| AMF (Asylum Music Format, *Crusader: No Remorse / No Regret*; signature `ASYLUM Music Format V1.0`) | supported (8 channels, played through the MOD engine) |
+| AMF (DSMI, Otto Chrons; signature `AMF` + version 0x08-0x0E) | supported (up to 32 channels, event-based tracks converted to MOD cells, played through the MOD engine; slides and portamento stay active until the next effect, as in the format; checked against one file only, some effects are approximated) |
+| AMF (Asylum Music Format, *Crusader: No Remorse / No Regret*; signature `ASYLUM Music Format V1.0`; a different format than DSMI AMF) | supported (8 channels, played through the MOD engine) |
 | XM (FastTracker 2) | supported |
 | IT (Impulse Tracker) | supported, still being completed |
 | DMF (X-Tracker, v8) | supported, some rare effects still missing |
@@ -37,7 +38,7 @@ level of quality on Linux, together with an interface that is a joy to look at.
 
 Looking for DMF files to try? The [Radical Rhythms Archive](https://www.radicalrhythms.org/) collects tracks by a German tracker group from the mid-1990s, including DMF modules.
 
-Planned: DSMI AMF (a different format with the same extension, signature `AMF` + version byte), DSM, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
+Planned: DSM, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
 
 ## Features
 
