@@ -1940,7 +1940,7 @@ static void settings_save(void) {
         int px, py;
         SDL_GetWindowSize(win, &g_win_w, &g_win_h);
         SDL_GetWindowPosition(win, &px, &py);
-        if (px || py) { g_win_x = px; g_win_y = py; }      /* Wayland reports 0,0 (the compositor places windows): then keep the old value */
+        if ((px || py) && (px & 0xFFFF0000) != 0x2FFF0000 && (px & 0xFFFF0000) != 0x1FFF0000) { g_win_x = px; g_win_y = py; }      /* Wayland has no window position (SDL returns 0,0 or the "centered" flag): then keep the old value */
     }
     fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\norb=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_orb ? 1 : 0);
     fclose(f);
