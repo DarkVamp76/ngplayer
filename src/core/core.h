@@ -46,6 +46,7 @@ typedef struct {
     XSmp smp[100];             /* 1..99 */
     int maxvol;                /* 0x40 */
     int speed, tempo;
+    double mixgain;            /* > 0: extra output gain (1 = none); XM saved by ModPlug Tracker, which libopenmpt mixes much quieter */
     double tempo_exact;        /* > 0: tempo as a fraction (BPM), used instead of tempo until the song sets a new one */
     /* XM (fmt 4): Instrumente 1..ninst, Samples flach in xsmp[]; XCell.vol1 = roher Volumenspalten-Byte (0 = keiner) */
     XInst *inst; int ninst;
