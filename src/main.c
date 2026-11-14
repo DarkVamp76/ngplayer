@@ -1838,6 +1838,46 @@ static int shot_frames, vsync_ok, running, frame, fullscreen;
 static Uint64 t0, tlast;
 static double freq;
 
+#ifndef __EMSCRIPTEN__
+/* Einstellungen: $XDG_CONFIG_HOME/ngplayer/settings.ini (sonst ~/.config/ngplayer/settings.ini), Zeilen "key=value" */
+static int g_win_w = 1280, g_win_h = 860;
+static int settings_path(char *out, size_t n, int mkdir_p) {
+    const char *x = getenv("XDG_CONFIG_HOME"), *h = getenv("HOME");
+    char dir[900];
+    if (x && *x) snprintf(dir, sizeof dir, "%s/ngplayer", x);
+    else if (h && *h) snprintf(dir, sizeof dir, "%s/.config/ngplayer", h);
+    else return 0;
+    if (mkdir_p) {
+        char par[900]; snprintf(par, sizeof par, "%s", dir);
+        char *sl = strrchr(par, '/'); if (sl) { *sl = 0; mkdir(par, 0755); }
+        mkdir(dir, 0755);
+    }
+    snprintf(out, n, "%s/settings.ini", dir);
+    return 1;
+}
+static void settings_load(void) {
+    char path[1000]; FILE *f;
+    if (!settings_path(path, sizeof path, 0) || !(f = fopen(path, "r"))) return;
+    char line[128];
+    while (fgets(line, sizeof line, f)) {
+        int v;
+        if (sscanf(line, "window_w=%d", &v) == 1 && v >= 360 && v <= 16384) g_win_w = v;
+        else if (sscanf(line, "window_h=%d", &v) == 1 && v >= 480 && v <= 16384) g_win_h = v;
+        else if (sscanf(line, "orb=%d", &v) == 1) g_orb = v != 0;
+    }
+    fclose(f);
+}
+static void settings_save(void) {
+    char path[1000]; FILE *f;
+    if (!settings_path(path, sizeof path, 1) || !(f = fopen(path, "w"))) return;
+    /* Groesse nur merken, wenn das Fenster normal ist (nicht Vollbild/maximiert) */
+    if (!(SDL_GetWindowFlags(win) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_MAXIMIZED)))
+        SDL_GetWindowSize(win, &g_win_w, &g_win_h);
+    fprintf(f, "window_w=%d\nwindow_h=%d\norb=%d\n", g_win_w, g_win_h, g_orb ? 1 : 0);
+    fclose(f);
+}
+#endif
+
 #ifdef __EMSCRIPTEN__
 /* Wird von der Webseite (Drag & Drop / Dateiauswahl) aufgerufen, nachdem die Datei ins virtuelle Dateisystem geschrieben wurde. */
 /* Canvas-Groesse in Pixeln (Hochformat auf dem Handy, siehe ngweb/shell.html) */
@@ -2069,7 +2109,15 @@ int main(int argc, char **argv) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 #endif
-    win = SDL_CreateWindow("ngPlayer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 860,
+#ifndef __EMSCRIPTEN__
+    if (!shot) settings_load();
+#define WIN_W0 g_win_w
+#define WIN_H0 g_win_h
+#else
+#define WIN_W0 1280
+#define WIN_H0 860
+#endif
+    win = SDL_CreateWindow("ngPlayer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIN_W0, WIN_H0,
                                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!win) { fprintf(stderr, "Fenster: %s\n", SDL_GetError()); return 1; }
     SDL_SetWindowMinimumSize(win, 360, 480);      /* schmal erlaubt: dann greift das Hochformat-Layout */
@@ -2152,6 +2200,9 @@ int main(int argc, char **argv) {
     emscripten_set_main_loop(iter, 0, 1);
 #else
     while (running) iter();
+#endif
+#ifndef __EMSCRIPTEN__
+    if (!shot) settings_save();
 #endif
     if (g_dev) SDL_CloseAudioDevice(g_dev);
     unload();
