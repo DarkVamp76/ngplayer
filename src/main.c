@@ -350,8 +350,9 @@ static int rclick, rclickx, rclicky;                       /* right mouse button
 static int ctx_idx = -1; static float ctx_x, ctx_y;        /* context menu ("Share") of a Mod Archive entry in the list */
 static float toast_t; static char toast_txt[48];
 #define CTX_W 120.0f
-#define CTX_H 62.0f
 #define CTX_ROW 30.0f
+static int ctx_n(int idx) { return idx >= 0 && idx < npl && pl[idx].ma_id ? 3 : 1; }      /* MA entries: Share, Info, Remove; local files: Remove */
+#define CTX_H(idx) (ctx_n(idx) * CTX_ROW + 2.0f)
 static int hit(float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; }
 static int clicked(float x, float y, float w, float h) { return click && clickx >= x && clickx < x + w && clicky >= y && clicky < y + h; }
 
@@ -1161,6 +1162,16 @@ static void next_prev(int d) {      /* stays inside the group (local files / Mod
 
 /* playlist tabs: indices of the entries of the active tab */
 static int pl_count_tab(int tab) { int n = 0; for (int i = 0; i < npl; i++) if ((pl[i].ma_id > 0) == (tab == 1)) n++; return n; }
+/* Remove an entry from the list (the file itself stays untouched). The playing song moves on to the next one of its group, or stops. */
+static void pl_remove(int i) {
+    if (i < 0 || i >= npl) return;
+    if (i == cur) { if (pl_count_tab(pl[i].ma_id > 0) > 1) next_prev(1); else { unload(); cur = -1; } }
+    free(pl[i].path); free(pl[i].key);
+    memmove(pl + i, pl + i + 1, sizeof(entry) * (size_t)(npl - i - 1));
+    npl--;
+    if (cur > i) cur--;
+    ctx_idx = -1;
+}
 static void pl_build_vis(void) {
     pl_vis = (int *)realloc(pl_vis, sizeof(int) * (size_t)(npl > 0 ? npl : 1));
     nvis = 0; cvis = -1;
@@ -1475,14 +1486,20 @@ static void draw_ui(double t) {
                 tx += 31;
             }
             float tgw = tg[0] ? text_width(tg, 14) : 0;
-            fit_text(lab, w - 52 - (tx - (x + 20)) - tgw, 14);
+            fit_text(lab, w - 74 - (tx - (x + 20)) - tgw, 14);
             text(tx, yy + 5, 14, isc ? TXT : DIM, lab);
-            if (tg[0]) text_right(x + w - 22, yy + 5, 14, VC[1], tg);      /* #ID flush right */
-            if (rclick && pl[i].ma_id && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {
+            if (tg[0]) text_right(x + w - 44, yy + 5, 14, VC[1], tg);      /* #ID, left of the remove button */
+            int xhv = hit(x + w - 38, yy + 2, 26, rh - 6);
+            if (hv) {               /* red x: remove from list */
+                if (xhv) rrect(x + w - 38, yy + 3, 26, rh - 8, 6, alpha(WARN, 0.22f));
+                text(x + w - 31, yy + 5, 15, xhv ? WARN : alpha(WARN, 0.55f), "\xd7");
+            }
+            if (hv && xhv && click && clickx >= x + w - 38 && clickx < x + w - 12 && clicky >= yy && clicky < yy + rh) { pl_remove(i); click = 0; break; }
+            if (rclick && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {
                 ctx_idx = i; rclick = 0;
                 ctx_x = (float)rclickx; ctx_y = (float)rclicky;
                 if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
-                if (ctx_y + CTX_H > view_h - 4) ctx_y = view_h - 4 - CTX_H;
+                if (ctx_y + CTX_H(i) > view_h - 4) ctx_y = view_h - 4 - CTX_H(i);
             }
             if (clicked(x + 8, yy, w - 16, rh)) { play_index(i); click = 0; }
         }
@@ -1840,7 +1857,7 @@ static double freq;
 
 #ifndef __EMSCRIPTEN__
 /* Einstellungen: $XDG_CONFIG_HOME/ngplayer/settings.ini (sonst ~/.config/ngplayer/settings.ini), Zeilen "key=value" */
-static int g_win_w = 1280, g_win_h = 860;
+static int g_win_w = 1280, g_win_h = 860, g_win_x = SDL_WINDOWPOS_CENTERED, g_win_y = SDL_WINDOWPOS_CENTERED;
 static int settings_path(char *out, size_t n, int mkdir_p) {
     const char *x = getenv("XDG_CONFIG_HOME"), *h = getenv("HOME");
     char dir[900];
@@ -1864,6 +1881,53 @@ static void settings_load(void) {
         if (sscanf(line, "window_w=%d", &v) == 1 && v >= 360 && v <= 16384) g_win_w = v;
         else if (sscanf(line, "window_h=%d", &v) == 1 && v >= 480 && v <= 16384) g_win_h = v;
         else if (sscanf(line, "orb=%d", &v) == 1) g_orb = v != 0;
+        else if (sscanf(line, "window_x=%d", &v) == 1) g_win_x = v;
+        else if (sscanf(line, "window_y=%d", &v) == 1) g_win_y = v;
+    }
+    fclose(f);
+    if (g_win_x != SDL_WINDOWPOS_CENTERED || g_win_y != SDL_WINDOWPOS_CENTERED) {   /* only use the position if it is still on a screen (monitor unplugged?) */
+        int ok = 0;
+        for (int d = 0; d < SDL_GetNumVideoDisplays() && !ok; d++) {
+            SDL_Rect r;
+            if (!SDL_GetDisplayBounds(d, &r) && g_win_x + 100 >= r.x && g_win_x + 100 < r.x + r.w && g_win_y + 20 >= r.y && g_win_y + 20 < r.y + r.h) ok = 1;
+        }
+        if (!ok) g_win_x = g_win_y = SDL_WINDOWPOS_CENTERED;
+    }
+}
+/* Mod Archive list: one "id<TAB>title" per line in modarchive.list next to settings.ini. Entries are restored from the download cache; ones whose file is gone are dropped. */
+static int ma_list_path(char *out, size_t n, int mk) {
+    char p[1000];
+    if (!settings_path(p, sizeof p, mk)) return 0;
+    char *sl = strrchr(p, '/'); if (!sl) return 0;
+    snprintf(sl + 1, sizeof p - (size_t)(sl + 1 - p), "modarchive.list");
+    snprintf(out, n, "%s", p);
+    return 1;
+}
+static void ma_list_load(void) {
+    char path[1000], dir[900], line[256]; FILE *f;
+    if (!ma_list_path(path, sizeof path, 0) || !(f = fopen(path, "r")) || net_cache_dir(dir, sizeof dir)) { if (f) fclose(f); return; }
+    while (fgets(line, sizeof line, f)) {
+        char *tab = strchr(line, '\t'), *nl = strpbrk(line, "\r\n");
+        int id = atoi(line);
+        if (nl) *nl = 0;
+        if (id <= 0) continue;
+        char fp[1100]; struct stat sb;
+        snprintf(fp, sizeof fp, "%s/modarchive/%d.mod", dir, id);
+        if (stat(fp, &sb) || sb.st_size <= 0) continue;
+        add_file(fp);
+        pl[npl - 1].ma_id = id;
+        snprintf(pl[npl - 1].label, sizeof pl[npl - 1].label, "%s", tab && tab[1] ? tab + 1 : "ModArchive");
+    }
+    fclose(f);
+}
+static void ma_list_save(void) {
+    char path[1000]; FILE *f;
+    if (!ma_list_path(path, sizeof path, 1) || !(f = fopen(path, "w"))) return;
+    for (int i = 0; i < npl; i++) {
+        if (pl[i].ma_id <= 0) continue;
+        char t[128]; snprintf(t, sizeof t, "%s", pl[i].label);
+        for (char *c = t; *c; c++) if (*c == '\t' || *c == '\n' || *c == '\r') *c = ' ';
+        fprintf(f, "%d\t%s\n", pl[i].ma_id, t);
     }
     fclose(f);
 }
@@ -1872,8 +1936,13 @@ static void settings_save(void) {
     if (!settings_path(path, sizeof path, 1) || !(f = fopen(path, "w"))) return;
     /* Groesse nur merken, wenn das Fenster normal ist (nicht Vollbild/maximiert) */
     if (!(SDL_GetWindowFlags(win) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_MAXIMIZED)))
+        {
+        int px, py;
         SDL_GetWindowSize(win, &g_win_w, &g_win_h);
-    fprintf(f, "window_w=%d\nwindow_h=%d\norb=%d\n", g_win_w, g_win_h, g_orb ? 1 : 0);
+        SDL_GetWindowPosition(win, &px, &py);
+        if (px || py) { g_win_x = px; g_win_y = py; }      /* Wayland reports 0,0 (the compositor places windows): then keep the old value */
+    }
+    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\norb=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_orb ? 1 : 0);
     fclose(f);
 }
 #endif
@@ -1939,14 +2008,15 @@ static void info_open(int idx) {
 }
 static void draw_ctx_menu(void) {
     if (ctx_idx >= 0 && ctx_idx < npl) {
-        static const char *const item[2] = { "Share", "Info" };
-        rrect(ctx_x - 1, ctx_y - 1, CTX_W + 2, CTX_H + 2, 9, alpha(EDGE, 0.9f));
-        rrect(ctx_x, ctx_y, CTX_W, CTX_H, 8, CARDHI);
-        for (int j = 0; j < 2; j++) {
+        static const char *const item[3] = { "Share", "Info", "Remove" };
+        int n = ctx_n(ctx_idx), off = 3 - n;           /* local files only show the last item (Remove) */
+        rrect(ctx_x - 1, ctx_y - 1, CTX_W + 2, CTX_H(ctx_idx) + 2, 9, alpha(EDGE, 0.9f));
+        rrect(ctx_x, ctx_y, CTX_W, CTX_H(ctx_idx), 8, CARDHI);
+        for (int j = 0; j < n; j++) {
             float iy = ctx_y + 1 + j * CTX_ROW;
             int hv = mx >= ctx_x && mx < ctx_x + CTX_W && my >= iy && my < iy + CTX_ROW;
             if (hv) rrect(ctx_x + 3, iy + 2, CTX_W - 6, CTX_ROW - 4, 6, alpha(VC[0], 0.22f));
-            text(ctx_x + 14, iy + 7, 14, hv ? TXT : DIM, item[j]);
+            text(ctx_x + 14, iy + 7, 14, item[j + off][0] == 'R' ? (hv ? WARN : alpha(WARN, 0.75f)) : (hv ? TXT : DIM), item[j + off]);
         }
     }
     if (toast_t > 0) {
@@ -2030,8 +2100,9 @@ static void iter(void) {
         if (click) { clickx = (int)(clickx * k); clicky = (int)(clicky * k); }
         if (rclick) { rclickx = (int)(rclickx * k); rclicky = (int)(rclicky * k); }
         if (ctx_idx >= 0 && click) {                         /* click on the open menu: copy the link; any click closes it */
-            if (clickx >= ctx_x && clickx < ctx_x + CTX_W && clicky >= ctx_y && clicky < ctx_y + CTX_H && ctx_idx < npl && pl[ctx_idx].ma_id) {
-                if (clicky < ctx_y + 1 + CTX_ROW) share_link(ctx_idx); else info_open(ctx_idx);
+            if (clickx >= ctx_x && clickx < ctx_x + CTX_W && clicky >= ctx_y && clicky < ctx_y + CTX_H(ctx_idx) && ctx_idx < npl) {
+                int j = (int)((clicky - ctx_y - 1) / CTX_ROW) + 3 - ctx_n(ctx_idx);          /* 0 Share, 1 Info, 2 Remove */
+                if (j == 0) share_link(ctx_idx); else if (j == 1) info_open(ctx_idx); else if (j == 2) pl_remove(ctx_idx);
             }
             ctx_idx = -1; click = 0;
         }
@@ -2110,14 +2181,18 @@ int main(int argc, char **argv) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 #endif
 #ifndef __EMSCRIPTEN__
-    if (!shot) settings_load();
+    if (!shot) { settings_load(); ma_list_load(); }
+#define WIN_X0 g_win_x
+#define WIN_Y0 g_win_y
 #define WIN_W0 g_win_w
 #define WIN_H0 g_win_h
 #else
+#define WIN_X0 SDL_WINDOWPOS_CENTERED
+#define WIN_Y0 SDL_WINDOWPOS_CENTERED
 #define WIN_W0 1280
 #define WIN_H0 860
 #endif
-    win = SDL_CreateWindow("ngPlayer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIN_W0, WIN_H0,
+    win = SDL_CreateWindow("ngPlayer", WIN_X0, WIN_Y0, WIN_W0, WIN_H0,
                                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!win) { fprintf(stderr, "Fenster: %s\n", SDL_GetError()); return 1; }
     SDL_SetWindowMinimumSize(win, 360, 480);      /* schmal erlaubt: dann greift das Hochformat-Layout */
@@ -2202,7 +2277,7 @@ int main(int argc, char **argv) {
     while (running) iter();
 #endif
 #ifndef __EMSCRIPTEN__
-    if (!shot) settings_save();
+    if (!shot) { settings_save(); ma_list_save(); }
 #endif
     if (g_dev) SDL_CloseAudioDevice(g_dev);
     unload();
