@@ -110,7 +110,7 @@ static void audio_cb(void *ud, Uint8 *stream, int len) {
 }
 
 /* ================================================================== Playlist */
-typedef struct { char *path; char *key; char label[128]; int ma_id; } entry;   /* key: Sortierschluessel (Ordner + Anzeigename) */
+typedef struct { char *path; char *key; char label[128]; int ma_id; int fmt; } entry;   /* fmt: -1 not yet determined, 0 unknown, else FMT_* */   /* key: Sortierschluessel (Ordner + Anzeigename) */
 static entry *pl;
 static int npl, cur = -1;
 static float list_scroll;
@@ -125,15 +125,74 @@ static int is_mod_name(const char *n) {
     if (tfmx_is_song_name(n)) return 1;          /* mdat.NAME / NAME.tfx; smpl.* und .sam sind nur Sampledaten */
     const char *d = strrchr(n, '.');
     if (!d) return 0;
-    static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".med", ".psm", ".far", ".mdl", ".mmd0", ".mmd1", ".mmd2", ".mmd3", ".xm", ".it", ".dmf", NULL };
+    static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".med", ".psm", ".far", ".mdl", ".mmd0", ".mmd1", ".mmd2", ".mmd3", ".xm", ".it", ".dmf", ".amf", ".sfx", NULL };
     for (int i = 0; ext[i]; i++) if (!strcasecmp(d, ext[i])) return 1;
     return 0;
+}
+
+/* ---- File format badge in front of each list entry (colour per format) ---- */
+enum { FMT_NONE, FMT_MOD, FMT_S3M, FMT_XM, FMT_IT, FMT_STM, FMT_PTM, FMT_ULT, FMT_669, FMT_MTM, FMT_MED, FMT_PSM, FMT_FAR, FMT_MDL, FMT_DMF, FMT_TFMX, FMT_AMF, FMT_SFX, FMT_COUNT };
+static const char *const FMT_NAME[FMT_COUNT] = { "", "MOD", "S3M", "XM", "IT", "STM", "PTM", "ULT", "669", "MTM", "MED", "PSM", "FAR", "MDL", "DMF", "TFMX", "AMF", "SFX" };
+static const col FMT_COL[FMT_COUNT] = {
+    { 0.5f, 0.5f, 0.5f, 1 }, { 1.00f, 0.76f, 0.28f, 1 }, { 0.35f, 0.95f, 0.55f, 1 }, { 0.24f, 0.88f, 1.00f, 1 }, { 1.00f, 0.36f, 0.80f, 1 },
+    { 0.30f, 0.85f, 0.75f, 1 }, { 0.65f, 0.50f, 1.00f, 1 }, { 1.00f, 0.55f, 0.25f, 1 }, { 1.00f, 0.42f, 0.38f, 1 }, { 0.75f, 0.95f, 0.30f, 1 },
+    { 0.40f, 0.60f, 1.00f, 1 }, { 0.90f, 0.45f, 1.00f, 1 }, { 0.85f, 0.75f, 0.55f, 1 }, { 0.55f, 1.00f, 0.85f, 1 }, { 1.00f, 0.60f, 0.65f, 1 }, { 0.85f, 0.88f, 1.00f, 1 }, { 0.95f, 0.62f, 0.50f, 1 }, { 0.80f, 0.78f, 0.45f, 1 } };
+static int fmt_from_name(const char *fn) {
+    if (tfmx_is_song_name(fn)) return FMT_TFMX;
+    const char *d = strrchr(fn, '.');
+    if (!d) return FMT_NONE;
+    static const struct { const char *ext; int f; } map[] = { {".mod", FMT_MOD}, {".s3m", FMT_S3M}, {".xm", FMT_XM}, {".it", FMT_IT}, {".stm", FMT_STM}, {".ptm", FMT_PTM},
+        {".ult", FMT_ULT}, {".669", FMT_669}, {".mtm", FMT_MTM}, {".med", FMT_MED}, {".mmd0", FMT_MED}, {".mmd1", FMT_MED}, {".mmd2", FMT_MED}, {".mmd3", FMT_MED},
+        {".psm", FMT_PSM}, {".far", FMT_FAR}, {".mdl", FMT_MDL}, {".dmf", FMT_DMF}, {".amf", FMT_AMF}, {".sfx", FMT_SFX}, { NULL, 0 } };
+    for (int i = 0; map[i].ext; i++) if (!strcasecmp(d, map[i].ext)) return map[i].f;
+    return FMT_NONE;
+}
+/* Mod Archive downloads are all cached as <id>.mod, so look at the file contents */
+static int fmt_sniff(const char *path) {
+    unsigned char b[1100]; size_t n = 0; FILE *f = fopen(path, "rb");
+    if (f) { n = fread(b, 1, sizeof b, f); fclose(f); }
+    if (n < 4) return FMT_NONE;
+    if (n >= 128 && (!memcmp(b + 60, "SONG", 4) || !memcmp(b + 124, "SO31", 4))) return FMT_SFX;   /* SoundFX */
+    if (!memcmp(b, "IMPM", 4)) return FMT_IT;
+    if (n >= 17 && !memcmp(b, "Extended Module: ", 17)) return FMT_XM;
+    if (n > 0x30 && !memcmp(b + 0x2C, "SCRM", 4)) return FMT_S3M;
+    if (n > 0x30 && !memcmp(b + 0x2C, "PTMF", 4)) return FMT_PTM;
+    if (!memcmp(b, "MMD", 3) && b[3] >= '0' && b[3] <= '3') return FMT_MED;
+    if (!memcmp(b, "MTM", 3)) return FMT_MTM;
+    if (!memcmp(b, "DDMF", 4)) return FMT_DMF;
+    if (!memcmp(b, "DMDL", 4)) return FMT_MDL;
+    if (!memcmp(b, "FAR\xFE", 4)) return FMT_FAR;
+    if (n >= 24 && !memcmp(b, "ASYLUM Music Format V1.0", 24)) return FMT_AMF;      /* Crusader */
+    if (!memcmp(b, "AMF", 3) && b[3] >= 8 && b[3] <= 14) return FMT_AMF;           /* DSMI */
+    if (!memcmp(b, "PSM\xFE", 4) || !memcmp(b, "PSM ", 4)) return FMT_PSM;
+    if (!memcmp(b, "MAS_UTrack_V00", 14)) return FMT_ULT;
+    if ((b[0] == 'i' && b[1] == 'f') || (b[0] == 'J' && b[1] == 'N')) return FMT_669;
+    if (n > 0x30 && !memcmp(b + 0x14, "!Scream!", 8)) return FMT_STM;
+    if (n > 0x30 && !memcmp(b + 0x14, "BMOD2STM", 8)) return FMT_STM;
+    if (n >= 1084) { const unsigned char *m = b + 1080; if (!memcmp(m, "M.K.", 4) || !memcmp(m, "M!K!", 4) || !memcmp(m, "FLT", 3) || !memcmp(m, "CD81", 4) || !memcmp(m, "OKTA", 4) || (m[1] == 'C' && m[2] == 'H' && m[3] == 'N') || (m[2] == 'C' && m[3] == 'H')) return FMT_MOD; }
+    return FMT_NONE;
+}
+static int entry_fmt(entry *e) {
+    if (e->fmt < 0) { const char *b = strrchr(e->path, '/'); e->fmt = e->ma_id > 0 ? fmt_sniff(e->path) : fmt_from_name(b ? b + 1 : e->path); if (e->ma_id > 0 && e->fmt == FMT_NONE) e->fmt = fmt_from_name(b ? b + 1 : e->path); }
+    return e->fmt;
+}
+/* Draws the badge at (x, y = top) and returns the width to advance (the same for every format so the names line up) */
+#define FMT_BADGE_W 36.0f
+static float draw_fmt_badge(float x, float y, entry *e, int isc) {
+    int f = entry_fmt(e);
+    if (f > 0 && f < FMT_COUNT) {
+        float tw = text_width(FMT_NAME[f], 10.5f);
+        rrect(x, y, FMT_BADGE_W, 17, 4, alpha(FMT_COL[f], isc ? 0.32f : 0.20f));
+        text(x + (FMT_BADGE_W - tw) / 2, y + 2.5f, 10.5f, FMT_COL[f], FMT_NAME[f]);
+    }
+    return FMT_BADGE_W + 7.0f;
 }
 
 static void add_file(const char *path) {
     pl = (entry *)realloc(pl, sizeof(entry) * (size_t)(npl + 1));
     pl[npl].path = strdup(path);
     pl[npl].ma_id = 0;                           /* >0: stammt vom The Mod Archive (Modul-ID) */
+    pl[npl].fmt = -1;
     const char *b = strrchr(path, '/');
     const char *fn = b ? b + 1 : path;
     if (tfmx_is_song_name(fn)) {                 /* TFMX: Namensschema mdat.X / X.tfx ist kein sinnvoller Anzeigename */
@@ -352,8 +411,9 @@ static Uint32 lp_t;
 static int ctx_idx = -1; static float ctx_x, ctx_y;        /* context menu ("Share") of a Mod Archive entry in the list */
 static float toast_t; static char toast_txt[48];
 #define CTX_W 120.0f
-#define CTX_H 62.0f
 #define CTX_ROW 30.0f
+static int ctx_n(int idx) { return idx >= 0 && idx < npl && pl[idx].ma_id ? 3 : 1; }      /* MA entries: Share, Info, Remove; local files: Remove */
+#define CTX_H(idx) (ctx_n(idx) * CTX_ROW + 2.0f)
 static int hit(float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; }
 static int clicked(float x, float y, float w, float h) { return click && clickx >= x && clickx < x + w && clicky >= y && clicky < y + h; }
 
@@ -996,7 +1056,7 @@ static void draw_logo(float x, float y, float s) {
 #define TAGLINE "Module player for Linux"
 #endif
 /* ---------------------------------------------------------------- Wachssiegel (Meilenstein, oben rechts in der Logo-Box) */
-#define SEAL_TEXT "1.0"          /* Text im Siegel: hier aendern */
+#define SEAL_TEXT "1.4"          /* Text im Siegel: hier aendern */
 #define SEAL_ROT 0.7854f         /* Drehung im Uhrzeigersinn (45 Grad) */
 static void seal_lobes(float cx, float cy, float r, col c) {
     static const float lr[12] = { 1.00f, 0.93f, 1.05f, 0.96f, 1.02f, 0.92f, 1.04f, 0.97f, 1.01f, 0.94f, 1.06f, 0.95f };
@@ -1004,6 +1064,105 @@ static void seal_lobes(float cx, float cy, float r, col c) {
     for (int i = 0; i < 12; i++) {
         float a = i * 0.5236f + 0.3f + SEAL_ROT, d = r * 0.78f * lr[i], lrad = r * 0.24f * lr[(i + 5) % 12];
         rrect(cx + cosf(a) * d - lrad, cy + sinf(a) * d - lrad, lrad * 2, lrad * 2, lrad, c);
+    }
+}
+/* Stateless fire: every particle lives in cycles (phase = time * speed), its randomness comes from a hash of (particle, cycle),
+ * so no per-particle state is needed. Additive blobs: white-yellow core -> orange -> red -> gone. */
+static float fhash(unsigned n) { n = n * 747796405u + 2891336453u; n = ((n >> ((n >> 28) + 4)) ^ n) * 277803737u; n = (n >> 22) ^ n; return (float)(n & 0xFFFF) / 65535.0f; }
+static col fire_col(float u) {
+    if (u < 0.16f) return mix(C(1.00f, 0.90f, 0.50f, 1), C(1.00f, 0.60f, 0.12f, 1), u / 0.16f);
+    if (u < 0.55f) return mix(C(1.00f, 0.60f, 0.12f, 1), C(0.90f, 0.20f, 0.04f, 1), (u - 0.16f) / 0.39f);
+    return mix(C(0.90f, 0.20f, 0.04f, 1), C(0.35f, 0.05f, 0.04f, 1), (u - 0.55f) / 0.45f);
+}
+/* front = 0: flames licking out behind the seal; front = 1: shorter tongues rising from the wax surface (over the lettering) */
+static void seal_flames(float cx, float cy, float r, float t, float beat, float flick, int front) {
+    int n = g_mobile ? 10 : 22;
+    float pow_ = 1.0f + 0.55f * beat;
+    for (int i = 0; i < n; i++) {
+        float sp = 0.85f + 0.9f * fhash((unsigned)i * 7 + 1);
+        float ph = t * sp + fhash((unsigned)i * 3 + 2) * 8.0f, cyc = floorf(ph), u = ph - cyc;
+        unsigned sd = (unsigned)i * 131u + (unsigned)cyc * 17u + (front ? 9001u : 0u);
+        float a = -2.3f + (fhash(sd) + fhash(sd + 1) - 1.0f) * (front ? 1.6f : 2.6f);             /* around the rim, biased to the upper left */
+        float ro = front ? r * (0.45f + 0.5f * fhash(sd + 4)) : r * 0.85f;
+        float ox = cx + cosf(a) * ro, oy = cy + sinf(a) * ro;
+        float dx = cosf(a) * 0.55f - 0.55f, dy = sinf(a) * 0.45f - 0.55f, dl = sqrtf(dx * dx + dy * dy);   /* outwards + wind to the upper left */
+        dx /= dl; dy /= dl;
+        float L = r * (front ? 0.8f : 1.3f + 1.5f * fhash(sd + 2)) * pow_, ue = powf(u, 0.8f);
+        float wob = sinf(u * 9.0f + fhash(sd + 5) * 6.0f) * r * 0.16f * u;
+        float px = ox + dx * L * ue - dy * wob, py = oy + dy * L * ue + dx * wob;
+        float sz = r * (front ? 0.30f : 0.42f) * (0.6f + 0.7f * fhash(sd + 3)) * (1.0f - 0.85f * u);
+        float al = (u < 0.12f ? u / 0.12f : 1.0f) * powf(1.0f - u, 1.3f) * (front ? 0.16f : 0.30f);
+        col c = fire_col(u);
+        blob(px, py, sz * 1.9f, alpha(c, 0.06f * al));                             /* soft halo */
+        blob(px, py, sz, alpha(c, 0.5f * al));
+        float u2 = u > 0.06f ? u - 0.06f : 0.0f, ue2 = powf(u2, 0.8f);            /* trailing blob: makes the tongue longer */
+        blob(ox + dx * L * ue2 - dy * wob * 0.8f, oy + dy * L * ue2 + dx * wob * 0.8f, sz * 0.8f, alpha(fire_col(u2), 0.45f * al));
+    }
+    if (front) return;
+    int nt = g_mobile ? 6 : 11, np = g_mobile ? 6 : 9;                             /* flame tongues: S-shaped, thinning towards the tip, the tips curl upwards (heat rises) */
+    for (int k = 0; k < nt; k++) {
+        float fk = (float)k;
+        float ak = -3.0f + (fk - (nt - 1) * 0.5f) * (3.0f / (float)nt) + 0.12f * sinf(t * 1.7f + fk * 2.3f);
+        float len = r * (1.0f + 0.9f * fhash((unsigned)k * 19 + 3)) * (0.78f + 0.26f * sinf(t * (5.0f + fk * 0.7f) + fk) + 0.10f * sinf(t * 17.0f + fk * 1.9f)) * (1.0f + 0.5f * beat);
+        float dx = cosf(ak) * 0.8f - 0.5f, dy = sinf(ak) * 0.8f - 0.2f, dl = sqrtf(dx * dx + dy * dy);
+        dx /= dl; dy /= dl;
+        float bx = cx + cosf(ak) * r * 0.86f, by = cy + sinf(ak) * r * 0.86f, ph = t * 3.4f + fk * 1.7f;
+        float pts[2 * 12];
+        for (int m = 0; m < np; m++) {
+            float sf = (float)m / (float)(np - 1);
+            float sw = r * 0.30f * sinf(sf * 4.2f + ph) * sf;                       /* S-curve, flickering along the flame */
+            pts[2 * m] = bx + dx * len * sf - dy * sw;
+            pts[2 * m + 1] = by + dy * len * sf + dx * sw - r * 0.85f * sf * sf;    /* rising curl */
+        }
+        float g = 0.55f + 0.45f * flick;
+        blob(bx, by, r * 0.5f, alpha(C(1.0f, 0.35f, 0.06f, 1), 0.14f * g));
+        static const float LW[3] = { 0.26f, 0.16f, 0.075f }, LF[3] = { 1.0f, 0.72f, 0.42f }, LA[3] = { 0.26f, 0.34f, 0.46f };
+        static const col LC[3] = { { 0.92f, 0.16f, 0.04f, 1 }, { 1.00f, 0.52f, 0.08f, 1 }, { 1.00f, 0.92f, 0.55f, 1 } };
+        for (int ly = 0; ly < 3; ly++) {
+            int ns = (int)((np - 1) * LF[ly] + 0.5f);
+            for (int m = 0; m < ns; m++) {                                          /* one ribbon piece per segment: width tapers to the tip */
+                float tp = (float)m / (float)ns, w = r * LW[ly] * powf(1.0f - tp, 0.85f) + 0.4f;
+                polyline(pts + 2 * m, 2, w, 1.5f, alpha(LC[ly], LA[ly] * g * (1.0f - 0.4f * tp)));
+            }
+        }
+    }
+    int ne = g_mobile ? 6 : 14;                                                    /* embers: small sparks flying away, drifting left with the wind */
+    for (int i = 0; i < ne; i++) {
+        float sp = 0.35f + 0.5f * fhash((unsigned)i * 11 + 5);
+        float ph = t * sp + fhash((unsigned)i * 5 + 6) * 9.0f, cyc = floorf(ph), u = ph - cyc;
+        unsigned sd = (unsigned)i * 977u + (unsigned)cyc * 31u;
+        float a = -1.5708f + (fhash(sd) - 0.5f) * 2.6f;
+        float L = r * (1.8f + 2.4f * fhash(sd + 1)), ue = 1.0f - (1.0f - u) * (1.0f - u);
+        float px = cx + cosf(a) * r * 0.8f + (cosf(a) * 0.6f - 0.7f * u) * L * ue + sinf(u * 14.0f + fhash(sd + 2) * 6.0f) * r * 0.10f;
+        float py = cy + sinf(a) * r * 0.8f + (sinf(a) * 0.6f - 1.0f) * L * ue * 0.9f;
+        float fl = 0.6f + 0.4f * sinf(t * 23.0f + (float)i * 4.1f), al = (u < 0.08f ? u / 0.08f : 1.0f) * (1.0f - u) * fl;
+        blob(px, py, 1.1f + 0.9f * fhash(sd + 3), alpha(mix(C(1.0f, 0.85f, 0.4f, 1), C(1.0f, 0.4f, 0.1f, 1), u), 0.95f * al));
+    }
+}
+/* Molten wax drops: now and then a drop swells at the lower rim of the seal, lets go, falls over the card (cooling from glowing orange to dark red) and splashes. */
+static void seal_drop(float cx, float cy, float r, float t, float off, float per) {
+    float tt = t + off, ph = fmodf(tt, per);
+    unsigned cyc = (unsigned)(tt / per) * 7u + (unsigned)(off * 10.0f);
+    const float TF = 1.3f, TD = 0.95f, TS = 0.4f;                                  /* swelling, falling, splash (seconds) */
+    float a = 1.5708f + (fhash(cyc + 1) - 0.5f) * 1.5f;                            /* somewhere along the lower rim */
+    float bx = cx + cosf(a) * r * 0.9f, by = cy + sinf(a) * r * 0.9f;
+    col hot = C(1.00f, 0.52f, 0.12f, 1), wax = C(0.68f, 0.07f, 0.09f, 1), hi = C(1.00f, 0.80f, 0.55f, 1);
+    if (ph < TF) {                                                                 /* hanging: the drop swells and sags */
+        float u = ph / TF, w = r * (0.06f + 0.18f * u * u), sag = r * 0.30f * u * u * u;
+        col c = mix(hot, wax, 0.45f);
+        rrect(bx - w, by - w * 0.5f, w * 2, w * 1.5f + sag, w, c);
+        rrect(bx - w * 0.35f, by - w * 0.1f, w * 0.5f, w * 0.7f, w * 0.25f, alpha(hi, 0.6f));
+    } else if (ph < TF + TD) {                                                     /* falling */
+        float v = (ph - TF) / TD, w = r * 0.24f, y = by + r * 0.25f + r * 3.6f * v * v, st = w * (0.4f + 1.4f * v);
+        float fa = v > 0.85f ? (1.0f - v) / 0.15f : 1.0f;
+        col c = mix(hot, wax, v);
+        set_additive(1); blob(bx, y, w * 2.6f, alpha(hot, 0.35f * (1.0f - v) * fa)); set_additive(0);
+        rrect(bx - w * 0.8f, y - st, w * 1.6f, w + st, w * 0.8f, alpha(c, fa));                                   /* stretched tear */
+        rrect(bx - w * 0.3f, y - st * 0.2f, w * 0.5f, w * 0.7f, w * 0.25f, alpha(hi, 0.55f * (1.0f - v) * fa));
+    } else if (ph < TF + TD + TS) {                                                /* splash on the card */
+        float u = (ph - TF - TD) / TS, y = by + r * 0.25f + r * 3.6f, rr = r * (0.10f + 0.35f * u), pts[2 * 13];
+        for (int i = 0; i < 13; i++) { float an = i * 6.2832f / 12; pts[2 * i] = bx + cosf(an) * rr; pts[2 * i + 1] = y + sinf(an) * rr * 0.35f; }
+        polyline(pts, 13, 1.6f, 1.0f, alpha(mix(hot, wax, 0.6f), 0.7f * (1.0f - u)));
     }
 }
 static void draw_seal(float cx, float cy, float r, const char *label) {
@@ -1014,13 +1173,18 @@ static void draw_seal(float cx, float cy, float r, const char *label) {
     if (age < T1) { float u = age / T1; sc = 1.0f + 1.0f * (1 - u) * (1 - u); al = u < 0.4f ? u / 0.4f : 1.0f; heat = 1.0f; }
     else { sc = 1.0f - 0.10f * expf(-since * 9.0f) * sinf(since * 18.0f); al = 1.0f; heat = expf(-since * 1.1f); }
     float beat = g_paused ? 0.0f : g_beat;
-    float gl = heat + 0.10f + 0.08f * (0.5f + 0.5f * sinf(age * 2.1f)) + 0.12f * beat;   /* Restglut + Puls im Takt */
+    float flick = 0.5f + 0.25f * sinf(age * 13.0f) + 0.15f * sinf(age * 7.3f + 1.0f) + 0.10f * sinf(age * 31.0f);   /* fire flicker, 0..1 */
+    float burn = 0.34f + 0.16f * flick + 0.12f * beat;                             /* the seal burns all the time: wax stays glowing */
+    if (heat < burn) heat = burn;
+    float gl = heat + 0.35f + 0.25f * flick + 0.25f * beat;                        /* glow + flicker + pulse with the beat */
     col dk = mix(C(0.34f, 0.03f, 0.05f, 1), C(0.80f, 0.20f, 0.05f, 1), heat * 0.6f);
     col md = mix(C(0.68f, 0.07f, 0.09f, 1), C(1.00f, 0.45f, 0.10f, 1), heat * 0.85f);
     col lt = mix(C(0.90f, 0.26f, 0.22f, 1), C(1.00f, 0.88f, 0.45f, 1), heat);
     r *= sc;
     set_additive(1);                                                               /* Glut hinter dem Siegel */
-    blob(cx, cy, r * (0.85f + 0.35f * heat), alpha(C(1.0f, 0.32f, 0.06f, 1), 0.50f * gl * al));
+    blob(cx, cy, r * (1.25f + 0.35f * heat), alpha(C(1.0f, 0.32f, 0.06f, 1), 0.12f * gl * al));
+    blob(cx, cy, r * (0.85f + 0.35f * heat), alpha(C(1.0f, 0.32f, 0.06f, 1), 0.24f * gl * al));
+    seal_flames(cx, cy, r, age, beat, flick, 0);                                          /* flames licking out behind the seal */
     set_additive(0);
     blob(cx + 1.5f, cy + 3.0f, r * 0.55f, C(0, 0, 0, 0.55f * al));                 /* Schatten */
     seal_lobes(cx + 0.8f, cy + 1.0f, r, alpha(dk, al));                            /* dunkler Rand unten rechts */
@@ -1050,7 +1214,10 @@ static void draw_seal(float cx, float cy, float r, const char *label) {
             blob(cx + cosf(an) * dd, cy + sinf(an) * dd + 14.0f * since * since, 1.3f + 0.4f * (i % 3), alpha(C(1.0f, 0.7f, 0.25f, 1), 0.9f * fa * fa));
         }
     }
+    seal_flames(cx, cy, r, age, beat, flick, 1);                                          /* tongues over the wax */
     set_additive(0);
+    seal_drop(cx, cy, r, age, 0.0f, 5.3f);                                         /* drips: two with different rhythms */
+    seal_drop(cx, cy, r, age, 2.9f, 8.1f);
 }
 /* ---------------------------------------------------------------- Soundchips (Kopfzeile)
    Gezeichnet mit den vorhandenen Primitiven (Koordinaten im 320x200-Raster, Chip um 160,100). */
@@ -1163,6 +1330,16 @@ static void next_prev(int d) {      /* stays inside the group (local files / Mod
 
 /* playlist tabs: indices of the entries of the active tab */
 static int pl_count_tab(int tab) { int n = 0; for (int i = 0; i < npl; i++) if ((pl[i].ma_id > 0) == (tab == 1)) n++; return n; }
+/* Remove an entry from the list (the file itself stays untouched). The playing song moves on to the next one of its group, or stops. */
+static void pl_remove(int i) {
+    if (i < 0 || i >= npl) return;
+    if (i == cur) { if (pl_count_tab(pl[i].ma_id > 0) > 1) next_prev(1); else { unload(); cur = -1; } }
+    free(pl[i].path); free(pl[i].key);
+    memmove(pl + i, pl + i + 1, sizeof(entry) * (size_t)(npl - i - 1));
+    npl--;
+    if (cur > i) cur--;
+    ctx_idx = -1;
+}
 static void pl_build_vis(void) {
     pl_vis = (int *)realloc(pl_vis, sizeof(int) * (size_t)(npl > 0 ? npl : 1));
     nvis = 0; cvis = -1;
@@ -1471,20 +1648,22 @@ static void draw_ui(double t) {
             } else if (hv) rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(EDGE, 0.25f));
             char lab[160], tg[24]; list_label(lab, sizeof lab, tg, sizeof tg, &pl[i]);
             float tx = x + 20;
-            if (pl[i].ma_id) {      /* kleine Marke "MA": Titel stammt vom The Mod Archive */
-                rrect(tx, yy + 6, 24, 17, 4, alpha(VC[1], isc ? 0.32f : 0.20f));
-                text(tx + 4, yy + 8, 11, VC[1], "MA");
-                tx += 31;
-            }
+            tx += draw_fmt_badge(tx, yy + 6, &pl[i], isc);      /* file format in its own colour */
             float tgw = tg[0] ? text_width(tg, 14) : 0;
-            fit_text(lab, w - 52 - (tx - (x + 20)) - tgw, 14);
+            fit_text(lab, w - 74 - (tx - (x + 20)) - tgw, 14);
             text(tx, yy + 5, 14, isc ? TXT : DIM, lab);
-            if (tg[0]) text_right(x + w - 22, yy + 5, 14, VC[1], tg);      /* #ID flush right */
-            if (rclick && pl[i].ma_id && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {
+            if (tg[0]) text_right(x + w - 44, yy + 5, 14, VC[1], tg);      /* #ID, left of the remove button */
+            int xhv = hit(x + w - 38, yy + 2, 26, rh - 6);
+            if (hv) {               /* red x: remove from list */
+                if (xhv) rrect(x + w - 38, yy + 3, 26, rh - 8, 6, alpha(WARN, 0.22f));
+                text(x + w - 31, yy + 5, 15, xhv ? WARN : alpha(WARN, 0.55f), "\xd7");
+            }
+            if (hv && xhv && click && clickx >= x + w - 38 && clickx < x + w - 12 && clicky >= yy && clicky < yy + rh) { pl_remove(i); click = 0; break; }
+            if (rclick && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {
                 ctx_idx = i; rclick = 0;
                 ctx_x = (float)rclickx; ctx_y = (float)rclicky;
                 if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
-                if (ctx_y + CTX_H > view_h - 4) ctx_y = view_h - 4 - CTX_H;
+                if (ctx_y + CTX_H(i) > view_h - 4) ctx_y = view_h - 4 - CTX_H(i);
             }
             if (clicked(x + 8, yy, w - 16, rh)) { play_index(i); click = 0; }
         }
@@ -1685,11 +1864,7 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
         }
         char lab[160], tg[24]; list_label(lab, sizeof lab, tg, sizeof tg, &pl[i]);
         float tx = x + 20;
-        if (pl[i].ma_id) {
-            rrect(tx, yy + 8, 24, 17, 4, alpha(VC[1], isc ? 0.32f : 0.20f));
-            text(tx + 4, yy + 10, 11, VC[1], "MA");
-            tx += 31;
-        }
+        tx += draw_fmt_badge(tx, yy + 8, &pl[i], isc);          /* file format in its own colour */
         float tgw = tg[0] ? text_width(tg, 14) : 0;
         fit_text(lab, w - 40 - (tx - (x + 20)) - tgw, 14);
         text(tx, yy + 8, 14, isc ? TXT : DIM, lab);
@@ -1846,6 +2021,98 @@ static int shot_frames, vsync_ok, running, frame, fullscreen;
 static Uint64 t0, tlast;
 static double freq;
 
+#ifndef __EMSCRIPTEN__
+/* Einstellungen: $XDG_CONFIG_HOME/ngplayer/settings.ini (sonst ~/.config/ngplayer/settings.ini), Zeilen "key=value" */
+static int g_win_w = 1280, g_win_h = 860, g_win_x = SDL_WINDOWPOS_CENTERED, g_win_y = SDL_WINDOWPOS_CENTERED;
+static int settings_path(char *out, size_t n, int mkdir_p) {
+    const char *x = getenv("XDG_CONFIG_HOME"), *h = getenv("HOME");
+    char dir[900];
+    if (x && *x) snprintf(dir, sizeof dir, "%s/ngplayer", x);
+    else if (h && *h) snprintf(dir, sizeof dir, "%s/.config/ngplayer", h);
+    else return 0;
+    if (mkdir_p) {
+        char par[900]; snprintf(par, sizeof par, "%s", dir);
+        char *sl = strrchr(par, '/'); if (sl) { *sl = 0; mkdir(par, 0755); }
+        mkdir(dir, 0755);
+    }
+    snprintf(out, n, "%s/settings.ini", dir);
+    return 1;
+}
+static void settings_load(void) {
+    char path[1000]; FILE *f;
+    if (!settings_path(path, sizeof path, 0) || !(f = fopen(path, "r"))) return;
+    char line[128];
+    while (fgets(line, sizeof line, f)) {
+        int v;
+        if (sscanf(line, "window_w=%d", &v) == 1 && v >= 360 && v <= 16384) g_win_w = v;
+        else if (sscanf(line, "window_h=%d", &v) == 1 && v >= 480 && v <= 16384) g_win_h = v;
+        else if (sscanf(line, "orb=%d", &v) == 1) g_orb = v != 0;
+        else if (sscanf(line, "window_x=%d", &v) == 1) g_win_x = v;
+        else if (sscanf(line, "window_y=%d", &v) == 1) g_win_y = v;
+    }
+    fclose(f);
+    if (g_win_x != SDL_WINDOWPOS_CENTERED || g_win_y != SDL_WINDOWPOS_CENTERED) {   /* only use the position if it is still on a screen (monitor unplugged?) */
+        int ok = 0;
+        for (int d = 0; d < SDL_GetNumVideoDisplays() && !ok; d++) {
+            SDL_Rect r;
+            if (!SDL_GetDisplayBounds(d, &r) && g_win_x + 100 >= r.x && g_win_x + 100 < r.x + r.w && g_win_y + 20 >= r.y && g_win_y + 20 < r.y + r.h) ok = 1;
+        }
+        if (!ok) g_win_x = g_win_y = SDL_WINDOWPOS_CENTERED;
+    }
+}
+/* Mod Archive list: one "id<TAB>title" per line in modarchive.list next to settings.ini. Entries are restored from the download cache; ones whose file is gone are dropped. */
+static int ma_list_path(char *out, size_t n, int mk) {
+    char p[1000];
+    if (!settings_path(p, sizeof p, mk)) return 0;
+    char *sl = strrchr(p, '/'); if (!sl) return 0;
+    snprintf(sl + 1, sizeof p - (size_t)(sl + 1 - p), "modarchive.list");
+    snprintf(out, n, "%s", p);
+    return 1;
+}
+static void ma_list_load(void) {
+    char path[1000], dir[900], line[256]; FILE *f;
+    if (!ma_list_path(path, sizeof path, 0) || !(f = fopen(path, "r")) || net_cache_dir(dir, sizeof dir)) { if (f) fclose(f); return; }
+    while (fgets(line, sizeof line, f)) {
+        char *tab = strchr(line, '\t'), *nl = strpbrk(line, "\r\n");
+        int id = atoi(line);
+        if (nl) *nl = 0;
+        if (id <= 0) continue;
+        char fp[1100]; struct stat sb;
+        snprintf(fp, sizeof fp, "%s/modarchive/%d.mod", dir, id);
+        if (stat(fp, &sb) || sb.st_size <= 0) continue;
+        add_file(fp);
+        pl[npl - 1].ma_id = id;
+        snprintf(pl[npl - 1].label, sizeof pl[npl - 1].label, "%s", tab && tab[1] ? tab + 1 : "ModArchive");
+    }
+    fclose(f);
+}
+static void ma_list_save(void) {
+    char path[1000]; FILE *f;
+    if (!ma_list_path(path, sizeof path, 1) || !(f = fopen(path, "w"))) return;
+    for (int i = 0; i < npl; i++) {
+        if (pl[i].ma_id <= 0) continue;
+        char t[128]; snprintf(t, sizeof t, "%s", pl[i].label);
+        for (char *c = t; *c; c++) if (*c == '\t' || *c == '\n' || *c == '\r') *c = ' ';
+        fprintf(f, "%d\t%s\n", pl[i].ma_id, t);
+    }
+    fclose(f);
+}
+static void settings_save(void) {
+    char path[1000]; FILE *f;
+    if (!settings_path(path, sizeof path, 1) || !(f = fopen(path, "w"))) return;
+    /* Groesse nur merken, wenn das Fenster normal ist (nicht Vollbild/maximiert) */
+    if (!(SDL_GetWindowFlags(win) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_MAXIMIZED)))
+        {
+        int px, py;
+        SDL_GetWindowSize(win, &g_win_w, &g_win_h);
+        SDL_GetWindowPosition(win, &px, &py);
+        if ((px || py) && (px & 0xFFFF0000) != 0x2FFF0000 && (px & 0xFFFF0000) != 0x1FFF0000) { g_win_x = px; g_win_y = py; }      /* Wayland has no window position (SDL returns 0,0 or the "centered" flag): then keep the old value */
+    }
+    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\norb=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_orb ? 1 : 0);
+    fclose(f);
+}
+#endif
+
 #ifdef __EMSCRIPTEN__
 /* Wird von der Webseite (Drag & Drop / Dateiauswahl) aufgerufen, nachdem die Datei ins virtuelle Dateisystem geschrieben wurde. */
 /* Canvas-Groesse in Pixeln (Hochformat auf dem Handy, siehe ngweb/shell.html) */
@@ -1907,14 +2174,15 @@ static void info_open(int idx) {
 }
 static void draw_ctx_menu(void) {
     if (ctx_idx >= 0 && ctx_idx < npl) {
-        static const char *const item[2] = { "Share", "Info" };
-        rrect(ctx_x - 1, ctx_y - 1, CTX_W + 2, CTX_H + 2, 9, alpha(EDGE, 0.9f));
-        rrect(ctx_x, ctx_y, CTX_W, CTX_H, 8, CARDHI);
-        for (int j = 0; j < 2; j++) {
+        static const char *const item[3] = { "Share", "Info", "Remove" };
+        int n = ctx_n(ctx_idx), off = 3 - n;           /* local files only show the last item (Remove) */
+        rrect(ctx_x - 1, ctx_y - 1, CTX_W + 2, CTX_H(ctx_idx) + 2, 9, alpha(EDGE, 0.9f));
+        rrect(ctx_x, ctx_y, CTX_W, CTX_H(ctx_idx), 8, CARDHI);
+        for (int j = 0; j < n; j++) {
             float iy = ctx_y + 1 + j * CTX_ROW;
             int hv = mx >= ctx_x && mx < ctx_x + CTX_W && my >= iy && my < iy + CTX_ROW;
             if (hv) rrect(ctx_x + 3, iy + 2, CTX_W - 6, CTX_ROW - 4, 6, alpha(VC[0], 0.22f));
-            text(ctx_x + 14, iy + 7, 14, hv ? TXT : DIM, item[j]);
+            text(ctx_x + 14, iy + 7, 14, item[j + off][0] == 'R' ? (hv ? WARN : alpha(WARN, 0.75f)) : (hv ? TXT : DIM), item[j + off]);
         }
     }
     if (toast_t > 0) {
@@ -2009,8 +2277,9 @@ static void iter(void) {
         if (click) { clickx = (int)(clickx * k); clicky = (int)(clicky * k); }
         if (rclick) { rclickx = (int)(rclickx * k); rclicky = (int)(rclicky * k); }
         if (ctx_idx >= 0 && click) {                         /* click on the open menu: copy the link; any click closes it */
-            if (clickx >= ctx_x && clickx < ctx_x + CTX_W && clicky >= ctx_y && clicky < ctx_y + CTX_H && ctx_idx < npl && pl[ctx_idx].ma_id) {
-                if (clicky < ctx_y + 1 + CTX_ROW) share_link(ctx_idx); else info_open(ctx_idx);
+            if (clickx >= ctx_x && clickx < ctx_x + CTX_W && clicky >= ctx_y && clicky < ctx_y + CTX_H(ctx_idx) && ctx_idx < npl) {
+                int j = (int)((clicky - ctx_y - 1) / CTX_ROW) + 3 - ctx_n(ctx_idx);          /* 0 Share, 1 Info, 2 Remove */
+                if (j == 0) share_link(ctx_idx); else if (j == 1) info_open(ctx_idx); else if (j == 2) pl_remove(ctx_idx);
             }
             ctx_idx = -1; click = 0; lp_swallow = 1;
         }
@@ -2088,7 +2357,19 @@ int main(int argc, char **argv) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 #endif
-    win = SDL_CreateWindow("ngPlayer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 860,
+#ifndef __EMSCRIPTEN__
+    if (!shot) { settings_load(); ma_list_load(); }
+#define WIN_X0 g_win_x
+#define WIN_Y0 g_win_y
+#define WIN_W0 g_win_w
+#define WIN_H0 g_win_h
+#else
+#define WIN_X0 SDL_WINDOWPOS_CENTERED
+#define WIN_Y0 SDL_WINDOWPOS_CENTERED
+#define WIN_W0 1280
+#define WIN_H0 860
+#endif
+    win = SDL_CreateWindow("ngPlayer", WIN_X0, WIN_Y0, WIN_W0, WIN_H0,
                                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!win) { fprintf(stderr, "Fenster: %s\n", SDL_GetError()); return 1; }
     SDL_SetWindowMinimumSize(win, 360, 480);      /* schmal erlaubt: dann greift das Hochformat-Layout */
@@ -2171,6 +2452,9 @@ int main(int argc, char **argv) {
     emscripten_set_main_loop(iter, 0, 1);
 #else
     while (running) iter();
+#endif
+#ifndef __EMSCRIPTEN__
+    if (!shot) { settings_save(); ma_list_save(); }
 #endif
     if (g_dev) SDL_CloseAudioDevice(g_dev);
     unload();

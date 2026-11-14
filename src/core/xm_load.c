@@ -19,6 +19,9 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
     s->fmt = 4; s->maxvol = 0x40; s->gvol = 255;
     if (n < 80 || memcmp(b, "Extended Module: ", 17)) return -1;
     memcpy(s->title, b + 17, 20); s->title[20] = 0;
+    /* ModPlug Tracker writes "FastTracker v 2.00" (a space after the v, FastTracker 2 itself writes "FastTracker v2.00"). libopenmpt plays such
+     * files 3.6x quieter than FT2 files (gain measured on one file, waveform identical: factor 0.275 relative to our FT2 mix level). */
+    if (!memcmp(b + 38, "FastTracker v 2.00", 18)) s->mixgain = 0.275;
     unsigned ver = rd16(b + 58), hs = rd32(b + 60);
     unsigned nord = rd16(b + 64), rst = rd16(b + 66), nch = rd16(b + 68), npat = rd16(b + 70), nins = rd16(b + 72);
     unsigned flags = rd16(b + 74), speed = rd16(b + 76), tempo = rd16(b + 78);

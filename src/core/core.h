@@ -46,6 +46,8 @@ typedef struct {
     XSmp smp[100];             /* 1..99 */
     int maxvol;                /* 0x40 */
     int speed, tempo;
+    double mixgain;            /* > 0: extra output gain (1 = none); XM saved by ModPlug Tracker, which libopenmpt mixes much quieter */
+    double tempo_exact;        /* > 0: tempo as a fraction (BPM), used instead of tempo until the song sets a new one */
     /* XM (fmt 4): Instrumente 1..ninst, Samples flach in xsmp[]; XCell.vol1 = roher Volumenspalten-Byte (0 = keiner) */
     XInst *inst; int ninst;
     XSmp *xsmp; int nxsmp;
@@ -64,6 +66,12 @@ int  ptm_probe(const uint8_t *buf, size_t len);             /* 1 = Poly Tracker 
 int  xptm_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (PTM -> S3M replay) */
 int  ult_probe(const uint8_t *buf, size_t len);             /* 1 = UltraTracker file */
 int  xult_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (ULT -> S3M replay) */
+int  sfx_probe(const uint8_t *buf, size_t len);              /* 15 / 31 = SoundFX 1.3 / 2.0, 0 = no */
+int  xsfx_load(XSong *s, const uint8_t *buf, size_t len);      /* 0 = ok (-> MOD replay) */
+int  amf_probe(const uint8_t *buf, size_t len);              /* 1 = DSMI AMF ("AMF" + version 8..14) */
+int  xamf_load(XSong *s, const uint8_t *buf, size_t len);      /* 0 = ok (-> MOD replay) */
+int  asylum_probe(const uint8_t *buf, size_t len);          /* 1 = Asylum Music Format (Crusader) */
+int  xasylum_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (-> MOD replay) */
 int  mtm_probe(const uint8_t *buf, size_t len);             /* 1 = MultiTracker file */
 int  xmtm_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (MTM -> MOD replay) */
 int  psm_probe(const uint8_t *buf, size_t len);             /* 1 = Epic PSM16 file ("PSM\xFE") */
