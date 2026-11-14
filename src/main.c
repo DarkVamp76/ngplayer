@@ -1857,7 +1857,7 @@ static double freq;
 
 #ifndef __EMSCRIPTEN__
 /* Einstellungen: $XDG_CONFIG_HOME/ngplayer/settings.ini (sonst ~/.config/ngplayer/settings.ini), Zeilen "key=value" */
-static int g_win_w = 1280, g_win_h = 860;
+static int g_win_w = 1280, g_win_h = 860, g_win_x = SDL_WINDOWPOS_CENTERED, g_win_y = SDL_WINDOWPOS_CENTERED;
 static int settings_path(char *out, size_t n, int mkdir_p) {
     const char *x = getenv("XDG_CONFIG_HOME"), *h = getenv("HOME");
     char dir[900];
@@ -1881,6 +1881,53 @@ static void settings_load(void) {
         if (sscanf(line, "window_w=%d", &v) == 1 && v >= 360 && v <= 16384) g_win_w = v;
         else if (sscanf(line, "window_h=%d", &v) == 1 && v >= 480 && v <= 16384) g_win_h = v;
         else if (sscanf(line, "orb=%d", &v) == 1) g_orb = v != 0;
+        else if (sscanf(line, "window_x=%d", &v) == 1) g_win_x = v;
+        else if (sscanf(line, "window_y=%d", &v) == 1) g_win_y = v;
+    }
+    fclose(f);
+    if (g_win_x != SDL_WINDOWPOS_CENTERED || g_win_y != SDL_WINDOWPOS_CENTERED) {   /* only use the position if it is still on a screen (monitor unplugged?) */
+        int ok = 0;
+        for (int d = 0; d < SDL_GetNumVideoDisplays() && !ok; d++) {
+            SDL_Rect r;
+            if (!SDL_GetDisplayBounds(d, &r) && g_win_x + 100 >= r.x && g_win_x + 100 < r.x + r.w && g_win_y + 20 >= r.y && g_win_y + 20 < r.y + r.h) ok = 1;
+        }
+        if (!ok) g_win_x = g_win_y = SDL_WINDOWPOS_CENTERED;
+    }
+}
+/* Mod Archive list: one "id<TAB>title" per line in modarchive.list next to settings.ini. Entries are restored from the download cache; ones whose file is gone are dropped. */
+static int ma_list_path(char *out, size_t n, int mk) {
+    char p[1000];
+    if (!settings_path(p, sizeof p, mk)) return 0;
+    char *sl = strrchr(p, '/'); if (!sl) return 0;
+    snprintf(sl + 1, sizeof p - (size_t)(sl + 1 - p), "modarchive.list");
+    snprintf(out, n, "%s", p);
+    return 1;
+}
+static void ma_list_load(void) {
+    char path[1000], dir[900], line[256]; FILE *f;
+    if (!ma_list_path(path, sizeof path, 0) || !(f = fopen(path, "r")) || net_cache_dir(dir, sizeof dir)) { if (f) fclose(f); return; }
+    while (fgets(line, sizeof line, f)) {
+        char *tab = strchr(line, '\t'), *nl = strpbrk(line, "\r\n");
+        int id = atoi(line);
+        if (nl) *nl = 0;
+        if (id <= 0) continue;
+        char fp[1100]; struct stat sb;
+        snprintf(fp, sizeof fp, "%s/modarchive/%d.mod", dir, id);
+        if (stat(fp, &sb) || sb.st_size <= 0) continue;
+        add_file(fp);
+        pl[npl - 1].ma_id = id;
+        snprintf(pl[npl - 1].label, sizeof pl[npl - 1].label, "%s", tab && tab[1] ? tab + 1 : "ModArchive");
+    }
+    fclose(f);
+}
+static void ma_list_save(void) {
+    char path[1000]; FILE *f;
+    if (!ma_list_path(path, sizeof path, 1) || !(f = fopen(path, "w"))) return;
+    for (int i = 0; i < npl; i++) {
+        if (pl[i].ma_id <= 0) continue;
+        char t[128]; snprintf(t, sizeof t, "%s", pl[i].label);
+        for (char *c = t; *c; c++) if (*c == '\t' || *c == '\n' || *c == '\r') *c = ' ';
+        fprintf(f, "%d\t%s\n", pl[i].ma_id, t);
     }
     fclose(f);
 }
@@ -1889,8 +1936,13 @@ static void settings_save(void) {
     if (!settings_path(path, sizeof path, 1) || !(f = fopen(path, "w"))) return;
     /* Groesse nur merken, wenn das Fenster normal ist (nicht Vollbild/maximiert) */
     if (!(SDL_GetWindowFlags(win) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_MAXIMIZED)))
+        {
+        int px, py;
         SDL_GetWindowSize(win, &g_win_w, &g_win_h);
-    fprintf(f, "window_w=%d\nwindow_h=%d\norb=%d\n", g_win_w, g_win_h, g_orb ? 1 : 0);
+        SDL_GetWindowPosition(win, &px, &py);
+        if (px || py) { g_win_x = px; g_win_y = py; }      /* Wayland reports 0,0 (the compositor places windows): then keep the old value */
+    }
+    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\norb=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_orb ? 1 : 0);
     fclose(f);
 }
 #endif
@@ -2129,14 +2181,18 @@ int main(int argc, char **argv) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 #endif
 #ifndef __EMSCRIPTEN__
-    if (!shot) settings_load();
+    if (!shot) { settings_load(); ma_list_load(); }
+#define WIN_X0 g_win_x
+#define WIN_Y0 g_win_y
 #define WIN_W0 g_win_w
 #define WIN_H0 g_win_h
 #else
+#define WIN_X0 SDL_WINDOWPOS_CENTERED
+#define WIN_Y0 SDL_WINDOWPOS_CENTERED
 #define WIN_W0 1280
 #define WIN_H0 860
 #endif
-    win = SDL_CreateWindow("ngPlayer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIN_W0, WIN_H0,
+    win = SDL_CreateWindow("ngPlayer", WIN_X0, WIN_Y0, WIN_W0, WIN_H0,
                                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!win) { fprintf(stderr, "Fenster: %s\n", SDL_GetError()); return 1; }
     SDL_SetWindowMinimumSize(win, 360, 480);      /* schmal erlaubt: dann greift das Hochformat-Layout */
@@ -2221,7 +2277,7 @@ int main(int argc, char **argv) {
     while (running) iter();
 #endif
 #ifndef __EMSCRIPTEN__
-    if (!shot) settings_save();
+    if (!shot) { settings_save(); ma_list_save(); }
 #endif
     if (g_dev) SDL_CloseAudioDevice(g_dev);
     unload();
