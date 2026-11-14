@@ -478,7 +478,12 @@ static void advance(XPlayer *p){
                    if (c->loop_cnt > 0) loopto = c->loop_row; }
         }
     }
-    if (loopto >= 0 && jo < 0) { p->row = loopto; p->loop_jump = 1; return; }
+    if (loopto >= 0 && jo < 0) {
+        /* E6x pattern loop: the rows of the loop are meant to be played again, so forget that they were visited
+         * (otherwise the song-end detection takes the repeat for a loop of the whole song and stops after the first pass) */
+        for (int r = loopto; r <= p->row && r < 64; r++) p->vis[p->order][r] = 0;
+        p->row = loopto; p->loop_jump = 1; return;
+    }
     if (jo >= 0) { p->order = jo; p->row = jr < 0 ? 0 : jr; }
     else if (++p->row >= 64) { p->row = 0; p->order++; }
     if (p->row >= 64) p->row = 0;
