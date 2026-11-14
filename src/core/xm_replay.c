@@ -344,6 +344,7 @@ static void pan_add(double sm, int pan, double *l, double *r){
 int xxm_render(XXPlayer *p, int16_t *out, int n){
     const XSong *s = p->s; int done = 0;
     double master = 96.0 / 256.0;
+    if (s->mixgain > 0) master *= s->mixgain;
     { const char *e = getenv("XMGAIN"); if (e) master = atof(e); }
     while (done < n) {
         if (p->done) break;
