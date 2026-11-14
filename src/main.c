@@ -995,7 +995,7 @@ static void draw_logo(float x, float y, float s) {
 #define TAGLINE "Module player for Linux"
 #endif
 /* ---------------------------------------------------------------- Wachssiegel (Meilenstein, oben rechts in der Logo-Box) */
-#define SEAL_TEXT "1.0"          /* Text im Siegel: hier aendern */
+#define SEAL_TEXT "1.4"          /* Text im Siegel: hier aendern */
 #define SEAL_ROT 0.7854f         /* Drehung im Uhrzeigersinn (45 Grad) */
 static void seal_lobes(float cx, float cy, float r, col c) {
     static const float lr[12] = { 1.00f, 0.93f, 1.05f, 0.96f, 1.02f, 0.92f, 1.04f, 0.97f, 1.01f, 0.94f, 1.06f, 0.95f };
@@ -1003,6 +1003,105 @@ static void seal_lobes(float cx, float cy, float r, col c) {
     for (int i = 0; i < 12; i++) {
         float a = i * 0.5236f + 0.3f + SEAL_ROT, d = r * 0.78f * lr[i], lrad = r * 0.24f * lr[(i + 5) % 12];
         rrect(cx + cosf(a) * d - lrad, cy + sinf(a) * d - lrad, lrad * 2, lrad * 2, lrad, c);
+    }
+}
+/* Stateless fire: every particle lives in cycles (phase = time * speed), its randomness comes from a hash of (particle, cycle),
+ * so no per-particle state is needed. Additive blobs: white-yellow core -> orange -> red -> gone. */
+static float fhash(unsigned n) { n = n * 747796405u + 2891336453u; n = ((n >> ((n >> 28) + 4)) ^ n) * 277803737u; n = (n >> 22) ^ n; return (float)(n & 0xFFFF) / 65535.0f; }
+static col fire_col(float u) {
+    if (u < 0.16f) return mix(C(1.00f, 0.90f, 0.50f, 1), C(1.00f, 0.60f, 0.12f, 1), u / 0.16f);
+    if (u < 0.55f) return mix(C(1.00f, 0.60f, 0.12f, 1), C(0.90f, 0.20f, 0.04f, 1), (u - 0.16f) / 0.39f);
+    return mix(C(0.90f, 0.20f, 0.04f, 1), C(0.35f, 0.05f, 0.04f, 1), (u - 0.55f) / 0.45f);
+}
+/* front = 0: flames licking out behind the seal; front = 1: shorter tongues rising from the wax surface (over the lettering) */
+static void seal_flames(float cx, float cy, float r, float t, float beat, float flick, int front) {
+    int n = g_mobile ? 10 : 22;
+    float pow_ = 1.0f + 0.55f * beat;
+    for (int i = 0; i < n; i++) {
+        float sp = 0.85f + 0.9f * fhash((unsigned)i * 7 + 1);
+        float ph = t * sp + fhash((unsigned)i * 3 + 2) * 8.0f, cyc = floorf(ph), u = ph - cyc;
+        unsigned sd = (unsigned)i * 131u + (unsigned)cyc * 17u + (front ? 9001u : 0u);
+        float a = -2.3f + (fhash(sd) + fhash(sd + 1) - 1.0f) * (front ? 1.6f : 2.6f);             /* around the rim, biased to the upper left */
+        float ro = front ? r * (0.45f + 0.5f * fhash(sd + 4)) : r * 0.85f;
+        float ox = cx + cosf(a) * ro, oy = cy + sinf(a) * ro;
+        float dx = cosf(a) * 0.55f - 0.55f, dy = sinf(a) * 0.45f - 0.55f, dl = sqrtf(dx * dx + dy * dy);   /* outwards + wind to the upper left */
+        dx /= dl; dy /= dl;
+        float L = r * (front ? 0.8f : 1.3f + 1.5f * fhash(sd + 2)) * pow_, ue = powf(u, 0.8f);
+        float wob = sinf(u * 9.0f + fhash(sd + 5) * 6.0f) * r * 0.16f * u;
+        float px = ox + dx * L * ue - dy * wob, py = oy + dy * L * ue + dx * wob;
+        float sz = r * (front ? 0.30f : 0.42f) * (0.6f + 0.7f * fhash(sd + 3)) * (1.0f - 0.85f * u);
+        float al = (u < 0.12f ? u / 0.12f : 1.0f) * powf(1.0f - u, 1.3f) * (front ? 0.16f : 0.30f);
+        col c = fire_col(u);
+        blob(px, py, sz * 1.9f, alpha(c, 0.06f * al));                             /* soft halo */
+        blob(px, py, sz, alpha(c, 0.5f * al));
+        float u2 = u > 0.06f ? u - 0.06f : 0.0f, ue2 = powf(u2, 0.8f);            /* trailing blob: makes the tongue longer */
+        blob(ox + dx * L * ue2 - dy * wob * 0.8f, oy + dy * L * ue2 + dx * wob * 0.8f, sz * 0.8f, alpha(fire_col(u2), 0.45f * al));
+    }
+    if (front) return;
+    int nt = g_mobile ? 6 : 11, np = g_mobile ? 6 : 9;                             /* flame tongues: S-shaped, thinning towards the tip, the tips curl upwards (heat rises) */
+    for (int k = 0; k < nt; k++) {
+        float fk = (float)k;
+        float ak = -3.0f + (fk - (nt - 1) * 0.5f) * (3.0f / (float)nt) + 0.12f * sinf(t * 1.7f + fk * 2.3f);
+        float len = r * (1.0f + 0.9f * fhash((unsigned)k * 19 + 3)) * (0.78f + 0.26f * sinf(t * (5.0f + fk * 0.7f) + fk) + 0.10f * sinf(t * 17.0f + fk * 1.9f)) * (1.0f + 0.5f * beat);
+        float dx = cosf(ak) * 0.8f - 0.5f, dy = sinf(ak) * 0.8f - 0.2f, dl = sqrtf(dx * dx + dy * dy);
+        dx /= dl; dy /= dl;
+        float bx = cx + cosf(ak) * r * 0.86f, by = cy + sinf(ak) * r * 0.86f, ph = t * 3.4f + fk * 1.7f;
+        float pts[2 * 12];
+        for (int m = 0; m < np; m++) {
+            float sf = (float)m / (float)(np - 1);
+            float sw = r * 0.30f * sinf(sf * 4.2f + ph) * sf;                       /* S-curve, flickering along the flame */
+            pts[2 * m] = bx + dx * len * sf - dy * sw;
+            pts[2 * m + 1] = by + dy * len * sf + dx * sw - r * 0.85f * sf * sf;    /* rising curl */
+        }
+        float g = 0.55f + 0.45f * flick;
+        blob(bx, by, r * 0.5f, alpha(C(1.0f, 0.35f, 0.06f, 1), 0.14f * g));
+        static const float LW[3] = { 0.26f, 0.16f, 0.075f }, LF[3] = { 1.0f, 0.72f, 0.42f }, LA[3] = { 0.26f, 0.34f, 0.46f };
+        static const col LC[3] = { { 0.92f, 0.16f, 0.04f, 1 }, { 1.00f, 0.52f, 0.08f, 1 }, { 1.00f, 0.92f, 0.55f, 1 } };
+        for (int ly = 0; ly < 3; ly++) {
+            int ns = (int)((np - 1) * LF[ly] + 0.5f);
+            for (int m = 0; m < ns; m++) {                                          /* one ribbon piece per segment: width tapers to the tip */
+                float tp = (float)m / (float)ns, w = r * LW[ly] * powf(1.0f - tp, 0.85f) + 0.4f;
+                polyline(pts + 2 * m, 2, w, 1.5f, alpha(LC[ly], LA[ly] * g * (1.0f - 0.4f * tp)));
+            }
+        }
+    }
+    int ne = g_mobile ? 6 : 14;                                                    /* embers: small sparks flying away, drifting left with the wind */
+    for (int i = 0; i < ne; i++) {
+        float sp = 0.35f + 0.5f * fhash((unsigned)i * 11 + 5);
+        float ph = t * sp + fhash((unsigned)i * 5 + 6) * 9.0f, cyc = floorf(ph), u = ph - cyc;
+        unsigned sd = (unsigned)i * 977u + (unsigned)cyc * 31u;
+        float a = -1.5708f + (fhash(sd) - 0.5f) * 2.6f;
+        float L = r * (1.8f + 2.4f * fhash(sd + 1)), ue = 1.0f - (1.0f - u) * (1.0f - u);
+        float px = cx + cosf(a) * r * 0.8f + (cosf(a) * 0.6f - 0.7f * u) * L * ue + sinf(u * 14.0f + fhash(sd + 2) * 6.0f) * r * 0.10f;
+        float py = cy + sinf(a) * r * 0.8f + (sinf(a) * 0.6f - 1.0f) * L * ue * 0.9f;
+        float fl = 0.6f + 0.4f * sinf(t * 23.0f + (float)i * 4.1f), al = (u < 0.08f ? u / 0.08f : 1.0f) * (1.0f - u) * fl;
+        blob(px, py, 1.1f + 0.9f * fhash(sd + 3), alpha(mix(C(1.0f, 0.85f, 0.4f, 1), C(1.0f, 0.4f, 0.1f, 1), u), 0.95f * al));
+    }
+}
+/* Molten wax drops: now and then a drop swells at the lower rim of the seal, lets go, falls over the card (cooling from glowing orange to dark red) and splashes. */
+static void seal_drop(float cx, float cy, float r, float t, float off, float per) {
+    float tt = t + off, ph = fmodf(tt, per);
+    unsigned cyc = (unsigned)(tt / per) * 7u + (unsigned)(off * 10.0f);
+    const float TF = 1.3f, TD = 0.95f, TS = 0.4f;                                  /* swelling, falling, splash (seconds) */
+    float a = 1.5708f + (fhash(cyc + 1) - 0.5f) * 1.5f;                            /* somewhere along the lower rim */
+    float bx = cx + cosf(a) * r * 0.9f, by = cy + sinf(a) * r * 0.9f;
+    col hot = C(1.00f, 0.52f, 0.12f, 1), wax = C(0.68f, 0.07f, 0.09f, 1), hi = C(1.00f, 0.80f, 0.55f, 1);
+    if (ph < TF) {                                                                 /* hanging: the drop swells and sags */
+        float u = ph / TF, w = r * (0.06f + 0.18f * u * u), sag = r * 0.30f * u * u * u;
+        col c = mix(hot, wax, 0.45f);
+        rrect(bx - w, by - w * 0.5f, w * 2, w * 1.5f + sag, w, c);
+        rrect(bx - w * 0.35f, by - w * 0.1f, w * 0.5f, w * 0.7f, w * 0.25f, alpha(hi, 0.6f));
+    } else if (ph < TF + TD) {                                                     /* falling */
+        float v = (ph - TF) / TD, w = r * 0.24f, y = by + r * 0.25f + r * 3.6f * v * v, st = w * (0.4f + 1.4f * v);
+        float fa = v > 0.85f ? (1.0f - v) / 0.15f : 1.0f;
+        col c = mix(hot, wax, v);
+        set_additive(1); blob(bx, y, w * 2.6f, alpha(hot, 0.35f * (1.0f - v) * fa)); set_additive(0);
+        rrect(bx - w * 0.8f, y - st, w * 1.6f, w + st, w * 0.8f, alpha(c, fa));                                   /* stretched tear */
+        rrect(bx - w * 0.3f, y - st * 0.2f, w * 0.5f, w * 0.7f, w * 0.25f, alpha(hi, 0.55f * (1.0f - v) * fa));
+    } else if (ph < TF + TD + TS) {                                                /* splash on the card */
+        float u = (ph - TF - TD) / TS, y = by + r * 0.25f + r * 3.6f, rr = r * (0.10f + 0.35f * u), pts[2 * 13];
+        for (int i = 0; i < 13; i++) { float an = i * 6.2832f / 12; pts[2 * i] = bx + cosf(an) * rr; pts[2 * i + 1] = y + sinf(an) * rr * 0.35f; }
+        polyline(pts, 13, 1.6f, 1.0f, alpha(mix(hot, wax, 0.6f), 0.7f * (1.0f - u)));
     }
 }
 static void draw_seal(float cx, float cy, float r, const char *label) {
@@ -1013,13 +1112,18 @@ static void draw_seal(float cx, float cy, float r, const char *label) {
     if (age < T1) { float u = age / T1; sc = 1.0f + 1.0f * (1 - u) * (1 - u); al = u < 0.4f ? u / 0.4f : 1.0f; heat = 1.0f; }
     else { sc = 1.0f - 0.10f * expf(-since * 9.0f) * sinf(since * 18.0f); al = 1.0f; heat = expf(-since * 1.1f); }
     float beat = g_paused ? 0.0f : g_beat;
-    float gl = heat + 0.10f + 0.08f * (0.5f + 0.5f * sinf(age * 2.1f)) + 0.12f * beat;   /* Restglut + Puls im Takt */
+    float flick = 0.5f + 0.25f * sinf(age * 13.0f) + 0.15f * sinf(age * 7.3f + 1.0f) + 0.10f * sinf(age * 31.0f);   /* fire flicker, 0..1 */
+    float burn = 0.34f + 0.16f * flick + 0.12f * beat;                             /* the seal burns all the time: wax stays glowing */
+    if (heat < burn) heat = burn;
+    float gl = heat + 0.35f + 0.25f * flick + 0.25f * beat;                        /* glow + flicker + pulse with the beat */
     col dk = mix(C(0.34f, 0.03f, 0.05f, 1), C(0.80f, 0.20f, 0.05f, 1), heat * 0.6f);
     col md = mix(C(0.68f, 0.07f, 0.09f, 1), C(1.00f, 0.45f, 0.10f, 1), heat * 0.85f);
     col lt = mix(C(0.90f, 0.26f, 0.22f, 1), C(1.00f, 0.88f, 0.45f, 1), heat);
     r *= sc;
     set_additive(1);                                                               /* Glut hinter dem Siegel */
-    blob(cx, cy, r * (0.85f + 0.35f * heat), alpha(C(1.0f, 0.32f, 0.06f, 1), 0.50f * gl * al));
+    blob(cx, cy, r * (1.25f + 0.35f * heat), alpha(C(1.0f, 0.32f, 0.06f, 1), 0.12f * gl * al));
+    blob(cx, cy, r * (0.85f + 0.35f * heat), alpha(C(1.0f, 0.32f, 0.06f, 1), 0.24f * gl * al));
+    seal_flames(cx, cy, r, age, beat, flick, 0);                                          /* flames licking out behind the seal */
     set_additive(0);
     blob(cx + 1.5f, cy + 3.0f, r * 0.55f, C(0, 0, 0, 0.55f * al));                 /* Schatten */
     seal_lobes(cx + 0.8f, cy + 1.0f, r, alpha(dk, al));                            /* dunkler Rand unten rechts */
@@ -1049,7 +1153,10 @@ static void draw_seal(float cx, float cy, float r, const char *label) {
             blob(cx + cosf(an) * dd, cy + sinf(an) * dd + 14.0f * since * since, 1.3f + 0.4f * (i % 3), alpha(C(1.0f, 0.7f, 0.25f, 1), 0.9f * fa * fa));
         }
     }
+    seal_flames(cx, cy, r, age, beat, flick, 1);                                          /* tongues over the wax */
     set_additive(0);
+    seal_drop(cx, cy, r, age, 0.0f, 5.3f);                                         /* drips: two with different rhythms */
+    seal_drop(cx, cy, r, age, 2.9f, 8.1f);
 }
 /* ---------------------------------------------------------------- Soundchips (Kopfzeile)
    Gezeichnet mit den vorhandenen Primitiven (Koordinaten im 320x200-Raster, Chip um 160,100). */
