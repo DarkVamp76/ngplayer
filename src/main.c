@@ -110,7 +110,7 @@ static void audio_cb(void *ud, Uint8 *stream, int len) {
 }
 
 /* ================================================================== Playlist */
-typedef struct { char *path; char *key; char label[128]; int ma_id; } entry;   /* key: Sortierschluessel (Ordner + Anzeigename) */
+typedef struct { char *path; char *key; char label[128]; int ma_id; int fmt; } entry;   /* fmt: -1 not yet determined, 0 unknown, else FMT_* */   /* key: Sortierschluessel (Ordner + Anzeigename) */
 static entry *pl;
 static int npl, cur = -1;
 static float list_scroll;
@@ -130,10 +130,66 @@ static int is_mod_name(const char *n) {
     return 0;
 }
 
+/* ---- File format badge in front of each list entry (colour per format) ---- */
+enum { FMT_NONE, FMT_MOD, FMT_S3M, FMT_XM, FMT_IT, FMT_STM, FMT_PTM, FMT_ULT, FMT_669, FMT_MTM, FMT_MED, FMT_PSM, FMT_FAR, FMT_MDL, FMT_DMF, FMT_TFMX, FMT_COUNT };
+static const char *const FMT_NAME[FMT_COUNT] = { "", "MOD", "S3M", "XM", "IT", "STM", "PTM", "ULT", "669", "MTM", "MED", "PSM", "FAR", "MDL", "DMF", "TFMX" };
+static const col FMT_COL[FMT_COUNT] = {
+    { 0.5f, 0.5f, 0.5f, 1 }, { 1.00f, 0.76f, 0.28f, 1 }, { 0.35f, 0.95f, 0.55f, 1 }, { 0.24f, 0.88f, 1.00f, 1 }, { 1.00f, 0.36f, 0.80f, 1 },
+    { 0.30f, 0.85f, 0.75f, 1 }, { 0.65f, 0.50f, 1.00f, 1 }, { 1.00f, 0.55f, 0.25f, 1 }, { 1.00f, 0.42f, 0.38f, 1 }, { 0.75f, 0.95f, 0.30f, 1 },
+    { 0.40f, 0.60f, 1.00f, 1 }, { 0.90f, 0.45f, 1.00f, 1 }, { 0.85f, 0.75f, 0.55f, 1 }, { 0.55f, 1.00f, 0.85f, 1 }, { 1.00f, 0.60f, 0.65f, 1 }, { 0.85f, 0.88f, 1.00f, 1 } };
+static int fmt_from_name(const char *fn) {
+    if (tfmx_is_song_name(fn)) return FMT_TFMX;
+    const char *d = strrchr(fn, '.');
+    if (!d) return FMT_NONE;
+    static const struct { const char *ext; int f; } map[] = { {".mod", FMT_MOD}, {".s3m", FMT_S3M}, {".xm", FMT_XM}, {".it", FMT_IT}, {".stm", FMT_STM}, {".ptm", FMT_PTM},
+        {".ult", FMT_ULT}, {".669", FMT_669}, {".mtm", FMT_MTM}, {".med", FMT_MED}, {".mmd0", FMT_MED}, {".mmd1", FMT_MED}, {".mmd2", FMT_MED}, {".mmd3", FMT_MED},
+        {".psm", FMT_PSM}, {".far", FMT_FAR}, {".mdl", FMT_MDL}, {".dmf", FMT_DMF}, { NULL, 0 } };
+    for (int i = 0; map[i].ext; i++) if (!strcasecmp(d, map[i].ext)) return map[i].f;
+    return FMT_NONE;
+}
+/* Mod Archive downloads are all cached as <id>.mod, so look at the file contents */
+static int fmt_sniff(const char *path) {
+    unsigned char b[1100]; size_t n = 0; FILE *f = fopen(path, "rb");
+    if (f) { n = fread(b, 1, sizeof b, f); fclose(f); }
+    if (n < 4) return FMT_NONE;
+    if (!memcmp(b, "IMPM", 4)) return FMT_IT;
+    if (n >= 17 && !memcmp(b, "Extended Module: ", 17)) return FMT_XM;
+    if (n > 0x30 && !memcmp(b + 0x2C, "SCRM", 4)) return FMT_S3M;
+    if (n > 0x30 && !memcmp(b + 0x2C, "PTMF", 4)) return FMT_PTM;
+    if (!memcmp(b, "MMD", 3) && b[3] >= '0' && b[3] <= '3') return FMT_MED;
+    if (!memcmp(b, "MTM", 3)) return FMT_MTM;
+    if (!memcmp(b, "DDMF", 4)) return FMT_DMF;
+    if (!memcmp(b, "DMDL", 4)) return FMT_MDL;
+    if (!memcmp(b, "FAR\xFE", 4)) return FMT_FAR;
+    if (!memcmp(b, "PSM\xFE", 4) || !memcmp(b, "PSM ", 4)) return FMT_PSM;
+    if (!memcmp(b, "MAS_UTrack_V00", 14)) return FMT_ULT;
+    if ((b[0] == 'i' && b[1] == 'f') || (b[0] == 'J' && b[1] == 'N')) return FMT_669;
+    if (n > 0x30 && !memcmp(b + 0x14, "!Scream!", 8)) return FMT_STM;
+    if (n > 0x30 && !memcmp(b + 0x14, "BMOD2STM", 8)) return FMT_STM;
+    if (n >= 1084) { const unsigned char *m = b + 1080; if (!memcmp(m, "M.K.", 4) || !memcmp(m, "M!K!", 4) || !memcmp(m, "FLT", 3) || !memcmp(m, "CD81", 4) || !memcmp(m, "OKTA", 4) || (m[1] == 'C' && m[2] == 'H' && m[3] == 'N') || (m[2] == 'C' && m[3] == 'H')) return FMT_MOD; }
+    return FMT_NONE;
+}
+static int entry_fmt(entry *e) {
+    if (e->fmt < 0) { const char *b = strrchr(e->path, '/'); e->fmt = e->ma_id > 0 ? fmt_sniff(e->path) : fmt_from_name(b ? b + 1 : e->path); if (e->ma_id > 0 && e->fmt == FMT_NONE) e->fmt = fmt_from_name(b ? b + 1 : e->path); }
+    return e->fmt;
+}
+/* Draws the badge at (x, y = top) and returns the width to advance (the same for every format so the names line up) */
+#define FMT_BADGE_W 36.0f
+static float draw_fmt_badge(float x, float y, entry *e, int isc) {
+    int f = entry_fmt(e);
+    if (f > 0 && f < FMT_COUNT) {
+        float tw = text_width(FMT_NAME[f], 10.5f);
+        rrect(x, y, FMT_BADGE_W, 17, 4, alpha(FMT_COL[f], isc ? 0.32f : 0.20f));
+        text(x + (FMT_BADGE_W - tw) / 2, y + 2.5f, 10.5f, FMT_COL[f], FMT_NAME[f]);
+    }
+    return FMT_BADGE_W + 7.0f;
+}
+
 static void add_file(const char *path) {
     pl = (entry *)realloc(pl, sizeof(entry) * (size_t)(npl + 1));
     pl[npl].path = strdup(path);
     pl[npl].ma_id = 0;                           /* >0: stammt vom The Mod Archive (Modul-ID) */
+    pl[npl].fmt = -1;
     const char *b = strrchr(path, '/');
     const char *fn = b ? b + 1 : path;
     if (tfmx_is_song_name(fn)) {                 /* TFMX: Namensschema mdat.X / X.tfx ist kein sinnvoller Anzeigename */
@@ -1587,11 +1643,7 @@ static void draw_ui(double t) {
             } else if (hv) rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(EDGE, 0.25f));
             char lab[160], tg[24]; list_label(lab, sizeof lab, tg, sizeof tg, &pl[i]);
             float tx = x + 20;
-            if (pl[i].ma_id) {      /* kleine Marke "MA": Titel stammt vom The Mod Archive */
-                rrect(tx, yy + 6, 24, 17, 4, alpha(VC[1], isc ? 0.32f : 0.20f));
-                text(tx + 4, yy + 8, 11, VC[1], "MA");
-                tx += 31;
-            }
+            tx += draw_fmt_badge(tx, yy + 6, &pl[i], isc);      /* file format in its own colour */
             float tgw = tg[0] ? text_width(tg, 14) : 0;
             fit_text(lab, w - 74 - (tx - (x + 20)) - tgw, 14);
             text(tx, yy + 5, 14, isc ? TXT : DIM, lab);
@@ -1807,11 +1859,7 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
         }
         char lab[160], tg[24]; list_label(lab, sizeof lab, tg, sizeof tg, &pl[i]);
         float tx = x + 20;
-        if (pl[i].ma_id) {
-            rrect(tx, yy + 8, 24, 17, 4, alpha(VC[1], isc ? 0.32f : 0.20f));
-            text(tx + 4, yy + 10, 11, VC[1], "MA");
-            tx += 31;
-        }
+        tx += draw_fmt_badge(tx, yy + 8, &pl[i], isc);          /* file format in its own colour */
         float tgw = tg[0] ? text_width(tg, 14) : 0;
         fit_text(lab, w - 40 - (tx - (x + 20)) - tgw, 14);
         text(tx, yy + 8, 14, isc ? TXT : DIM, lab);
