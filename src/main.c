@@ -403,6 +403,7 @@ static void analyse(float dt) {
 }
 
 /* ================================================================== UI-Helfer */
+#define MOB_BTN_W 34.0f                                           /* width of the per-row menu button (touch devices) */
 static float mx, my;
 static int click, clickx, clicky, mouse_down, click_ctrl;
 static int rclick, rclickx, rclicky;                       /* right mouse button */
@@ -1866,10 +1867,22 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
         float tx = x + 20;
         tx += draw_fmt_badge(tx, yy + 8, &pl[i], isc);          /* file format in its own colour */
         float tgw = tg[0] ? text_width(tg, 14) : 0;
-        fit_text(lab, w - 40 - (tx - (x + 20)) - tgw, 14);
+        float mob = g_mobile ? MOB_BTN_W + 6 : 0, bx = x + w - 8 - MOB_BTN_W;       /* touch devices: a menu button at the right of every row */
+        fit_text(lab, w - 40 - mob - (tx - (x + 20)) - tgw, 14);
         text(tx, yy + 8, 14, isc ? TXT : DIM, lab);
-        if (tg[0]) text_right(x + w - 20, yy + 8, 14, VC[1], tg);      /* #ID flush right */
-        if (rclick && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {       /* long press: Share/Info (Mod Archive) and Remove (every entry) */
+        if (tg[0]) text_right(x + w - 20 - mob, yy + 8, 14, VC[1], tg);      /* #ID flush right (left of the button) */
+        if (g_mobile) {
+            rrect(bx, yy + 3, MOB_BTN_W, rh - 9, 8, alpha(EDGE, 0.40f));
+            for (int d = -1; d <= 1; d++) rrect(bx + MOB_BTN_W * 0.5f - 2 + d * 8, yy + 3 + (rh - 9) * 0.5f - 2, 4, 4, 2, isc ? TXT : DIM);   /* three dots */
+            if (tap && !moved && mx >= bx - 4 && mx < x + w && my >= yy && my < yy + rh) {      /* tap on the button: open the menu of this entry, do not play it */
+                ctx_idx = i; tap = 0;
+                ctx_x = bx + MOB_BTN_W - CTX_W; ctx_y = yy + (rh - 9) * 0.5f;
+                if (ctx_x < 4) ctx_x = 4;
+                if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
+                if (ctx_y + CTX_H(i) > view_h - 4) ctx_y = view_h - 4 - CTX_H(i);
+            }
+        }
+        if (rclick && !moved && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {       /* long press: Share/Info (Mod Archive) and Remove (every entry); not while dragging */
             ctx_idx = i; rclick = 0;
             ctx_x = (float)rclickx; ctx_y = (float)rclicky;
             if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
@@ -2205,9 +2218,6 @@ static void iter(void) {
                     lp_on = g_portrait; lp_fired = 0; lp_swallow = 0; lp_x = clickx; lp_y = clicky; lp_t = SDL_GetTicks();
                 }
                 break;
-            case SDL_MOUSEMOTION:
-                if (lp_on && (abs(e.motion.x - lp_x) > 12 || abs(e.motion.y - lp_y) > 12)) lp_on = 0;   /* a drag is no long press */
-                break;
             case SDL_MOUSEBUTTONUP: if (e.button.button == SDL_BUTTON_LEFT) lp_on = 0; break;
             case SDL_MOUSEWHEEL:
                 if (mx < 16 + 288 + 16) list_scroll -= e.wheel.y * 3;
@@ -2254,6 +2264,7 @@ static void iter(void) {
         SDL_GL_GetDrawableSize(win, &dw, &dh);
         /* Hochformat (Seitenverhaeltnis < 0,8) oder zu klein fuer das Querformat: schmales, gestapeltes Layout (virtuell 440 breit) */
         g_portrait = dw * 10 < dh * 12 || dw < 640 || dh < 430;      /* aspect < 1.2: tablets upright, phones */
+        if (getenv("NGPLAYER_TEST_MOBILE")) g_portrait = 1;          /* test hook: force the phone layout */
         if (g_portrait) {                                              /* virtual width 440, but at least 640 high (tablets are wider than phones) */
             view_scale = (float)dw / 440.0f;
             if ((float)dh / 640.0f < view_scale) view_scale = (float)dh / 640.0f;
@@ -2270,15 +2281,20 @@ static void iter(void) {
         mouse_down = (mb & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
         float k = ww ? (float)dw / (float)ww / view_scale : 1;
         mx = (float)mxi * k; my = (float)myi * k;
+        if (lp_on && !mouse_down) lp_on = 0;
         if (lp_on && !lp_fired && SDL_GetTicks() - lp_t >= 500) {      /* held still for half a second: open the menu like a right click */
             lp_fired = 1; lp_on = 0; lp_swallow = 1;
-            rclick = 1; rclickx = lp_x; rclicky = lp_y;
+            /* Use the current pointer position (mx, my), like the taps in the list do: the coordinates of the touch-down event are not reliable
+             * on iOS (the menu then belonged to the wrong entry, always the first one). Converted back to event units because the scaling below
+             * turns rclickx/rclicky into view units again. */
+            rclick = 1; rclickx = k > 0 ? (int)(mx / k) : lp_x; rclicky = k > 0 ? (int)(my / k) : lp_y;
         }
         if (click) { clickx = (int)(clickx * k); clicky = (int)(clicky * k); }
         if (rclick) { rclickx = (int)(rclickx * k); rclicky = (int)(rclicky * k); }
         if (ctx_idx >= 0 && click) {                         /* click on the open menu: copy the link; any click closes it */
-            if (clickx >= ctx_x && clickx < ctx_x + CTX_W && clicky >= ctx_y && clicky < ctx_y + CTX_H(ctx_idx) && ctx_idx < npl) {
-                int j = (int)((clicky - ctx_y - 1) / CTX_ROW) + 3 - ctx_n(ctx_idx);          /* 0 Share, 1 Info, 2 Remove */
+            float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;     /* touch: current pointer (the event coordinates are not reliable on iOS) */
+            if (cmx >= ctx_x && cmx < ctx_x + CTX_W && cmy >= ctx_y && cmy < ctx_y + CTX_H(ctx_idx) && ctx_idx < npl) {
+                int j = (int)((cmy - ctx_y - 1) / CTX_ROW) + 3 - ctx_n(ctx_idx);          /* 0 Share, 1 Info, 2 Remove */
                 if (j == 0) share_link(ctx_idx); else if (j == 1) info_open(ctx_idx); else if (j == 2) pl_remove(ctx_idx);
             }
             ctx_idx = -1; click = 0; lp_swallow = 1;
@@ -2372,7 +2388,8 @@ int main(int argc, char **argv) {
     win = SDL_CreateWindow("ngPlayer", WIN_X0, WIN_Y0, WIN_W0, WIN_H0,
                                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!win) { fprintf(stderr, "Fenster: %s\n", SDL_GetError()); return 1; }
-    SDL_SetWindowMinimumSize(win, 360, 480);      /* schmal erlaubt: dann greift das Hochformat-Layout */
+    SDL_SetWindowMinimumSize(win, 360, 480);
+    { const char *ts = getenv("NGPLAYER_TEST_SIZE"); int tw, th; if (ts && sscanf(ts, "%dx%d", &tw, &th) == 2) SDL_SetWindowSize(win, tw, th); }   /* test hook: fixed window size for screenshots */      /* schmal erlaubt: dann greift das Hochformat-Layout */
     { SDL_Surface *ic = make_icon(64); if (ic) { SDL_SetWindowIcon(win, ic); SDL_FreeSurface(ic); } }
 #ifdef __EMSCRIPTEN__
     EM_ASM({ if (window.ngFit) window.ngFit(); });
@@ -2436,6 +2453,8 @@ int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
     g_mobile = EM_ASM_INT({ return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 1 : 0; });
 #endif
+    if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
+    if (getenv("NGPLAYER_TEST_PLOPEN")) g_plopen = 1;        /* test hook: playlist overlay open (phone layout) */
     SDL_AudioSpec want, have;
     SDL_zero(want);
     want.freq = g_rate; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = AUDIO_SAMPLES; want.callback = audio_cb;
