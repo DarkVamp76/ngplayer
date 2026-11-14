@@ -406,6 +406,8 @@ static void analyse(float dt) {
 static float mx, my;
 static int click, clickx, clicky, mouse_down, click_ctrl;
 static int rclick, rclickx, rclicky;                       /* right mouse button */
+static int lp_on, lp_fired, lp_swallow, lp_x, lp_y;        /* long press on a touch screen = right click */
+static Uint32 lp_t;
 static int ctx_idx = -1; static float ctx_x, ctx_y;        /* context menu ("Share") of a Mod Archive entry in the list */
 static float toast_t; static char toast_txt[48];
 #define CTX_W 120.0f
@@ -1834,7 +1836,7 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
         if (!pd) { pd = 1; py0 = my; ls0 = list_scroll; moved = 0; }
         if (fabsf(my - py0) > 8) moved = 1;
         if (moved) list_scroll = ls0 + (py0 - my) / rh;
-    } else if (pd) { pd = 0; if (!moved) tap = 1; }
+    } else if (pd) { pd = 0; if (!moved && !lp_swallow) tap = 1; lp_swallow = 0; }
     float cbx = x + w - 92, cby = y + 8;
     int hvc = hit(cbx, cby, 78, 28);
     rrect(cbx, cby, 78, 28, 8, alpha(hvc ? VC[0] : EDGE, 0.35f));
@@ -1867,6 +1869,12 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
         fit_text(lab, w - 40 - (tx - (x + 20)) - tgw, 14);
         text(tx, yy + 8, 14, isc ? TXT : DIM, lab);
         if (tg[0]) text_right(x + w - 20, yy + 8, 14, VC[1], tg);      /* #ID flush right */
+        if (rclick && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {       /* long press: Share/Info (Mod Archive) and Remove (every entry) */
+            ctx_idx = i; rclick = 0;
+            ctx_x = (float)rclickx; ctx_y = (float)rclicky;
+            if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
+            if (ctx_y + CTX_H(i) > view_h - 4) ctx_y = view_h - 4 - CTX_H(i);
+        }
         if (tap && !moved && mx >= x + 8 && mx < x + w - 8 && my >= yy && my < yy + rh) { play_index(i); g_plopen = 0; was_open = 0; return; }
     }
     if (!npl) text(x + 16, y + 64, 14, DIM, "No files.");
@@ -2192,8 +2200,15 @@ static void iter(void) {
             case SDL_QUIT: running = 0; break;
             case SDL_MOUSEBUTTONDOWN:
                 if (e.button.button == SDL_BUTTON_RIGHT) { rclick = 1; rclickx = (int)e.button.x; rclicky = (int)e.button.y; }
-                if (e.button.button == SDL_BUTTON_LEFT) { click = 1; clickx = (int)e.button.x; clicky = (int)e.button.y; click_ctrl = (SDL_GetModState() & KMOD_CTRL) != 0; }
+                if (e.button.button == SDL_BUTTON_LEFT) {
+                    click = 1; clickx = (int)e.button.x; clicky = (int)e.button.y; click_ctrl = (SDL_GetModState() & KMOD_CTRL) != 0;
+                    lp_on = g_portrait; lp_fired = 0; lp_swallow = 0; lp_x = clickx; lp_y = clicky; lp_t = SDL_GetTicks();
+                }
                 break;
+            case SDL_MOUSEMOTION:
+                if (lp_on && (abs(e.motion.x - lp_x) > 12 || abs(e.motion.y - lp_y) > 12)) lp_on = 0;   /* a drag is no long press */
+                break;
+            case SDL_MOUSEBUTTONUP: if (e.button.button == SDL_BUTTON_LEFT) lp_on = 0; break;
             case SDL_MOUSEWHEEL:
                 if (mx < 16 + 288 + 16) list_scroll -= e.wheel.y * 3;
                 else if (e.wheel.x) pat_ch0 -= e.wheel.x;
@@ -2255,6 +2270,10 @@ static void iter(void) {
         mouse_down = (mb & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
         float k = ww ? (float)dw / (float)ww / view_scale : 1;
         mx = (float)mxi * k; my = (float)myi * k;
+        if (lp_on && !lp_fired && SDL_GetTicks() - lp_t >= 500) {      /* held still for half a second: open the menu like a right click */
+            lp_fired = 1; lp_on = 0; lp_swallow = 1;
+            rclick = 1; rclickx = lp_x; rclicky = lp_y;
+        }
         if (click) { clickx = (int)(clickx * k); clicky = (int)(clicky * k); }
         if (rclick) { rclickx = (int)(rclickx * k); rclicky = (int)(rclicky * k); }
         if (ctx_idx >= 0 && click) {                         /* click on the open menu: copy the link; any click closes it */
@@ -2262,7 +2281,7 @@ static void iter(void) {
                 int j = (int)((clicky - ctx_y - 1) / CTX_ROW) + 3 - ctx_n(ctx_idx);          /* 0 Share, 1 Info, 2 Remove */
                 if (j == 0) share_link(ctx_idx); else if (j == 1) info_open(ctx_idx); else if (j == 2) pl_remove(ctx_idx);
             }
-            ctx_idx = -1; click = 0;
+            ctx_idx = -1; click = 0; lp_swallow = 1;
         }
         if (rclick && ctx_idx >= 0) ctx_idx = -1;
 
