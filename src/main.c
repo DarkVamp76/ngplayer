@@ -1790,7 +1790,8 @@ static void draw_ui_portrait(float W, float H) {
             text(lx + (lw - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
             if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; click = 0; }
         }
-        float vx = bx + 250, vw = bw - 250 - 22;
+        draw_dice(bx + 262, cy, 9.5f);            /* random dice (portrait: between LIST and the volume slider) */
+        float vx = bx + 296, vw = bw - 296 - 22;
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
         rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
         float kx = vx + 3 + (vw - 6) * g_vol;
