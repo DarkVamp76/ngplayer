@@ -1869,11 +1869,11 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
         fit_text(lab, w - 40 - (tx - (x + 20)) - tgw, 14);
         text(tx, yy + 8, 14, isc ? TXT : DIM, lab);
         if (tg[0]) text_right(x + w - 20, yy + 8, 14, VC[1], tg);      /* #ID flush right */
-        if (rclick && pl[i].ma_id && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {
+        if (rclick && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {       /* long press: Share/Info (Mod Archive) and Remove (every entry) */
             ctx_idx = i; rclick = 0;
             ctx_x = (float)rclickx; ctx_y = (float)rclicky;
             if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
-            if (ctx_y + CTX_H > view_h - 4) ctx_y = view_h - 4 - CTX_H;
+            if (ctx_y + CTX_H(i) > view_h - 4) ctx_y = view_h - 4 - CTX_H(i);
         }
         if (tap && !moved && mx >= x + 8 && mx < x + w - 8 && my >= yy && my < yy + rh) { play_index(i); g_plopen = 0; was_open = 0; return; }
     }
