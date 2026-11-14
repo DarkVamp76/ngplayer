@@ -209,6 +209,9 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
             s->nch = s->xs.nch; s->nord = s->xs.nord;
             s->xp = xplay_new(&s->xs, rate);
         }
+    } else if (n > 4 && !memcmp(b, "AMF", 3) && b[3] >= 8 && b[3] <= 14) {      /* DSMI Advanced Module Format: not supported (yet) */
+        snprintf(err, errcap, "AMF (DSMI) is not supported yet");
+        free(b); song_close(s); return NULL;
     } else {
         r = xmod_load(&s->xs, b, (size_t)n);
         if (!r) {
