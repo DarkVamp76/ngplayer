@@ -2223,12 +2223,22 @@ EM_JS(void, web_media_update, (const char *title, int playing), {
     if (a) { if (playing) { var p = a.play(); if (p && p.then) p.then(Module.ngMediaHandlers).catch(function () {}); } else a.pause(); }
     if (Module.ngMediaHandlers) Module.ngMediaHandlers();
 });
+/* Pushes the title and the playing state to the Media Session when one of them changed. Also called right after a lock screen command:
+ * with the screen locked the browser stops requestAnimationFrame (the main loop), only the audio keeps running, so the loop alone would
+ * leave the old title on the lock screen. */
+static void media_sync(void) {
+    static char mt[160]; static int mp = -1;
+    const char *t = (cur >= 0 && cur < npl) ? pl[cur].label : "ngPlayer";
+    int now = g_song && !g_paused && !g_ended;
+    if (now != mp || strcmp(t, mt)) { mp = now; snprintf(mt, sizeof mt, "%s", t); web_media_update(mt, now); }
+}
 /* Commands from the lock screen: 0 play, 1 pause, 2 next, 3 previous */
 EMSCRIPTEN_KEEPALIVE void ng_web_media(int cmd) {
     if (cmd == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; }
     else if (cmd == 1) g_paused = 1;
     else if (cmd == 2) next_prev(1);
     else if (cmd == 3) next_prev(-1);
+    media_sync();
 }
 #endif
 
@@ -2359,12 +2369,7 @@ static void iter(void) {
             }
         }
 #ifdef __EMSCRIPTEN__
-        {   /* keep the lock screen in sync: title of the current entry and playing / paused */
-            static char mt[160]; static int mp = -1;
-            const char *t = (cur >= 0 && cur < npl) ? pl[cur].label : "ngPlayer";
-            int now = g_song && !g_paused && !g_ended;
-            if (now != mp || strcmp(t, mt)) { mp = now; snprintf(mt, sizeof mt, "%s", t); web_media_update(mt, now); }
-        }
+        media_sync();       /* keep the lock screen in sync: title of the current entry and playing / paused */
 #endif
         int ww, wh, dw, dh;
         SDL_GetWindowSize(win, &ww, &wh);
