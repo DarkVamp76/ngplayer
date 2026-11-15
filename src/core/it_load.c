@@ -119,8 +119,11 @@ ITSong *it_load(const uint8_t *b, size_t n, int *err){
     s->gv = b[0x30]; s->mv = b[0x31]; s->schism_days = (s->cwt >> 12) == 1 ? (int)(s->cwt == 0x1FFF ? r32(b + 0x3C) : (unsigned)s->cwt - 0x1050) : -1;
     { int pa = omp_preamp(b, n); if (pa > 0 && pa <= 1024) s->mv = pa; } s->speed = b[0x32] ? b[0x32] : 6; s->tempo = b[0x33] >= 32 ? b[0x33] : 125; s->sep = b[0x34]; s->pwd = b[0x35];
     memcpy(s->chpan, b + 0x40, 64); memcpy(s->chvol, b + 0x80, 64);
-    if (s->nord > 256 || s->ninst > 255 || s->nsmp > 255 || s->npat > 256) { *err = -3; free(s); return NULL; }
-    size_t tab = 0xC0 + (size_t)s->nord;
+    /* Some files declare 257 orders (the 257th is a stray byte); libopenmpt plays them and reports 256. The table offset still counts every byte. */
+    size_t ordfile = s->nord;
+    if (ordfile > 257 || s->ninst > 255 || s->nsmp > 255 || s->npat > 256) { *err = -3; free(s); return NULL; }
+    if (s->nord > 256) s->nord = 256;
+    size_t tab = 0xC0 + ordfile;
     if (tab + 4 * ((size_t)s->ninst + s->nsmp + s->npat) > n) { *err = -4; free(s); return NULL; }
     memcpy(s->orders, b + 0xC0, s->nord);
     if (s->ninst && s->cmwt < 0x200) { *err = -5; free(s); return NULL; }     /* alte Instrumente (IT 1.x) nicht unterstuetzt */
