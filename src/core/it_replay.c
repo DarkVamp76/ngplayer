@@ -52,12 +52,13 @@ typedef struct ITPlayer {
 static int clampi(int v, int a, int b){ return v < a ? a : v > b ? b : v; }
 static int32_t muldivr(int64_t a, int64_t b, int64_t c){ return (int32_t)((a * b + c / 2) / c); }
 
+static int g_tabfreq;  /* Tonhoehen aus der S3M-Periodentabelle statt exakter Halbtoene (libopenmpt: kPeriodsAreHertz zurueckgesetzt) */
 static int g_it200;   /* cmwt == 0x200: libopenmpt rechnet mit der Semiton-Tabelle (aus Kalibrierung gemessen) */
 static int g_linear;
 static int g_swapcancel;   /* Gxx+Notiz+Samplewechsel ignoriert Portamento (gemessen: cmwt 0x200 mit cwtv 0x214/0x217, cwtv 0x888 und >= 0x1000) */
 static double freq_from_note(int note, uint32_t c5){
     if (note <= 0 || note > 0xF0) return 0;
-    if (g_it200 && c5) {
+    if (g_tabfreq && c5) {
         static const int tab[12] = {1712,1616,1524,1440,1356,1280,1208,1140,1076,1016,960,907};
         int n = note - 1;
         if (g_linear) return c5 * (1712.0 / tab[n % 12]) * pow(2.0, n / 12 - 5);
@@ -812,7 +813,9 @@ static void mix_voice(ITPlayer *p, V *c, double *mix, int n, int fast_ramp_len, 
 /* ---------------- Oeffentliche API ---------------- */
 ITPlayer *itp_new(const ITSong *s, int rate){
     ITPlayer *p = calloc(1, sizeof *p); p->s = s; p->rate = rate;
-    g_it200 = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217 || s->cwt == 0x888)); g_linear = (s->flags & 8) != 0; g_swapcancel = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217)) || s->cwt == 0x888 || s->cwt >= 0x1000; p->speed = s->speed; p->tempo = s->tempo; p->gvol = s->gv;
+    g_it200 = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217 || s->cwt == 0x888)); g_linear = (s->flags & 8) != 0;
+    /* Schism Tracker: libopenmpt setzt kPeriodsAreHertz zurueck bei Datum < 2015-01-29 (1916 Tage nach 2009-10-31), und bei Datum < 2021-05-02 (4201) ohne Linear-Slides */
+    g_tabfreq = g_it200 || (s->schism_days >= 0 && (s->schism_days < 1916 || (s->schism_days < 4201 && !g_linear))); g_swapcancel = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217)) || s->cwt == 0x888 || s->cwt >= 0x1000; p->speed = s->speed; p->tempo = s->tempo; p->gvol = s->gv;
     p->tick_count = 1; p->row_count = 0; p->process_row = NEXT_ORDER; p->process_order = -1; p->break_row = 0;
     p->visited = calloc((size_t)(s->nord + 1) * 256, 1);
     p->K = 1.0 / 65536.0;     /* gegen libopenmpt kalibriert (Faktor 4 gegenueber Schism-Skalierung) */

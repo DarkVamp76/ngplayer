@@ -35,6 +35,7 @@ typedef struct {
     int flags;                 /* 1 Stereo, 4 Instrumente, 8 linear, 16 alte Effekte, 32 Gxx-Link */
     int cwt, cmwt;
     int gv, mv, speed, tempo, sep, pwd;
+    int schism_days;   /* Schism Tracker: Tage seit 2009-10-31 (aus cwt bzw. Header-Feld), sonst -1 */
     uint8_t chpan[64], chvol[64];
     uint8_t orders[256];
     ITInst *inst;              /* 1..ninst (Index 0 unbenutzt) */
