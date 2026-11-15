@@ -116,7 +116,8 @@ ITSong *it_load(const uint8_t *b, size_t n, int *err){
     cpstr(s->title, b + 4, 26);
     s->nord = r16(b + 0x20); s->ninst = r16(b + 0x22); s->nsmp = r16(b + 0x24); s->npat = r16(b + 0x26);
     s->cwt = r16(b + 0x28); s->cmwt = r16(b + 0x2A); s->flags = r16(b + 0x2C);
-    s->gv = b[0x30]; s->mv = b[0x31]; { int pa = omp_preamp(b, n); if (pa > 0 && pa <= 1024) s->mv = pa; } s->speed = b[0x32] ? b[0x32] : 6; s->tempo = b[0x33] >= 32 ? b[0x33] : 125; s->sep = b[0x34]; s->pwd = b[0x35];
+    s->gv = b[0x30]; s->mv = b[0x31]; s->schism_days = (s->cwt >> 12) == 1 ? (int)(s->cwt == 0x1FFF ? r32(b + 0x3C) : (unsigned)s->cwt - 0x1050) : -1;
+    { int pa = omp_preamp(b, n); if (pa > 0 && pa <= 1024) s->mv = pa; } s->speed = b[0x32] ? b[0x32] : 6; s->tempo = b[0x33] >= 32 ? b[0x33] : 125; s->sep = b[0x34]; s->pwd = b[0x35];
     memcpy(s->chpan, b + 0x40, 64); memcpy(s->chvol, b + 0x80, 64);
     if (s->nord > 256 || s->ninst > 255 || s->nsmp > 255 || s->npat > 256) { *err = -3; free(s); return NULL; }
     size_t tab = 0xC0 + (size_t)s->nord;
