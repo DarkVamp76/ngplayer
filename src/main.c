@@ -2204,6 +2204,15 @@ EM_JS(void, web_media_setup, (void), {
     var a = new Audio(URL.createObjectURL(new Blob([b], { type: 'audio/wav' })));
     a.loop = true;
     Module.ngMediaEl = a;
+    Module.ngLoopUrl = a.src;
+    /* when the page goes to the background (screen lock) put the element where the song is now */
+    var park = function () {
+        if (!Module.ngTl || Module.ngPosT === undefined) return;
+        var now = Module.ngPosBase + (Module.ngPosRate > 0 ? (performance.now() - Module.ngPosT) / 1000 : 0);
+        if (Math.abs(a.currentTime - now) > 0.5) a.currentTime = now;
+    };
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') park(); });
+    window.addEventListener('pagehide', park);
     a.addEventListener('play', Module.ngMediaHandlers);
     a.addEventListener('playing', Module.ngMediaHandlers);
     Module.ngMediaWant = false;
@@ -2235,11 +2244,44 @@ EM_JS(void, web_media_update, (const char *title, int playing), {
  * and position. The length of a module is not known up front, so a second instance of the song is rendered silently up to its end in
  * small slices (timer driven, so it also runs while the screen is locked and the main loop stands still). */
 EM_JS(void, web_media_position, (double dur, double pos, double rate), {
-    if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
-    try {
-        var d = dur > 0 ? dur : Infinity;
-        navigator.mediaSession.setPositionState({ duration: d, position: Math.max(0, Math.min(pos, d)), playbackRate: rate });
-    } catch (e) {}
+    var ms = ('mediaSession' in navigator) ? navigator.mediaSession : null;
+    if (ms && ms.setPositionState) {
+        try {
+            var d = dur > 0 ? dur : Infinity;
+            ms.setPositionState({ duration: d, position: Math.max(0, Math.min(pos, d)), playbackRate: rate });
+        } catch (e) {}
+    }
+    /* iOS reads the lock screen position from the silent media element when the screen locks, not from setPositionState. So the element
+     * carries the real timeline: a silent track as long as the song (8 kHz, 8 bit), its currentTime kept at the song position. Songs of
+     * unknown length (or over 15 min) keep the 1 s loop. */
+    var a = Module.ngMediaEl;
+    if (!a) return;
+    Module.ngPosBase = pos; Module.ngPosT = performance.now(); Module.ngPosRate = rate;
+    if (dur > 0 && dur < 900) {
+        if (!Module.ngTl || Math.abs(Module.ngTl - dur) > 0.5) {
+            var secs = Math.ceil(dur) + 3, n = 8000 * secs;
+            var buf = new ArrayBuffer(44 + n), v = new DataView(buf), u = new Uint8Array(buf);
+            var str = function (o, t) { for (var i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+            str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVE'); str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+            v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+            str(36, 'data'); v.setUint32(40, n, true);
+            u.fill(128, 44);
+            var url = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+            if (Module.ngTlUrl) URL.revokeObjectURL(Module.ngTlUrl);
+            Module.ngTlUrl = url; Module.ngTl = dur;
+            a.loop = false;
+            var onmeta = function () {
+                a.removeEventListener('loadedmetadata', onmeta);
+                a.currentTime = Module.ngPosBase + (Module.ngPosRate > 0 ? (performance.now() - Module.ngPosT) / 1000 : 0);
+                if (Module.ngMediaWant) { var p = a.play(); if (p && p.catch) p.catch(function () {}); }
+            };
+            a.addEventListener('loadedmetadata', onmeta);
+            a.src = url;
+        } else if (Math.abs(a.currentTime - pos) > 1.0) a.currentTime = pos;
+    } else if (Module.ngTl) {                       /* length unknown again (next song): back to the 1 s loop */
+        Module.ngTl = 0; a.loop = true; a.src = Module.ngLoopUrl;
+        if (Module.ngMediaWant) { var q = a.play(); if (q && q.catch) q.catch(function () {}); }
+    }
 });
 static Song *g_probe; static unsigned long long g_probe_frames; static int g_probe_gen;
 static double g_len_s;                      /* > 0: length in seconds, 0: still being measured, -1: not available (reported as endless) */
