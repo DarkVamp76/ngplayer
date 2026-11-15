@@ -1074,7 +1074,7 @@ static void draw_logo(float x, float y, float s) {
 #define TAGLINE "Module player for Linux"
 #endif
 /* ---------------------------------------------------------------- Wachssiegel (Meilenstein, oben rechts in der Logo-Box) */
-#define SEAL_TEXT "1.7"          /* Text im Siegel: hier aendern */
+#define SEAL_TEXT "1.8"          /* Text im Siegel: hier aendern */
 #define SEAL_ROT 0.7854f         /* Drehung im Uhrzeigersinn (45 Grad) */
 static void seal_lobes(float cx, float cy, float r, col c) {
     static const float lr[12] = { 1.00f, 0.93f, 1.05f, 0.96f, 1.02f, 0.92f, 1.04f, 0.97f, 1.01f, 0.94f, 1.06f, 0.95f };
