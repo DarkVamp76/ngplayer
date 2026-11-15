@@ -7,7 +7,7 @@ typedef struct XSyn {              /* MED synth instrument: volume table + wavef
     uint8_t vtab[128], wtab[128]; int vn, vspd, wn, wspd;
     int nwf; int8_t *wf[64]; int wl[64];
 } XSyn;
-typedef struct { uint8_t note, inst, eff, par, vol1; } XCell;   /* vol1: 0 = keine Volumenspalte, sonst Wert+1 */
+typedef struct { uint8_t note, inst, eff, par, vol1, eff2, par2; } XCell;   /* eff2/par2: second effect (DBM), 0 = none */   /* vol1: 0 = keine Volumenspalte, sonst Wert+1 */
 typedef struct {
     uint32_t len, ls, le;      /* in Samples */
     int loop;                  /* Flag 8 */
@@ -16,13 +16,14 @@ typedef struct {
     uint32_t c2spd;
     int8_t *data;
     int pingpong;              /* XM: Loop-Typ 2 */
+    int nofree;                /* data belongs to another XSmp (DBM instruments sharing one sample): do not free */
     int finetune, relnote, pan;/* XM: -128..127, -96..95, 0..255 */
     XSyn *syn;                 /* MED synth: volume table (optional) */
 } XSmp;
 /* XM-Huellkurve */
 typedef struct {
     int n;                     /* Punkte */
-    uint16_t x[12]; uint8_t y[12];
+    uint16_t x[32]; uint8_t y[32];      /* XM: 12 points, DBM: up to 32 */
     int sus, ls, le;           /* Sustain-/Loop-Punktindex */
     int on, susen, loopen;     /* Flags */
 } XEnv;
@@ -40,12 +41,15 @@ typedef struct {
     int fmt;                   /* Format-ID wie im Original ([0x4e008]): 1 MOD, 2 S3M ... */
     int fast;                  /* Original [0x4e010] */
     int gvol;                  /* globale Lautstaerke 1..255 */
-    int chpan[32];             /* Start-Pan je Kanal, -1 = Standard */
-    int chen[32];              /* Kanal aktiv */
+    int chpan[64];             /* Start-Pan je Kanal, -1 = Standard */
+    int chen[64];              /* Kanal aktiv */
     XCell *pat;                /* npat * 64 * nch */
     XSmp smp[100];             /* 1..99 */
     int maxvol;                /* 0x40 */
     int speed, tempo;
+    int echo;                  /* DBM: the echo DSP is in use (channels flagged in echo_on go through it) */
+    uint8_t echo_on[64];       /* DBM: echo active for the channel at the start of the song */
+    uint8_t echo_par[4];       /* DBM: delay, feedback, wet/dry mix, cross echo (0..255) */
     double mixgain;            /* > 0: extra output gain (1 = none); XM saved by ModPlug Tracker, which libopenmpt mixes much quieter */
     double tempo_exact;        /* > 0: tempo as a fraction (BPM), used instead of tempo until the song sets a new one */
     /* XM (fmt 4): Instrumente 1..ninst, Samples flach in xsmp[]; XCell.vol1 = roher Volumenspalten-Byte (0 = keiner) */
@@ -68,6 +72,8 @@ int  ult_probe(const uint8_t *buf, size_t len);             /* 1 = UltraTracker 
 int  xult_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (ULT -> S3M replay) */
 int  sfx_probe(const uint8_t *buf, size_t len);              /* 15 / 31 = SoundFX 1.3 / 2.0, 0 = no */
 int  xsfx_load(XSong *s, const uint8_t *buf, size_t len);      /* 0 = ok (-> MOD replay) */
+int  dbm_probe(const uint8_t *buf, size_t len);              /* 1 = DigiBooster Pro (DBM0) */
+int  xdbm_load(XSong *s, const uint8_t *buf, size_t len);      /* 0 = ok (-> XM replay) */
 int  amf_probe(const uint8_t *buf, size_t len);              /* 1 = DSMI AMF ("AMF" + version 8..14) */
 int  xamf_load(XSong *s, const uint8_t *buf, size_t len);      /* 0 = ok (-> MOD replay) */
 int  asylum_probe(const uint8_t *buf, size_t len);          /* 1 = Asylum Music Format (Crusader) */
