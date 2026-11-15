@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <unistd.h>
 #include <sys/stat.h>
 
 #ifndef M_PI
@@ -276,8 +277,16 @@ static void list_label(char *dst, size_t cap, char *tag, size_t tcap, const entr
     while (cut > 0 && dst[cut - 1] == ' ') cut--;
     snprintf(dst + cut, cap - cut, "...");
 }
+#ifdef __EMSCRIPTEN__
+static void ma_need_download(int idx);
+static void ma_sync_web(int force);
+#endif
 static void play_index_sub(int idx, int sub) {
     if (idx < 0 || idx >= npl) return;
+#ifdef __EMSCRIPTEN__
+    /* Web: Mod Archive entries restored from the saved list have no file yet (the virtual file system is empty after a reload): fetch it first */
+    if (pl[idx].ma_id > 0 && access(pl[idx].path, R_OK)) { ma_need_download(idx); return; }
+#endif
     char err[128] = "";
     Song *s = song_open_sub(pl[idx].path, g_rate, sub, err, sizeof err);
     unload();
@@ -1342,6 +1351,9 @@ static void pl_remove(int i) {
     npl--;
     if (cur > i) cur--;
     ctx_idx = -1;
+#ifdef __EMSCRIPTEN__
+    ma_sync_web(1);
+#endif
 }
 static void pl_build_vis(void) {
     pl_vis = (int *)realloc(pl_vis, sizeof(int) * (size_t)(npl > 0 ? npl : 1));
@@ -1500,6 +1512,15 @@ static char ma_msg[160]; static int ma_msg_err;
 static volatile int dl_state;              /* 0 leer, 1 laedt, 2 fertig, 3 Fehler */
 static int dl_id, dl_rc, dl_random; static char dl_path[1100]; static SDL_Thread *dl_thr;   /* dl_random: the dice asked for it, dl_id 0 = ID not known yet */
 static int ma_busy(void) { return dl_state == 1; }
+static int dl_want = -1;                 /* entry that asked for its file (restored list), played when the download is done */
+#ifdef __EMSCRIPTEN__
+static void ma_need_download(int idx) {
+    if (dl_state == 1) { snprintf(toast_txt, sizeof toast_txt, "Another download is running"); toast_t = 2.0f; return; }
+    dl_id = pl[idx].ma_id; dl_want = idx; dl_random = 0; dl_state = 1;
+    snprintf(toast_txt, sizeof toast_txt, "Loading #%d ...", dl_id); toast_t = 4.0f;
+    EM_ASM({ if (window.ngMaFetch) window.ngMaFetch($0); }, dl_id);
+}
+#endif
 
 static int dl_thread(void *p) {
     if (!dl_id) {                                          /* random module: ask The Mod Archive for an ID first */
@@ -1550,16 +1571,28 @@ static void ma_poll(void) {
             dl_random = 0;
         }
         if (dl_state == 2) {
-            add_file(dl_path);
-            pl[npl - 1].ma_id = dl_id;
-            snprintf(pl[npl - 1].label, sizeof pl[npl - 1].label, "ModArchive #%d", dl_id);
-            play_index(npl - 1); list_follow = 1;
-            if (g_song) { const char *tt = song_title(g_song); if (tt && tt[0]) snprintf(pl[npl - 1].label, sizeof pl[npl - 1].label, "%s", tt); }   /* Titel des Lieds statt der ID anzeigen */
+            int j = -1;                                            /* the module is already in the list (restored entry, or loaded before): reuse it */
+            if (dl_want >= 0 && dl_want < npl && pl[dl_want].ma_id == dl_id) j = dl_want;
+            else for (int i = 0; i < npl; i++) if (pl[i].ma_id == dl_id) { j = i; break; }
+            if (j >= 0) { free(pl[j].path); pl[j].path = strdup(dl_path); pl[j].fmt = -1; }
+            else {
+                add_file(dl_path);
+                pl[npl - 1].ma_id = dl_id;
+                snprintf(pl[npl - 1].label, sizeof pl[npl - 1].label, "ModArchive #%d", dl_id);
+                j = npl - 1;
+            }
+            play_index(j); list_follow = 1;
+            if (g_song) { const char *tt = song_title(g_song); if (tt && tt[0]) snprintf(pl[j].label, sizeof pl[j].label, "%s", tt); }   /* Titel des Lieds statt der ID anzeigen */
             ma_buf[0] = 0; ma_len = 0; ma_show(0);
+#ifdef __EMSCRIPTEN__
+            ma_sync_web(1);
+#endif
         } else {
+            if (dl_want >= 0) { snprintf(toast_txt, sizeof toast_txt, "Mod Archive did not answer"); toast_t = 3.0f; }
             const char *m = dl_rc == 100 ? "Server returned no module file (does the ID exist?)." : dl_rc == 22 ? "Module not found (server error)." : (dl_rc == 6 || dl_rc == 7 || dl_rc == 28) ? "Cannot reach the server." : "Download failed.";
             snprintf(ma_msg, sizeof ma_msg, "%s (Code %d)", m, dl_rc); ma_msg_err = 1;
         }
+        dl_want = -1;
         dl_state = 0;
     }
 }
@@ -2169,6 +2202,65 @@ EMSCRIPTEN_KEEPALIVE void ng_web_paste(const char *t) {
     ma_text(t);
 }
 
+/* Mod Archive list in the browser: one "id<TAB>FORMAT<TAB>title" per line in localStorage (the files themselves are not kept, they are fetched
+ * again when an entry is played). Saved whenever the list or a title changes: a browser tab has no reliable "quit", especially on iOS. */
+EM_JS_DEPS(ngp_ma_deps, "$stringToUTF8");
+EM_JS(void, web_ma_store, (const char *txt), {
+    try { var s = UTF8ToString(txt); if (s) localStorage.setItem('ngp.malist', s); else localStorage.removeItem('ngp.malist'); } catch (e) {}
+});
+EM_JS(void, web_ma_fetch_saved, (char *buf, int cap), {
+    var s = '';
+    try { s = localStorage.getItem('ngp.malist') || ''; } catch (e) {}
+    stringToUTF8(s, buf, cap);
+});
+#define MA_LIST_CAP 65536
+static char ma_last[MA_LIST_CAP];
+static void ma_list_text(char *out, size_t cap) {
+    size_t n = 0; out[0] = 0;
+    for (int i = 0; i < npl; i++) {
+        if (pl[i].ma_id <= 0) continue;
+        char t[128]; snprintf(t, sizeof t, "%s", pl[i].label);
+        for (char *c = t; *c; c++) if (*c == '\t' || *c == '\n' || *c == '\r') *c = ' ';
+        int f = entry_fmt(&pl[i]); if (f < 0 || f >= FMT_COUNT) f = 0;
+        int w = snprintf(out + n, cap - n, "%d\t%s\t%s\n", pl[i].ma_id, FMT_NAME[f], t);
+        if (w < 0 || (size_t)w >= cap - n) break;
+        n += (size_t)w;
+    }
+}
+static void ma_sync_web(int force) {
+    static int tick;
+    if (!force && ++tick < 45) return;       /* the main loop checks every 45 frames as a safety net, changes are saved at once (force) */
+    tick = 0;
+    static char txt[MA_LIST_CAP];
+    ma_list_text(txt, sizeof txt);
+    if (strcmp(txt, ma_last)) { memcpy(ma_last, txt, sizeof ma_last); web_ma_store(txt); }
+}
+static void ma_list_load_web(void) {
+    static char buf[MA_LIST_CAP];
+    web_ma_fetch_saved(buf, sizeof buf);
+    for (char *line = buf; *line; ) {
+        char *nl = strchr(line, '\n'); if (nl) *nl = 0;
+        char *t1 = strchr(line, '\t'), *t2 = t1 ? strchr(t1 + 1, '\t') : NULL;
+        int id = atoi(line), dup = 0;
+        if (id > 0 && t2) {
+            for (int i = 0; i < npl; i++) if (pl[i].ma_id == id) dup = 1;
+            if (!dup) {
+                *t1 = 0; *t2 = 0;
+                char p[64]; snprintf(p, sizeof p, "/tmp/ma/%d.mod", id);     /* where the page stores the download */
+                add_file(p);
+                entry *e = &pl[npl - 1]; e->ma_id = id;
+                snprintf(e->label, sizeof e->label, "%s", t2[1] ? t2 + 1 : "ModArchive");
+                e->fmt = 0;
+                for (int f = 1; f < FMT_COUNT; f++) if (!strcmp(FMT_NAME[f], t1 + 1)) e->fmt = f;      /* badge without the file; set to -1 again when it arrives */
+            }
+        }
+        if (!nl) break;
+        line = nl + 1;
+    }
+    ma_list_text(ma_last, sizeof ma_last);
+    if (pl_count_tab(1) > 0 && pl_count_tab(0) == 0) g_pltab = 1;      /* only Mod Archive entries: show that tab */
+}
+
 /* Lock screen / control centre (iOS, Android, desktop media keys): Media Session with title, play/pause and next/previous.
  * iOS only lists a page as "now playing" while an HTMLMediaElement is playing, and SDL plays through Web Audio, so a silent looping
  * <audio> element runs alongside (started at the first touch, as the browser requires a gesture). */
@@ -2372,6 +2464,7 @@ static void iter(void) {
         }
 #ifdef __EMSCRIPTEN__
         media_sync();       /* keep the lock screen in sync: title of the current entry and playing / paused */
+        ma_sync_web(0);     /* save the Mod Archive list when it changed */
 #endif
         int ww, wh, dw, dh;
         SDL_GetWindowSize(win, &ww, &wh);
@@ -2577,7 +2670,10 @@ int main(int argc, char **argv) {
     if (!g_dev) fprintf(stderr, "Audio: %s (weiter ohne Ton)\n", SDL_GetError());
     else { g_rate = have.freq; SDL_PauseAudioDevice(g_dev, 0); }
 
-    if (npl) play_index(0);
+#ifdef __EMSCRIPTEN__
+    ma_list_load_web();                 /* Mod Archive list of the last visit (entries without file: fetched when played) */
+#endif
+    if (npl && !(pl[0].ma_id > 0 && access(pl[0].path, R_OK))) play_index(0);
 
     running = 1;
     t0 = SDL_GetPerformanceCounter(); tlast = t0;
