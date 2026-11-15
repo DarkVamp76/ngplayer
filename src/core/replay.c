@@ -520,6 +520,7 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
     int done_frames = 0;
     const XSong *s = p->s;
     double master = 96.0 / 256.0;      /* gemessen am Original (Kalibrier-MOD, 4 Kanaele): fester Gain je Kanal */
+    if (s->mixgain > 0) master *= s->mixgain;   /* S3M: Pre-Amp aus dem Master-Volume wie libopenmpt */
     while (done_frames < n) {
         if (p->done) break;
         if (p->acc <= 0) {
