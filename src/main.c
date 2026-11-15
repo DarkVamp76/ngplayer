@@ -2170,22 +2170,44 @@ EMSCRIPTEN_KEEPALIVE void ng_web_paste(const char *t) {
 }
 #endif
 
+#ifdef __EMSCRIPTEN__
+/* Browsers (iOS Safari above all) only allow window.open and clipboard writes inside the handler of a user gesture. The menu click is
+ * processed here in the main loop, after the event, so such a call is blocked. Instead the action is queued in the page and runs at the
+ * next touchend/click of the same tap (kind 0: open the URL in a new tab, 1: copy the text); if that gesture was already over, it is
+ * tried after 450 ms anyway (works on desktop browsers). */
+static void web_on_gesture(int kind, const char *arg) {
+    EM_ASM({
+        var kind = $0;
+        var arg = UTF8ToString($1);
+        if (!Module.ngGq) {
+            Module.ngGq = [];
+            var run = function () { var q = Module.ngGq; var n = performance.now(); Module.ngGq = []; q.forEach(function (it) { if (n - it.t < 2500) it.f(); }); };
+            window.addEventListener('touchend', run, true);
+            window.addEventListener('click', run, true);
+        }
+        var copy = function (t) {
+            var fb = function () {
+                var a = document.createElement('textarea');
+                a.value = t; a.style.position = 'fixed'; a.style.opacity = '0';
+                document.body.appendChild(a); a.focus(); a.select();
+                try { document.execCommand('copy'); } catch (e) {}
+                document.body.removeChild(a);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).catch(fb); else fb();
+        };
+        var f = kind == 0 ? function () { window.open(arg, '_blank'); } : function () { copy(arg); };
+        var item = {}; item.t = performance.now(); item.f = f;
+        Module.ngGq.push(item);
+        setTimeout(function () { var i = Module.ngGq.indexOf(item); if (i >= 0) { Module.ngGq.splice(i, 1); f(); } }, 450);
+    }, kind, arg);
+}
+#endif
+
 /* ---- Share: right click on a Mod Archive entry -> menu "Share" copies https://ngplayer.org/player/#<ID> to the clipboard ---- */
 static void share_link(int idx) {
     char url[96]; snprintf(url, sizeof url, "https://ngplayer.org/player/#%d", pl[idx].ma_id);
 #ifdef __EMSCRIPTEN__
-    /* SDL's clipboard does not reach the browser clipboard from the main loop: use the async API, with an execCommand fallback */
-    EM_ASM({
-        var t = UTF8ToString($0);
-        var fb = function () {
-            var a = document.createElement('textarea');
-            a.value = t; a.style.position = 'fixed'; a.style.opacity = '0';
-            document.body.appendChild(a); a.focus(); a.select();
-            try { document.execCommand('copy'); } catch (e) {}
-            document.body.removeChild(a);
-        };
-        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).catch(fb); else fb();
-    }, url);
+    web_on_gesture(1, url);
 #else
     SDL_SetClipboardText(url);
 #endif
@@ -2195,7 +2217,7 @@ static void share_link(int idx) {
 static void info_open(int idx) {
     char url[128]; snprintf(url, sizeof url, "https://modarchive.org/index.php?request=view_by_moduleid&query=%d", pl[idx].ma_id);
 #ifdef __EMSCRIPTEN__
-    EM_ASM({ window.open(UTF8ToString($0), '_blank'); }, url);
+    web_on_gesture(0, url);
 #else
     SDL_OpenURL(url);
 #endif
