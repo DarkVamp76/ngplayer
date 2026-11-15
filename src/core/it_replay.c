@@ -30,13 +30,15 @@ typedef struct {
     int cd_ret, cd_trem, cd_cut, cd_delay, cd_loop, loop_row;
     int ncmd;
     double gl, gr, pgl, pgr; double step;
-    int active;
+    int active; int rlen;                /* rlen > 0: Rampenlaenge dieses Ticks (Notenstart/Ausblendung), sonst Standard */
 } V;
 
 typedef struct ITPlayer {
     const ITSong *s; int rate;
     int speed, tempo, gvol, tick_count, row_count, process_row, process_order, cur_order, cur_pat, row, break_row, frame_delay, firsttick;
     V ch[192];
+    int note_started;                    /* note_change hat eine neue Note gestartet (nicht Tone-Portamento) */
+    V ghost[64]; int nghost;             /* ausblendende Stimmen: alte Note bei Retrigger (ein Tick lang) */
     uint8_t *visited; int ended;
     int tk_left, tk_len; double tk_frac; double K; int jumped;
     double *tkbuf; int16_t *tkout; int tkcap; int solo; long long nsamp;
@@ -44,6 +46,9 @@ typedef struct ITPlayer {
     float *tksc; int tkscap;             /* Scope des laufenden Ticks: [64][tk_len] */
 } ITPlayer;
 
+/* Rampen bei Retrigger auf klingendem Kanal (Samples bei 44,1 kHz; entsprechen libopenmpt: 363 us Einblendung, 952 us Ausblendung) */
+#define RAMP_IN 16
+#define RAMP_OUT 42
 static int clampi(int v, int a, int b){ return v < a ? a : v > b ? b : v; }
 static int32_t muldivr(int64_t a, int64_t b, int64_t c){ return (int32_t)((a * b + c / 2) / c); }
 
@@ -204,8 +209,9 @@ static void note_change(ITPlayer *p, V *c, int ch, int note, int porta, int retr
         if (in) { if (in->ifr & 0x80) c->resonance = in->ifr & 0x7F; if (in->ifc & 0x80) c->cutoff = in->ifc & 0x7F; } }
     if (!(porta && (!(s->flags & 32) || !c->row_inst))) c->flags &= ~F_KEYOFF;
     if (!porta) {
+        p->note_started = 1;
         c->flags |= F_FAST; if (!retrig) { c->avdepth = 0; c->avpos = 0; c->vibpos = 0; }
-        c->pgl = c->pgr = 0;
+        c->pgl = c->pgr = c->gl = c->gr = 0; c->rlen = RAMP_IN;
         if (!have_inst || 1) set_inst_pan(c, in, sm);
     }
 }
@@ -507,6 +513,11 @@ static void process_effects(ITPlayer *p, int ft){
                 if (!(s->flags & 16)) instr = 0;
             }
             if (note >= 1 && note <= 120 && !porta) check_nna(p, n, instr, note);
+            /* Neue Note auf klingendem Kanal ohne NNA-Hintergrundstimme: die alte Stimme vor dem Instrumentwechsel merken und nach dem
+             * Notenstart ueber RAMP_OUT Samples ausblenden statt hart abzuschneiden (wie libopenmpt; vermeidet den Klick am Notenanfang). */
+            V snap; int have_snap = note >= 1 && note <= 120 && !porta && c->freq && c->len && c->smp && c->active && !(c->flags & F_MUTE);
+            if (have_snap) snap = *c;
+            p->note_started = 0;
             int prev_new = c->new_note;
             if (note >= 1 && note <= 120) {
                 c->new_note = note;
@@ -524,6 +535,10 @@ static void process_effects(ITPlayer *p, int ft){
                     c->new_note = note; c->new_inst = 0;
                 }
                 note_change(p, c, n, note, porta, 0, !instr);
+                if (have_snap && p->note_started && p->nghost < 64) {
+                    V *g = &p->ghost[p->nghost++]; *g = snap; g->master = n + 1;
+                    g->pgl = snap.gl; g->pgr = snap.gr; g->gl = g->gr = 0; g->flags |= F_FAST; g->flags &= ~F_NEWNOTE; g->active = 1; g->rlen = RAMP_OUT;
+                }
             }
         }
         if (ft) {
@@ -757,7 +772,7 @@ static void mix_voice(ITPlayer *p, V *c, double *mix, int n, int fast_ramp_len, 
     if (!c->active && c->pgl == 0 && c->pgr == 0) return;
     double step = c->active ? c->step : 0.0;
     int rl = n;
-    if (!(c->flags & F_FAST) && (c->pgl != 0 || c->pgr != 0) && (c->gl != 0 || c->gr != 0)) rl = n; else rl = fast_ramp_len < n ? fast_ramp_len : n;
+    if (!(c->flags & F_FAST) && (c->pgl != 0 || c->pgr != 0) && (c->gl != 0 || c->gr != 0)) rl = n; else { int fr = c->rlen > 0 ? c->rlen : fast_ramp_len; rl = fr < n ? fr : n; }
     if (rl < 1) rl = 1;
     const ITSmp *m = c->smp; double dl = (c->gl - c->pgl) / rl, dr = (c->gr - c->pgr) / rl, gl = c->pgl, gr = c->pgr;
     int dir = (c->flags & F_PPREV) ? -1 : 1;
@@ -839,7 +854,12 @@ int itp_render(ITPlayer *p, int16_t *out, int n){
             memset(p->tkbuf, 0, sizeof(double) * 2 * p->tk_len);
             if (p->scb) { if (p->tkscap < p->tk_len) { p->tkscap = p->tk_len; p->tksc = realloc(p->tksc, sizeof(float) * 64 * (size_t)p->tkscap); } memset(p->tksc, 0, sizeof(float) * 64 * (size_t)p->tk_len); }
             p->nsamp += p->tk_len;
-            for (int i = 0; i < 192; i++) { if ((p->solo < 0 || i == p->solo || (i >= 64 && p->ch[i].master == p->solo + 1)) && !((xplay_mute >> (i < 64 ? i : (p->ch[i].master > 0 && p->ch[i].master <= 64 ? p->ch[i].master - 1 : 63))) & 1)) mix_voice(p, &p->ch[i], p->tkbuf, p->tk_len, 32, p->scb ? p->tksc + (size_t)(i < 64 ? i : (p->ch[i].master > 0 && p->ch[i].master <= 64 ? p->ch[i].master - 1 : 63)) * p->tk_len : NULL); p->ch[i].pgl = p->ch[i].gl; p->ch[i].pgr = p->ch[i].gr; }
+            for (int i = 0; i < 192; i++) { if ((p->solo < 0 || i == p->solo || (i >= 64 && p->ch[i].master == p->solo + 1)) && !((xplay_mute >> (i < 64 ? i : (p->ch[i].master > 0 && p->ch[i].master <= 64 ? p->ch[i].master - 1 : 63))) & 1)) mix_voice(p, &p->ch[i], p->tkbuf, p->tk_len, 32, p->scb ? p->tksc + (size_t)(i < 64 ? i : (p->ch[i].master > 0 && p->ch[i].master <= 64 ? p->ch[i].master - 1 : 63)) * p->tk_len : NULL); p->ch[i].pgl = p->ch[i].gl; p->ch[i].pgr = p->ch[i].gr; p->ch[i].rlen = 0; }
+            for (int i = 0; i < p->nghost; i++) {
+                V *g = &p->ghost[i]; int mi = g->master - 1;
+                if ((p->solo < 0 || mi == p->solo) && !((xplay_mute >> mi) & 1)) mix_voice(p, g, p->tkbuf, p->tk_len, 32, p->scb ? p->tksc + (size_t)mi * p->tk_len : NULL);
+            }
+            p->nghost = 0;
             for (int i = 0; i < 2 * p->tk_len; i++) { double v = p->tkbuf[i]; v = v > 32767 ? 32767 : v < -32768 ? -32768 : v; p->tkout[i] = (int16_t)lrint(v); }
         }
         int k = p->tk_left < n - done ? p->tk_left : n - done, off = p->tk_len - p->tk_left;
