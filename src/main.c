@@ -1653,15 +1653,28 @@ static void draw_ui(double t) {
             float tx = x + 20;
             tx += draw_fmt_badge(tx, yy + 6, &pl[i], isc);      /* file format in its own colour */
             float tgw = tg[0] ? text_width(tg, 14) : 0;
-            fit_text(lab, w - 74 - (tx - (x + 20)) - tgw, 14);
+            float mob = g_mobile ? MOB_BTN_W - 18 : 0, bx = x + w - 8 - MOB_BTN_W;       /* touch devices: the menu button of the phone list instead of the hover x */
+            fit_text(lab, w - 74 - mob - (tx - (x + 20)) - tgw, 14);
             text(tx, yy + 5, 14, isc ? TXT : DIM, lab);
-            if (tg[0]) text_right(x + w - 44, yy + 5, 14, VC[1], tg);      /* #ID, left of the remove button */
+            if (tg[0]) text_right(x + w - 44 - mob, yy + 5, 14, VC[1], tg);      /* #ID, left of the remove / menu button */
             int xhv = hit(x + w - 38, yy + 2, 26, rh - 6);
-            if (hv) {               /* red x: remove from list */
-                if (xhv) rrect(x + w - 38, yy + 3, 26, rh - 8, 6, alpha(WARN, 0.22f));
-                text(x + w - 31, yy + 5, 15, xhv ? WARN : alpha(WARN, 0.55f), "\xd7");
+            if (g_mobile) {
+                rrect(bx, yy + 2, MOB_BTN_W, rh - 8, 8, alpha(EDGE, 0.40f));
+                for (int d = -1; d <= 1; d++) rrect(bx + MOB_BTN_W * 0.5f - 2 + d * 8, yy + 2 + (rh - 8) * 0.5f - 2, 4, 4, 2, isc ? TXT : DIM);   /* three dots */
+                if (click && clickx >= bx - 4 && clickx < x + w - 4 && clicky >= yy && clicky < yy + rh) {      /* tap on the button: open the menu of this entry, do not play it */
+                    ctx_idx = i; click = 0;
+                    ctx_x = bx + MOB_BTN_W - CTX_W; ctx_y = yy + (rh - 8) * 0.5f;
+                    if (ctx_x < 4) ctx_x = 4;
+                    if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
+                    if (ctx_y + CTX_H(i) > view_h - 4) ctx_y = view_h - 4 - CTX_H(i);
+                }
+            } else {
+                if (hv) {               /* red x: remove from list */
+                    if (xhv) rrect(x + w - 38, yy + 3, 26, rh - 8, 6, alpha(WARN, 0.22f));
+                    text(x + w - 31, yy + 5, 15, xhv ? WARN : alpha(WARN, 0.55f), "\xd7");
+                }
+                if (hv && xhv && click && clickx >= x + w - 38 && clickx < x + w - 12 && clicky >= yy && clicky < yy + rh) { pl_remove(i); click = 0; break; }
             }
-            if (hv && xhv && click && clickx >= x + w - 38 && clickx < x + w - 12 && clicky >= yy && clicky < yy + rh) { pl_remove(i); click = 0; break; }
             if (rclick && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {
                 ctx_idx = i; rclick = 0;
                 ctx_x = (float)rclickx; ctx_y = (float)rclicky;
