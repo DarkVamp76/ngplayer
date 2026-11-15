@@ -2216,9 +2216,9 @@ EM_JS(void, web_media_setup, (void), {
 EM_JS(void, web_media_update, (const char *title, int playing), {
     if (!('mediaSession' in navigator)) return;
     var ms = navigator.mediaSession;
-    /* artwork: the site's icon with transparent rounded corners (public/media-artwork.png of the web repo, served from the site root);
-     * without it iOS takes the 180 px apple-touch-icon, which is blurry and gets white corners */
-    try { ms.metadata = new MediaMetadata({ title: UTF8ToString(title), artist: 'ngPlayer', album: 'ngplayer.org', artwork: [{ src: '/media-artwork.png', sizes: '512x512', type: 'image/png' }] }); } catch (e) {}
+    /* artwork: the site icon as an opaque full-bleed square (/icon-512.png). iOS rounds the artwork itself and paints transparent areas
+     * white, so rounded corners in the image itself show up as white slivers. Without any artwork it takes the 180 px apple-touch-icon. */
+    try { ms.metadata = new MediaMetadata({ title: UTF8ToString(title), artist: 'ngPlayer', album: 'ngplayer.org', artwork: [{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }] }); } catch (e) {}
     ms.playbackState = playing ? 'playing' : 'paused';
     Module.ngMediaWant = !!playing;
     var a = Module.ngMediaEl;
