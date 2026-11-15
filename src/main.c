@@ -276,6 +276,9 @@ static void list_label(char *dst, size_t cap, char *tag, size_t tcap, const entr
     while (cut > 0 && dst[cut - 1] == ' ') cut--;
     snprintf(dst + cut, cap - cut, "...");
 }
+#ifdef __EMSCRIPTEN__
+static void probe_start(int idx);
+#endif
 static void play_index_sub(int idx, int sub) {
     if (idx < 0 || idx >= npl) return;
     char err[128] = "";
@@ -304,6 +307,9 @@ static void play_index_sub(int idx, int sub) {
     if (g_portrait && g_mobile && song_channels(s) > 8) g_orb = 1;      /* phone, portrait, more than 8 voices: Orb view (scopes are too heavy) */
     view_reset = 1;
     g_open_sub = s ? song_subsong(s) : 0;
+#ifdef __EMSCRIPTEN__
+    probe_start(s ? idx : -1);        /* length of the song for the lock screen */
+#endif
 }
 static void play_index(int idx) { play_index_sub(idx, 0); }
 
@@ -2225,6 +2231,54 @@ EM_JS(void, web_media_update, (const char *title, int playing), {
     if (a) { if (playing) { var p = a.play(); if (p && p.then) p.then(Module.ngMediaHandlers).catch(function () {}); } else a.pause(); }
     if (Module.ngMediaHandlers) Module.ngMediaHandlers();
 });
+/* Lock screen progress: iOS only knows the 1 s of the silent loop and lets the bar swing back and forth unless it is told the real length
+ * and position. The length of a module is not known up front, so a second instance of the song is rendered silently up to its end in
+ * small slices (timer driven, so it also runs while the screen is locked and the main loop stands still). */
+EM_JS(void, web_media_position, (double dur, double pos, double rate), {
+    if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
+    try {
+        var d = dur > 0 ? dur : Infinity;
+        navigator.mediaSession.setPositionState({ duration: d, position: Math.max(0, Math.min(pos, d)), playbackRate: rate });
+    } catch (e) {}
+});
+static Song *g_probe; static unsigned long long g_probe_frames; static int g_probe_gen;
+static double g_len_s;                      /* > 0: length in seconds, 0: still being measured, -1: not available (reported as endless) */
+static double ps_pos, ps_rate = -1, ps_len = -2; static Uint32 ps_t;
+static void media_push_position(void) {
+    double pos = (double)g_frames / g_rate, rate = (g_song && !g_paused && !g_ended) ? 1.0 : 0.0;
+    web_media_position(g_len_s > 0 ? g_len_s : -1, pos, rate);
+    ps_pos = pos; ps_rate = rate; ps_len = g_len_s; ps_t = SDL_GetTicks();
+}
+static void probe_tick(void *arg) {
+    if ((int)(intptr_t)arg != g_probe_gen || !g_probe) return;        /* another song started meanwhile */
+    static int16_t buf[2048 * 2];
+    Uint64 t0 = SDL_GetPerformanceCounter(), fq = SDL_GetPerformanceFrequency();
+    for (;;) {
+        int got = song_render(g_probe, buf, 2048);
+        if (got > 0) g_probe_frames += (unsigned)got;
+        if (got <= 0 || g_probe_frames > (unsigned long long)g_rate * 3600) {
+            g_len_s = got <= 0 ? (double)g_probe_frames / g_rate : -1;
+            song_close(g_probe); g_probe = NULL;
+            media_push_position();
+            return;
+        }
+        if ((SDL_GetPerformanceCounter() - t0) * 1000 / fq >= 2) break;      /* 2 ms per slice: the audio callback shares this thread */
+    }
+    emscripten_async_call(probe_tick, arg, 8);
+}
+static void probe_start(int idx) {
+    g_probe_gen++;
+    if (g_probe) { song_close(g_probe); g_probe = NULL; }
+    g_len_s = 0; g_probe_frames = 0;
+    if (idx < 0 || idx >= npl || !g_song) { g_len_s = -1; return; }
+    const char *f = song_format(g_song);
+    /* only the replayers that keep all state in their own instance; the others report an endless song */
+    if (!strcmp(f, "TFMX") || !strcmp(f, "DMF") || !strcmp(f, "AHX")) { g_len_s = -1; return; }
+    char err[64] = "";
+    g_probe = song_open_sub(pl[idx].path, g_rate, g_open_sub, err, sizeof err);
+    if (!g_probe) { g_len_s = -1; return; }
+    emscripten_async_call(probe_tick, (void *)(intptr_t)g_probe_gen, 30);
+}
 /* Pushes the title and the playing state to the Media Session when one of them changed. Also called right after a lock screen command:
  * with the screen locked the browser stops requestAnimationFrame (the main loop), only the audio keeps running, so the loop alone would
  * leave the old title on the lock screen. */
@@ -2232,7 +2286,14 @@ static void media_sync(void) {
     static char mt[160]; static int mp = -1;
     const char *t = (cur >= 0 && cur < npl) ? pl[cur].label : "ngPlayer";
     int now = g_song && !g_paused && !g_ended;
-    if (now != mp || strcmp(t, mt)) { mp = now; snprintf(mt, sizeof mt, "%s", t); web_media_update(mt, now); }
+    int changed = now != mp || strcmp(t, mt);
+    if (changed) { mp = now; snprintf(mt, sizeof mt, "%s", t); web_media_update(mt, now); }
+    {   /* progress: push on every change, when the length became known, after a jump (seek) and every 15 s */
+        double pos = (double)g_frames / g_rate, rate = now ? 1.0 : 0.0;
+        Uint32 tn = SDL_GetTicks();
+        double expect = ps_pos + (ps_rate > 0 ? (double)(tn - ps_t) / 1000.0 : 0.0);
+        if (changed || g_len_s != ps_len || rate != ps_rate || fabs(pos - expect) > 1.5 || tn - ps_t > 15000) media_push_position();
+    }
 }
 /* Commands from the lock screen: 0 play, 1 pause, 2 next, 3 previous */
 EMSCRIPTEN_KEEPALIVE void ng_web_media(int cmd) {
