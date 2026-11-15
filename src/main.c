@@ -2291,7 +2291,6 @@ static void media_push_position(void) {
     web_media_position(g_len_s > 0 ? g_len_s : -1, pos, rate);
     ps_pos = pos; ps_rate = rate; ps_len = g_len_s; ps_t = SDL_GetTicks();
 }
-static void media_push_later(void *arg) { (void)arg; media_push_position(); }
 static void probe_tick(void *arg) {
     if ((int)(intptr_t)arg != g_probe_gen || !g_probe) return;        /* another song started meanwhile */
     static int16_t buf[2048 * 2];
@@ -2336,9 +2335,7 @@ static void media_sync(void) {
         Uint32 tn = SDL_GetTicks();
         double expect = ps_pos + (ps_rate > 0 ? (double)(tn - ps_t) / 1000.0 : 0.0);
         int jump = fabs(pos - expect) > 1.5;
-        if (jump && !changed) web_media_update(mt, now);      /* iOS only refreshes the lock screen after a jump when the metadata is set again, too */
         if (changed || g_len_s != ps_len || rate != ps_rate || jump || tn - ps_t > 15000) media_push_position();
-        if (jump) emscripten_async_call(media_push_later, NULL, 400);      /* and once more after it had time to take the metadata */
     }
 }
 /* Commands from the lock screen: 0 play, 1 pause, 2 next, 3 previous */
