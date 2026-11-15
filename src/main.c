@@ -1948,6 +1948,46 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
     else if (!nvis) text(x + 16, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
 }
 
+/* ---- Order slider (phone layout): drag the knob to choose an order, the jump happens when the finger lifts (seek_order re-renders the
+ * song up to the target, too slow to do on every move); the small buttons at both ends step one order back / forward. ---- */
+#define SEEK_ROW 36.0f
+static int seek_drag; static int seek_target;
+static void draw_seek_row(float bx, float ty, float bw) {
+    int n = song_norders(g_song), curo = g_view_valid ? g_view.order : song_order(g_song);
+    if (curo < 0) curo = 0;
+    if (curo > n - 1) curo = n - 1;
+    float cy = ty + SEEK_ROW / 2 - 3, bwid = 30, x0 = bx + 12 + bwid + 10, x1 = bx + bw - 12 - bwid - 10, tw = x1 - x0;
+    for (int i = 0; i < 2; i++) {               /* step buttons: ‹ and › */
+        float x = i ? bx + bw - 12 - bwid : bx + 12;
+        int hv = hit(x - 4, cy - 17, bwid + 8, 34);
+        rrect(x, cy - 13, bwid, 26, 8, alpha(hv ? VC[0] : EDGE, hv ? 0.30f : 0.35f));
+        if (i == 0) { tri(x + 18, cy - 6, x + 18, cy + 6, x + 10, cy, hv ? TXT : DIM); }
+        else { tri(x + 12, cy - 6, x + 12, cy + 6, x + 20, cy, hv ? TXT : DIM); }
+        if (clicked(x - 4, cy - 17, bwid + 8, 34)) { seek_order(curo + (i ? 1 : -1)); click = 0; }
+    }
+    int over = hit(x0 - 14, cy - 20, tw + 28, 40);
+    if (!seek_drag && click && clicked(x0 - 14, cy - 20, tw + 28, 40)) { seek_drag = 1; click = 0; }
+    if (seek_drag) {
+        if (mouse_down) {
+            float f = (mx - x0) / tw; if (f < 0) f = 0; if (f > 1) f = 1;
+            seek_target = (int)(f * (float)(n - 1) + 0.5f);
+        } else { seek_drag = 0; if (seek_target != curo) seek_order(seek_target); }
+    }
+    int shown = seek_drag ? seek_target : curo;
+    float f = n > 1 ? (float)shown / (float)(n - 1) : 0, kx = x0 + tw * f;
+    rrect(x0, cy - 3, tw, 6, 3, alpha(FAINT, 0.35f));
+    rrect(x0, cy - 3, 6 + (tw - 6) * f, 6, 3, VC[1]);
+    rrect(kx - 10, cy - 10, 20, 20, 10, (seek_drag || over) ? TXT : DIM);
+    if (seek_drag) {                            /* the order under the finger, above the knob */
+        char lb[24]; snprintf(lb, sizeof lb, "ORD %d", shown + 1);
+        float lw = text_width(lb, 12) + 16, lx = kx - lw / 2;
+        if (lx < bx + 6) lx = bx + 6;
+        if (lx + lw > bx + bw - 6) lx = bx + bw - 6 - lw;
+        rrect(lx, cy - 40, lw, 22, 7, alpha(CARDHI, 0.96f));
+        text(lx + 8, cy - 36, 12, VC[1], lb);
+    }
+}
+
 static void draw_ui_portrait(float W, float H) {
     const float M = 10, BOT = 64;
     float aw = W - 2 * M;
@@ -1990,7 +2030,9 @@ static void draw_ui_portrait(float W, float H) {
     }
     /* ---------------- Mitte */
     int nosp = g_song && song_channels(g_song) > 8;      /* many voices: drop spectrum/level, the room goes to channels + pattern */
-    float by = H - M - BOT, sh = nosp ? 0 : 96, sy = nosp ? by : by - M - sh, cy0 = hy + hh + M;
+    int has_seek = g_song && song_norders(g_song) > 1;   /* order slider row above the buttons */
+    float botH = BOT + (has_seek ? SEEK_ROW : 0);
+    float by = H - M - botH, sh = nosp ? 0 : 96, sy = nosp ? by : by - M - sh, cy0 = hy + hh + M;
     float oh = g_song ? overview_height(song_channels(g_song) > 64 ? 64 : song_channels(g_song)) : 60.0f;
     float avail = sy - M - cy0;
     if (avail - oh - M < 150) oh = avail - M - 150;   /* channel list keeps priority, the pattern may shrink */
@@ -2011,8 +2053,9 @@ static void draw_ui_portrait(float W, float H) {
     /* ---------------- Transport */
     {
         float bx = M, bw = aw;
-        card(bx, by, bw, BOT, 0);
-        float cy = by + BOT / 2, r = 20;
+        card(bx, by, bw, botH, 0);
+        float cy = by + botH - BOT / 2, r = 20;
+        if (has_seek) draw_seek_row(bx, by + 6, bw);
         float bxs[3] = { bx + 12, bx + 62, bx + 112 };
         for (int i = 0; i < 3; i++) {
             float x = bxs[i];
