@@ -14,6 +14,39 @@ static const int s3m_eff[26] = {
 /* S-Unterbefehle (Tabelle 0x4935): hoechstes Nibble -> Praefix des E-Parameters, -1 = nichts, -2 = nur x */
 static const int s3m_sub[15] = { -2, 0x30, 0x50, 0x40, 0x70, -1, -1, -1, 0x80, -1, -1, 0x60, 0xC0, 0xD0, 0xE0 };
 
+/* Output gain as libopenmpt computes it (Load_s3m.cpp): the header master volume becomes the sample pre-amp, except for Scream Tracker
+ * modules saved with the Gravis Ultrasound driver, which use a fixed 48 (ST3's GUS driver ignores the master volume). Mono modules
+ * (stereo bit clear) are scaled by 8/11. The engine's own fixed level corresponds to a pre-amp of about 47 (measured), so the gain is
+ * pre-amp / 47. GUS is detected like libopenmpt does: the OR of the gusAddress field of all PCM sample headers is greater than 1. */
+#define S3M_PREAMP_REF 47.0
+static double s3m_preamp_gain(const uint8_t *b, size_t n, unsigned ordnum, unsigned insnum, const uint8_t *insp, unsigned flags, unsigned ffi){
+    unsigned cwt = rd16(b + 0x28), special = rd16(b + 0x3E), uc = b[0x34], dp = b[0x35], mv = b[0x33];
+    int isst3 = (cwt >> 12) == 1;
+    if (isst3 && !memcmp(b + 0x36, "SCLUB2.0", 8)) isst3 = 0;
+    /* files written by ModPlug/OpenMPT/Schism/PlayerPRO/Velvet Studio that pretend to be ST3.20 (the canonical-offsets test is not done) */
+    if (isst3 && cwt == 0x1320 && special == 0) {
+        if (!(ordnum & 1) && uc == 0 && (flags & ~0x50u) == 0 && dp == 0xFC) isst3 = 0;
+        else if (uc == 0 && !(dp == 0xFC) && (flags == 0 || flags == 8)) isst3 = 0;
+    }
+    unsigned gus = 0; int any = 0;
+    for (unsigned i = 0; i < insnum; i++) {
+        size_t o = (size_t)rd16(insp + 2 * i) << 4;
+        if (!o || o + 0x50 > n || b[o] >= 2) continue;
+        gus |= rd16(b + o + 0x28);
+        if (rd32(b + o + 0x10)) any = 1;
+    }
+    if (isst3 && any && !gus && cwt != 0x1300) isst3 = 0;
+    int pre;
+    if (ffi == 1 && mv < 8) { pre = (int)(mv + 1) * 0x10; if (pre > 0x7F) pre = 0x7F; }
+    else if (mv == 2 || mv == (2 | 0x10)) pre = 0x20;
+    else if (!(mv & 0x7F)) pre = 48;
+    else { pre = (int)(mv & 0x7F); if (pre < 0x10) pre = 0x10; }
+    int stereo = (mv & 0x80) != 0 || (cwt >> 12) == 5;
+    if (!stereo) pre = (pre * 8 + 5) / 11;
+    if (isst3 && gus > 1) pre = 48;
+    return pre / S3M_PREAMP_REF;
+}
+
 int xs3m_load(XSong *s, const uint8_t *b, size_t n){
     memset(s, 0, sizeof *s);
     s->fmt = 2; s->maxvol = 0x40; s->gvol = 255;
@@ -122,5 +155,6 @@ int xs3m_load(XSong *s, const uint8_t *b, size_t n){
         for (int r = 0; r < 64; r++)
             for (int c = 0; c < maxch; c++) s->pat[((size_t)p * 64 + r) * maxch + c] = tmp[((size_t)p * 64 + r) * 32 + c];
     free(tmp);
+    s->mixgain = s3m_preamp_gain(b, n, ordnum, insnum, insp, flags, ffi);
     return 0;
 }
