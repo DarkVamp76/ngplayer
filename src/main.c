@@ -2176,12 +2176,20 @@ EM_JS(void, web_media_setup, (void), {
     if (!('mediaSession' in navigator)) return;
     var ms = navigator.mediaSession;
     var cmd = function (c) { return function () { Module._ng_web_media(c); }; };
-    try {
-        ms.setActionHandler('play', cmd(0));
-        ms.setActionHandler('pause', cmd(1));
-        ms.setActionHandler('nexttrack', cmd(2));
-        ms.setActionHandler('previoustrack', cmd(3));
-    } catch (e) {}
+    /* iOS shows +-10 s skip buttons instead of next/previous when it has dropped the handlers (it seems to reset them when the media
+     * element starts playing), so they are registered again at every start and state change, and the seek actions are cleared. */
+    Module.ngMediaHandlers = function () {
+        try {
+            ms.setActionHandler('play', cmd(0));
+            ms.setActionHandler('pause', cmd(1));
+            ms.setActionHandler('nexttrack', cmd(2));
+            ms.setActionHandler('previoustrack', cmd(3));
+            ms.setActionHandler('seekbackward', null);
+            ms.setActionHandler('seekforward', null);
+            ms.setActionHandler('seekto', null);
+        } catch (e) {}
+    };
+    Module.ngMediaHandlers();
     var n = 8000, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
     var str = function (o, t) { for (var i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
     str(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); str(8, 'WAVE'); str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
@@ -2190,6 +2198,8 @@ EM_JS(void, web_media_setup, (void), {
     var a = new Audio(URL.createObjectURL(new Blob([b], { type: 'audio/wav' })));
     a.loop = true;
     Module.ngMediaEl = a;
+    a.addEventListener('play', Module.ngMediaHandlers);
+    a.addEventListener('playing', Module.ngMediaHandlers);
     Module.ngMediaWant = false;
     /* The first tap primes the element (browsers allow later programmatic play() on an element a gesture has played); it is paused again
      * at once if nothing is playing yet, so the lock screen does not show an idle player. */
@@ -2210,7 +2220,8 @@ EM_JS(void, web_media_update, (const char *title, int playing), {
     ms.playbackState = playing ? 'playing' : 'paused';
     Module.ngMediaWant = !!playing;
     var a = Module.ngMediaEl;
-    if (a) { if (playing) { var p = a.play(); if (p && p.catch) p.catch(function () {}); } else a.pause(); }
+    if (a) { if (playing) { var p = a.play(); if (p && p.then) p.then(Module.ngMediaHandlers).catch(function () {}); } else a.pause(); }
+    if (Module.ngMediaHandlers) Module.ngMediaHandlers();
 });
 /* Commands from the lock screen: 0 play, 1 pause, 2 next, 3 previous */
 EMSCRIPTEN_KEEPALIVE void ng_web_media(int cmd) {
