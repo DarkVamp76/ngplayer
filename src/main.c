@@ -2168,6 +2168,57 @@ EMSCRIPTEN_KEEPALIVE void ng_web_paste(const char *t) {
     ma_eat = 0;
     ma_text(t);
 }
+
+/* Lock screen / control centre (iOS, Android, desktop media keys): Media Session with title, play/pause and next/previous.
+ * iOS only lists a page as "now playing" while an HTMLMediaElement is playing, and SDL plays through Web Audio, so a silent looping
+ * <audio> element runs alongside (started at the first touch, as the browser requires a gesture). */
+EM_JS(void, web_media_setup, (void), {
+    if (!('mediaSession' in navigator)) return;
+    var ms = navigator.mediaSession;
+    var cmd = function (c) { return function () { Module._ng_web_media(c); }; };
+    try {
+        ms.setActionHandler('play', cmd(0));
+        ms.setActionHandler('pause', cmd(1));
+        ms.setActionHandler('nexttrack', cmd(2));
+        ms.setActionHandler('previoustrack', cmd(3));
+    } catch (e) {}
+    var n = 8000, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
+    var str = function (o, t) { for (var i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+    str(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); str(8, 'WAVE'); str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+    v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 16000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    str(36, 'data'); v.setUint32(40, n * 2, true);
+    var a = new Audio(URL.createObjectURL(new Blob([b], { type: 'audio/wav' })));
+    a.loop = true;
+    Module.ngMediaEl = a;
+    Module.ngMediaWant = false;
+    /* The first tap primes the element (browsers allow later programmatic play() on an element a gesture has played); it is paused again
+     * at once if nothing is playing yet, so the lock screen does not show an idle player. */
+    var kick = function () {
+        if (!Module.ngPrimed) {
+            Module.ngPrimed = true;
+            var p = a.play();
+            if (p && p.then) p.then(function () { if (!Module.ngMediaWant) a.pause(); }).catch(function () { Module.ngPrimed = false; });
+        } else if (Module.ngMediaWant && a.paused) { var q = a.play(); if (q && q.catch) q.catch(function () {}); }
+    };
+    window.addEventListener('touchend', kick, true);
+    window.addEventListener('click', kick, true);
+});
+EM_JS(void, web_media_update, (const char *title, int playing), {
+    if (!('mediaSession' in navigator)) return;
+    var ms = navigator.mediaSession;
+    try { ms.metadata = new MediaMetadata({ title: UTF8ToString(title), artist: 'ngPlayer', album: 'ngplayer.org' }); } catch (e) {}
+    ms.playbackState = playing ? 'playing' : 'paused';
+    Module.ngMediaWant = !!playing;
+    var a = Module.ngMediaEl;
+    if (a) { if (playing) { var p = a.play(); if (p && p.catch) p.catch(function () {}); } else a.pause(); }
+});
+/* Commands from the lock screen: 0 play, 1 pause, 2 next, 3 previous */
+EMSCRIPTEN_KEEPALIVE void ng_web_media(int cmd) {
+    if (cmd == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; }
+    else if (cmd == 1) g_paused = 1;
+    else if (cmd == 2) next_prev(1);
+    else if (cmd == 3) next_prev(-1);
+}
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -2296,6 +2347,14 @@ static void iter(void) {
             default: break;
             }
         }
+#ifdef __EMSCRIPTEN__
+        {   /* keep the lock screen in sync: title of the current entry and playing / paused */
+            static char mt[160]; static int mp = -1;
+            const char *t = (cur >= 0 && cur < npl) ? pl[cur].label : "ngPlayer";
+            int now = g_song && !g_paused && !g_ended;
+            if (now != mp || strcmp(t, mt)) { mp = now; snprintf(mt, sizeof mt, "%s", t); web_media_update(mt, now); }
+        }
+#endif
         int ww, wh, dw, dh;
         SDL_GetWindowSize(win, &ww, &wh);
         SDL_GL_GetDrawableSize(win, &dw, &dh);
@@ -2489,6 +2548,7 @@ int main(int argc, char **argv) {
 
 #ifdef __EMSCRIPTEN__
     g_mobile = EM_ASM_INT({ return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 1 : 0; });
+    web_media_setup();
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
     if (getenv("NGPLAYER_TEST_PLOPEN")) g_plopen = 1;        /* test hook: playlist overlay open (phone layout) */
