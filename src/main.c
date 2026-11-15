@@ -112,6 +112,10 @@ static void audio_cb(void *ud, Uint8 *stream, int len) {
 
 /* ================================================================== Playlist */
 typedef struct { char *path; char *key; char label[128]; int ma_id; int fmt; } entry;   /* fmt: -1 not yet determined, 0 unknown, else FMT_* */   /* key: Sortierschluessel (Ordner + Anzeigename) */
+#ifdef __EMSCRIPTEN__
+static void ma_need_download(int idx);        /* Mod Archive list of the web build, see below */
+static void ma_sync_web(int force);
+#endif
 static entry *pl;
 static int npl, cur = -1;
 static float list_scroll;
@@ -277,10 +281,6 @@ static void list_label(char *dst, size_t cap, char *tag, size_t tcap, const entr
     while (cut > 0 && dst[cut - 1] == ' ') cut--;
     snprintf(dst + cut, cap - cut, "...");
 }
-#ifdef __EMSCRIPTEN__
-static void ma_need_download(int idx);
-static void ma_sync_web(int force);
-#endif
 static void play_index_sub(int idx, int sub) {
     if (idx < 0 || idx >= npl) return;
 #ifdef __EMSCRIPTEN__
