@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <math.h>
 
-#define MAXCH 32
+#define MAXCH 64
 static const uint8_t vib_tab[32] = {0,24,49,74,97,120,141,161,180,197,212,224,235,244,250,253,255,253,250,244,235,224,212,197,180,161,141,120,97,74,49,24};
 
 typedef struct XXPlayer XXPlayer;
@@ -31,6 +31,7 @@ typedef struct {
     double pprev; int pinst;   /* Pan-Rampe wie Lautstaerke */
     double vprev; int vinst;   /* Lautstaerke-Rampe ueber den Tick: Start (vorheriger Tick) / sofort */
     int m_eau, m_ead;          /* EAx/EBx Gedaechtnis */
+    int rev;                   /* DBM E3x: the sample plays backwards from its end and then ping-pongs over its whole length */
 } XCh;
 
 struct XXPlayer {
@@ -40,12 +41,17 @@ struct XXPlayer {
     int d_ord, d_row;          /* Anzeigeposition */
     float *scb; int scl; unsigned scn;   /* Scope-Ringpuffer */
     int loop_row[MAXCH], loop_cnt[MAXCH];
-    int jump_ord, jump_row, pdelay;
+    int jump_ord, jump_row, pdelay, repeat;     /* repeat: the row is being repeated by a pattern delay (EEx): no new notes/effects at tick 0 */
     double acc;
     int first, eloop; double tsec;
     int tkpos, tklen;          /* Position im aktuellen Tick / Ticklaenge in Samples */
     uint8_t seen[256 * 256 / 8];
     XCh ch[MAXCH];
+    /* DBM echo DSP (after the DigiBooster Pro echo as implemented by OpenMPT / libdigibooster3): a stereo delay with feedback and cross echo
+     * for the channels that are switched on in eon[] */
+    float *edl; int ebuf, epos, edelay;
+    uint8_t eon[MAXCH], epar[4];
+    float e_pmix, e_nmix, e_pcpb, e_pcnb, e_ncpb, e_ncnb;
 };
 
 static int xf_len(void){ static int v = -1; if (v < 0) { const char *e = getenv("XMXF"); v = e ? atoi(e) : 40; } return v; }
@@ -85,15 +91,37 @@ static void env_adv(const XEnv *e, int *pos, int keyon){
     if (*pos > e->x[e->n - 1] && !e->loopen) *pos = e->x[e->n - 1];
 }
 
+static void echo_recalc(XXPlayer *p){
+    int dl = p->epar[0] ? p->epar[0] : 167;                              /* a delay of 0 behaves like 167 (measured on DigiBooster Pro 2.21) */
+    p->edelay = (int)(((int64_t)dl * p->rate + 250) / 500);
+    if (p->edelay >= p->ebuf) p->edelay = p->ebuf - 1;
+    int fb = p->epar[1], mix = p->epar[2], cr = p->epar[3];
+    p->e_pmix = mix * (1.0f / 256.0f); p->e_nmix = (256 - mix) * (1.0f / 256.0f);
+    p->e_pcpb = (float)(cr * fb) * (1.0f / 65536.0f);              p->e_pcnb = (float)(cr * (256 - fb)) * (1.0f / 65536.0f);
+    p->e_ncpb = (float)((cr - 256) * fb) * (1.0f / 65536.0f);      p->e_ncnb = (float)((cr - 256) * (fb - 256)) * (1.0f / 65536.0f);
+}
+static void echo_init(XXPlayer *p){
+    const XSong *s = p->s;
+    if (!s->echo) return;
+    p->ebuf = (p->rate >> 1) + (p->rate >> 6);
+    p->edl = (float *)calloc((size_t)p->ebuf * 2, sizeof(float));
+    if (!p->edl) return;
+    memcpy(p->eon, s->echo_on, sizeof p->eon > sizeof s->echo_on ? sizeof s->echo_on : sizeof p->eon);
+    memcpy(p->epar, s->echo_par, 4);
+    echo_recalc(p);
+}
 XXPlayer *xxm_new(const XSong *s, int rate){
     XXPlayer *p = calloc(1, sizeof *p);
     p->s = s; p->rate = rate; p->speed = s->speed; p->tempo = s->tempo; p->gvol = 64;
+    echo_init(p);
     p->nrows = s->npat ? s->prows[s->orders[0]] : 64; p->first = 1;
     p->jump_ord = p->jump_row = -1;
+    p->seen[0] |= 1;                       /* the start position counts as visited: a jump back to order 0 row 0 ends the song (it played twice before) */
     for (int i = 0; i < MAXCH; i++) { p->ch[i].smpi = -1; p->ch[i].pan = 128; p->ch[i].fade = 32768; }
     return p;
 }
-void xxm_free(XXPlayer *p){ free(p); }
+void xxm_free(XXPlayer *p){
+    if (p) free(p->edl); free(p); }
 int xxm_order(const XXPlayer *p){ return p->order; }
 void xxm_set_scope(void *pp, float *buf, int len){ XXPlayer *p = pp; p->scb = buf; p->scl = len; p->scn = 0; }
 int xxm_chan_pan(const void *pp, int ch){ return ((const XXPlayer *)pp)->ch[ch].opan; }
@@ -128,6 +156,7 @@ static void trigger(XXPlayer *p, XCh *c, int note, int inst, int hasinst, int tp
         if (tp) { c->tper = per; if (hasinst && c->smpi >= 0) { XSmp *cm = &s->xsmp[c->smpi]; c->vol = cm->vol; c->pan = cm->pan; } }
         else {
             start_xf(c);
+            c->rev = 0;
             c->smpi = si; c->ft = m->finetune; c->note = note;
             c->per = c->tper = per;
             c->on = m->len > 0; c->pos = 0; c->dir = 1; c->avpos = 0; c->avcnt = 0;
@@ -144,11 +173,11 @@ static void trigger(XXPlayer *p, XCh *c, int note, int inst, int hasinst, int tp
 
 static void volslide(int *v, int par){ int u = par >> 4, d = par & 15; if (u) *v += u; else *v -= d; *v = clampi(*v, 0, 64); }
 
-static void do_row_cell(XXPlayer *p, int chn, XCh *c, const XCell *x){
+static void do_row_cell(XXPlayer *p, int chn, XCh *c, const XCell *x, int second){
     const XSong *s = p->s;
     int eff = x->eff, par = x->par, vc = x->vol1;
-    int tpvol = (vc >> 4) == 0xF || eff == 3 || eff == 5;
-    c->trig = 0;
+    int tpvol = (vc >> 4) == 0xF || eff == 3 || eff == 5 || x->eff2 == 3 || x->eff2 == 5;     /* a tone portamento in the second effect slot (DBM) counts too */
+    if (!second) c->trig = 0;
     if (eff == 0x0E && (par >> 4) == 0x0D && (par & 15)) { c->dnote = x->note ? x->note : -1; c->dinst = x->inst; c->dvol = vc; }
     else {
         if (x->note || x->inst) trigger(p, c, x->note, x->inst, x->inst != 0, tpvol && x->note != 97);
@@ -186,6 +215,15 @@ static void do_row_cell(XXPlayer *p, int chn, XCh *c, const XCell *x){
     case 0x14: if (par == 0) { c->keyon = 0; if (c->inst >= 1 && !s->inst[c->inst].venv.on) c->kopend = 1; } break;
     case 0x15: c->venvt = par; break;
     case 0x19: if (par) c->m_psl = par; break;
+    case 0x35:       /* DBM E3x: play the sample backwards (from its end, ping-pong over the whole sample) */
+        if (c->smpi >= 0 && s->xsmp[c->smpi].len > 0) { c->rev = 1; c->dir = -1; c->pos = (double)(s->xsmp[c->smpi].len - 1); c->on = 1; }
+        break;
+    case 0x30:       /* DBM 1Fxy: echo off/on (x: 0 = this channel, 1 = all channels; y: 0 = on, 1 = off) */
+        if (p->edl && (par >> 4) <= 2 && (par & 15) <= 1) { if ((par >> 4) == 1) { for (int k = 0; k < s->nch; k++) p->eon[k] = (par & 15) == 0; } else p->eon[chn] = (par & 15) == 0; }
+        break;
+    case 0x31: case 0x32: case 0x33: case 0x34:      /* DBM Wxx/Xxx/Yxx/Zxx: echo delay / feedback / mix / cross (xx / 8 of 32 steps) */
+        if (p->edl) { p->epar[eff - 0x31] = (uint8_t)((double)((par / 8) * 127 / 32) * 255.0 / 127.0 + 0.5); echo_recalc(p); }
+        break;
     case 0x1B: if (par) c->m_rv = par; break;
     case 0x1D: if (par) c->m_tr = par; break;
     case 0x21: if (hi == 1) { int d = lo ? lo : 0; (void)d; c->per -= lo; } else if (hi == 2) c->per += lo; break;
@@ -204,7 +242,7 @@ static void do_row_cell(XXPlayer *p, int chn, XCh *c, const XCell *x){
         }
         break;
     }
-    c->cutdelay = (eff == 0x0E && hi == 0xC) ? lo : -1;
+    if (eff == 0x0E && hi == 0xC) c->cutdelay = lo; else if (!second) c->cutdelay = -1;
     if (c->cutdelay == 0) c->vol = 0;
 }
 
@@ -261,17 +299,22 @@ static void do_tick(XXPlayer *p){
     for (int i = 0; i < s->nch; i++) {
         XCh *c = &p->ch[i]; const XCell *x = cell(p, i);
         if (c->kopend == 2) { start_xf(c); c->vol = 0; c->kopend = 0; }
-        if (p->tick == 0) {
+        if (p->tick == 0 && p->repeat) {
+            /* repeated row (pattern delay): the notes are not retriggered; tick-0 effects are not executed again */
+        } else if (p->tick == 0) {
             if (x->eff == 0x0E && (x->par >> 4) == 0xD && (x->par & 15)) { c->dnote = x->note; c->dinst = x->inst; c->dvol = x->vol1; }
-            do_row_cell(p, i, c, x);
+            do_row_cell(p, i, c, x, 0);
+            if (x->eff2 || x->par2) { XCell x2 = {0}; x2.eff = x->eff2; x2.par = x->par2; do_row_cell(p, i, c, &x2, 1); }       /* second effect (DBM) */
         } else if (x->eff == 0x0E && (x->par >> 4) == 0xD && p->tick == (x->par & 15)) {
             do_tick_effects(p, i, c, x);
         } else do_tick_effects(p, i, c, x);
+        if (p->tick > 0 && (x->eff2 || x->par2)) { XCell x2 = {0}; x2.eff = x->eff2; x2.par = x->par2; do_tick_effects(p, i, c, &x2); }
         if (c->kopend == 1) c->kopend = 2;
         /* Ausgabe-Parameter */
         XSmp *m = c->smpi >= 0 ? &s->xsmp[c->smpi] : NULL;
         if (!m) { c->step = 0; continue; }
         int eff = x->eff, par = x->par, vc = x->vol1;
+        if (!((eff == 0 && par) || eff == 4 || eff == 6) && ((x->eff2 == 0 && x->par2) || x->eff2 == 4 || x->eff2 == 6)) { eff = x->eff2; par = x->par2; }   /* arpeggio/vibrato from the second slot */
         double per = c->per;
         if (eff == 0 && par) { int a = p->tick % 3; int semi = a == 1 ? par >> 4 : a == 2 ? par & 15 : 0; per = s->linear ? per - 64 * semi : per * pow(2.0, -semi / 12.0); }
         if (eff == 4 || eff == 6 || (vc >> 4) == 0xB) {
@@ -303,7 +346,8 @@ static void advance(XXPlayer *p){
     const XSong *s = p->s;
     if (++p->tick < p->speed + (p->tick >= p->speed ? 0 : 0)) return;
     p->tick = 0;
-    if (p->pdelay) { p->pdelay--; p->tick = 0; if (p->pdelay) { } }
+    if (p->pdelay > 0) { p->pdelay--; p->tick = 0; p->repeat = 1; return; }     /* pattern delay: stay on this row for (EEx) more rows */
+    p->repeat = 0;
     int no = p->order, nr = p->row + 1;
     int jumped = 0;
     if (p->jump_ord >= 0) { jumped = (p->jump_ord != p->order || p->jump_row <= p->row) && !p->eloop; no = p->jump_ord; nr = p->jump_row; p->jump_ord = -1; if (no != p->order && p->jump_row >= 0) { } }
@@ -356,26 +400,38 @@ int xxm_render(XXPlayer *p, int16_t *out, int n){
         }
         int chunk = (int)p->acc; if (chunk < 1) chunk = 1; if (chunk > n - done) chunk = n - done;
         for (int f = 0; f < chunk; f++) {
-            double l = 0, r = 0, cs[MAXCH];
+            double l = 0, r = 0, el = 0, er = 0, cs[MAXCH];
             for (int i = 0; i < s->nch; i++) cs[i] = 0;
             for (int i = 0; i < s->nch; i++) {
                 XCh *c = &p->ch[i];
                 int solo_skip = (xplay_solo >= 0 && i != xplay_solo) || ((xplay_mute >> i) & 1);
+                double *tl = (p->edl && p->eon[i]) ? &el : &l, *tr = (p->edl && p->eon[i]) ? &er : &r;      /* channels with the echo switched on feed the echo */
                 double gnew = 1.0;
                 if (c->xf > 0) {                          /* alte Stimme ausblenden */
                     int L = xf_len(); double w = (double)(c->xf - 1) / L; gnew = 1.0;
                     { static int md = -1; if (md < 0) { const char *e = getenv("XMMODE"); md = e ? atoi(e) : 0; } if (md == 1) { w = 1; gnew = 0; } else if (md == 2) { w = 0; gnew = 1; } }
                     const XSmp *om = &s->xsmp[c->osmpi]; int oon = 1, en = 0;
-                    if (!solo_skip) { double v = read_smp(om, c->opos, &en); if (!en) { pan_add(v * c->ofvol * w, c->oopan, &l, &r); cs[i] += v * c->ofvol * w; } }
+                    if (!solo_skip) { double v = read_smp(om, c->opos, &en); if (!en) { pan_add(v * c->ofvol * w, c->oopan, tl, tr); cs[i] += v * c->ofvol * w; } }
                     adv_pos(om, &c->opos, &c->odir, c->ostep, &oon); c->xf--;
                 }
                 if (!c->on || c->smpi < 0) continue;
-                const XSmp *m = &s->xsmp[c->smpi];
+                const XSmp *m = &s->xsmp[c->smpi]; XSmp rvs;
+                if (c->rev) { rvs = *m; rvs.loop = 1; rvs.pingpong = 1; rvs.ls = 0; rvs.le = rvs.len; m = &rvs; }
                 if (!solo_skip) { int en = 0; double v = read_smp(m, c->pos, &en); if (en) { c->on = 0; continue; }
                     double rf = p->tklen > 0 ? (double)(p->tkpos + 1) / p->tklen : 1.0; if (rf > 1) rf = 1;
                     double vol = c->vprev + (c->fvol - c->vprev) * rf;
-                    pan_add(v * vol * gnew, (int)(c->pprev + (c->opan - c->pprev) * rf + 0.5), &l, &r); cs[i] += v * vol * gnew; }
+                    pan_add(v * vol * gnew, (int)(c->pprev + (c->opan - c->pprev) * rf + 0.5), tl, tr); cs[i] += v * vol * gnew; }
                 adv_pos(m, &c->pos, &c->dir, c->step, &c->on);
+            }
+            if (p->edl) {                          /* echo DSP: output = dry * (1 - mix) + delayed * mix; the delay line is fed with the dry + feedback mix */
+                int rp = p->epos - p->edelay; if (rp < 0) rp += p->ebuf;
+                float il = (float)el, ir = (float)er, dl = p->edl[rp * 2], dr = p->edl[rp * 2 + 1];
+                float al = il * p->e_ncnb + ir * p->e_pcnb + dl * p->e_ncpb + dr * p->e_pcpb;
+                float ar = ir * p->e_ncnb + il * p->e_pcnb + dr * p->e_ncpb + dl * p->e_pcpb;
+                if (fabsf(al) < 1e-24f) al = 0; if (fabsf(ar) < 1e-24f) ar = 0;
+                p->edl[p->epos * 2] = al; p->edl[p->epos * 2 + 1] = ar;
+                if (++p->epos >= p->ebuf) p->epos = 0;
+                l += il * p->e_nmix + dl * p->e_pmix; r += ir * p->e_nmix + dr * p->e_pmix;
             }
             p->tkpos++;
             if (p->scb) { unsigned w = p->scn & (unsigned)(p->scl - 1); for (int i = 0; i < s->nch; i++) p->scb[(size_t)i * p->scl + w] = (float)(cs[i] * master * 2.0); p->scn++; }

@@ -139,6 +139,14 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
             s->nch = s->xs.nch; s->nord = s->xs.nord;
             s->xxp = xxm_new(&s->xs, rate);
         }
+    } else if (dbm_probe(b, (size_t)n)) {
+        r = xdbm_load(&s->xs, b, (size_t)n);
+        if (!r) {
+            s->kind = K_XM; s->fmt = "DBM";
+            snprintf(s->title, sizeof s->title, "%s", s->xs.title);
+            s->nch = s->xs.nch; s->nord = s->xs.nord;
+            s->xxp = xxm_new(&s->xs, rate);
+        }
     } else if (mdl_probe(b, (size_t)n)) {
         r = xmdl_load(&s->xs, b, (size_t)n);
         if (!r) {
