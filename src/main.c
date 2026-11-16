@@ -1430,7 +1430,8 @@ static int last_of_group(int i) {
 }
 static void next_user(int d) {              /* next / previous as the user asks for it */
     if (d > 0 && g_rand && cur >= 0 && cur < npl && pl[cur].ma_id > 0 && last_of_group(cur)) {
-        if (!ma_busy() && (!rand_fail_t || SDL_GetTicks() - rand_fail_t > 5000)) ma_random();
+        if (ma_busy()) { snprintf(toast_txt, sizeof toast_txt, "Still loading ..."); toast_t = 1.5f; }
+        else if (!rand_fail_t || SDL_GetTicks() - rand_fail_t > 5000) { snprintf(toast_txt, sizeof toast_txt, "Drawing a random module ..."); toast_t = 2.5f; ma_random(); }
         return;
     }
     next_prev(d);
