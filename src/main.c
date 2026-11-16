@@ -1713,9 +1713,14 @@ static void ma_need_download(int idx) {
 #endif
 
 static int dl_thread(void *p) {
-    if (!dl_id) {                                          /* random module: ask The Mod Archive for an ID first */
-        dl_id = ma_random_id();
-        if (!dl_id) { dl_rc = 28; dl_state = 3; return 0; }
+    if (!dl_id) {                                          /* random module: ask The Mod Archive for an ID first; a draw that fails is repeated with a new ID (up to 3 times, not after 40 s) */
+        Uint32 t0 = SDL_GetTicks();
+        for (int tries = 0; tries < 3 && SDL_GetTicks() - t0 < 40000; tries++) {
+            int id = ma_random_id();
+            if (!id) continue;
+            if (!ma_download(id, dl_path, sizeof dl_path)) { dl_id = id; dl_rc = 0; dl_state = 2; return 0; }
+        }
+        dl_rc = 28; dl_state = 3; return 0;
     }
     dl_rc = ma_download(dl_id, dl_path, sizeof dl_path);
     dl_state = dl_rc ? 3 : 2;
@@ -1753,6 +1758,14 @@ static void ma_random(void) {
     dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
 }
 static void ma_poll(void) {
+#ifdef __EMSCRIPTEN__
+    {   /* safety net: the page should always answer (it has its own time limits); if it never does, do not stay "loading" for ever */
+        static Uint32 busy_since;
+        if (dl_state != 1) busy_since = 0;
+        else if (!busy_since) busy_since = SDL_GetTicks() | 1;
+        else if (SDL_GetTicks() - busy_since > 75000) { dl_rc = 28; dl_state = 3; busy_since = 0; }
+    }
+#endif
     if (dl_state == 2 || dl_state == 3) {
         SDL_WaitThread(dl_thr, NULL); dl_thr = NULL;
         if (dl_random) {
