@@ -813,7 +813,7 @@ static void mix_voice(ITPlayer *p, V *c, double *mix, int n, int fast_ramp_len, 
 /* ---------------- Oeffentliche API ---------------- */
 ITPlayer *itp_new(const ITSong *s, int rate){
     ITPlayer *p = calloc(1, sizeof *p); p->s = s; p->rate = rate;
-    g_it200 = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217 || s->cwt == 0x888)); g_linear = (s->flags & 8) != 0;
+    g_it200 = (s->cmwt == 0x200 && (s->cwt == 0x888 || ((s->cwt == 0x214 || s->cwt == 0x217) && s->rsv == 0)));   /* rsv != 0: real Impulse Tracker 2.14p4/p5, plain IT behaviour */ g_linear = (s->flags & 8) != 0;
     /* OpenMPT up to 1.28 (cwtv 0x5000..0x5128): table based periods too (measured: 0x5122, 0x5123, 0x5128 correlate much better with the table, 0x5130 and 0x5131 with the exact formula; 0x5129 not measured) */
     /* Schism Tracker: libopenmpt setzt kPeriodsAreHertz zurueck bei Datum < 2015-01-29 (1916 Tage nach 2009-10-31), und bei Datum < 2021-05-02 (4201) ohne Linear-Slides */
     g_tabfreq = g_it200 || (s->cmwt == 0x202 && s->cwt == 0x214) || (s->cwt >= 0x5000 && s->cwt < 0x5129) || (s->schism_days >= 0 && (s->schism_days < 1916 || (s->schism_days < 4201 && !g_linear))); g_swapcancel = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217)) || s->cwt == 0x888 || s->cwt >= 0x1000; p->speed = s->speed; p->tempo = s->tempo; p->gvol = s->gv;
@@ -823,7 +823,7 @@ ITPlayer *itp_new(const ITSong *s, int rate){
     /* Files saved by ModPlug Tracker 1.17/1.18 (cwtv 0x217, cmwt 0x200): libopenmpt mixes them with its older, quieter mix levels.
      * Measured on 5 files (12-18 channels, mix volume 53..100): factor 0.38-0.47, no clear dependence on channels or mix volume
      * (a 1/channels law fitted 4 files but missed the 5th by 23 %), so a constant is used. */
-    if (s->cwt == 0x217 && s->cmwt == 0x200) p->K *= 0.42;
+    if (s->cwt == 0x217 && s->cmwt == 0x200 && s->rsv == 0) p->K *= 0.42;   /* with a value in the reserved header field it is Impulse Tracker 2.14p4/p5 (libopenmpt tells them apart the same way) */
     /* ModPlug Tracker b3.2 .. 1.09 (cwtv 0x214, cmwt 0x202): same older mix levels. Measured on one file (9 channels, mix volume 65): factor 0.515. */
     if (s->cwt == 0x214 && s->cmwt == 0x202) p->K *= 0.515;
     { const char *e = getenv("ITGAIN"); if (e) p->K *= atof(e); }
