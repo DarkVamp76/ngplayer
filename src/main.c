@@ -1419,6 +1419,7 @@ static void seek_order(int target) {
  * A little 3D die at the bottom of the playlist. A click rolls it (it tumbles while the module is fetched) and it settles on a face. */
 static void ma_random(void);
 static int ma_busy(void);
+static int ma_loading(void);
 
 /* ---- Random mode (RND): at the end of the Mod Archive list "next" (button, key, lock screen) and the end of a song draw a new random
  * module instead of wrapping around to the first entry. Remembered between runs. ---- */
@@ -1430,7 +1431,7 @@ static int last_of_group(int i) {
 }
 static void next_user(int d) {              /* next / previous as the user asks for it */
     if (d > 0 && g_rand && cur >= 0 && cur < npl && pl[cur].ma_id > 0 && last_of_group(cur)) {
-        if (ma_busy()) { snprintf(toast_txt, sizeof toast_txt, "Still loading ..."); toast_t = 1.5f; }
+        if (ma_busy()) { if (ma_loading()) { snprintf(toast_txt, sizeof toast_txt, "Still loading ..."); toast_t = 1.5f; } }
         else if (!rand_fail_t || SDL_GetTicks() - rand_fail_t > 5000) { snprintf(toast_txt, sizeof toast_txt, "Drawing a random module ..."); toast_t = 2.5f; ma_random(); }
         return;
     }
@@ -1701,7 +1702,8 @@ static char ma_buf[256]; static int ma_len;
 static char ma_msg[160]; static int ma_msg_err;
 static volatile int dl_state;              /* 0 leer, 1 laedt, 2 fertig, 3 Fehler */
 static int dl_id, dl_rc, dl_random; static char dl_path[1100]; static SDL_Thread *dl_thr;   /* dl_random: the dice asked for it, dl_id 0 = ID not known yet */
-static int ma_busy(void) { return dl_state == 1; }
+static int ma_loading(void) { return dl_state == 1; }
+static int ma_busy(void) { return dl_state != 0; }   /* running, or finished and not yet taken over by ma_poll (a new draw must not discard that result) */
 static int dl_want = -1;                 /* entry that asked for its file (restored list), played when the download is done */
 #ifdef __EMSCRIPTEN__
 static void ma_need_download(int idx) {
@@ -1733,7 +1735,7 @@ static void ma_show(int on) {
     if (on) SDL_StartTextInput(); else SDL_StopTextInput();
 }
 static void ma_start(void) {
-    if (dl_state == 1) return;
+    if (dl_state != 0) return;
     int id = ma_parse_id(ma_buf);
     if (!id) { snprintf(ma_msg, sizeof ma_msg, "No module ID found. Expected: a number or a modarchive link."); ma_msg_err = 1; return; }
 #ifdef __EMSCRIPTEN__
@@ -1749,7 +1751,7 @@ static void ma_start(void) {
     net_cancel = 0; dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
 }
 static void ma_random(void) {
-    if (dl_state == 1) return;
+    if (dl_state != 0) return;
 #ifdef __EMSCRIPTEN__
     dl_id = 0; dl_random = 1; dl_state = 1; dice_start();
     EM_ASM({ if (window.ngMaRandom) window.ngMaRandom(); });          /* the page asks ma.php for an ID, then fetches the module */
