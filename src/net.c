@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <signal.h>
+#include <time.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -23,6 +25,8 @@ int net_cache_dir(char *out, size_t cap) {
     return mkdir_p(out);
 }
 
+volatile int net_cancel;
+
 #ifdef __EMSCRIPTEN__
 /* Web-Version: kein Hilfsprozess curl */
 int net_have_curl(void) { return 0; }
@@ -33,7 +37,13 @@ static int run_curl(char *const argv[]) {
     if (pid < 0) return -1;
     if (pid == 0) { execvp("curl", argv); _exit(127); }
     int st;
-    while (waitpid(pid, &st, 0) < 0) if (errno != EINTR) return -1;
+    for (;;) {                                           /* poll instead of a blocking wait, so that net_cancel can stop a stuck curl */
+        pid_t w = waitpid(pid, &st, WNOHANG);
+        if (w == pid) break;
+        if (w < 0 && errno != EINTR) return -1;
+        if (net_cancel) { kill(pid, SIGKILL); waitpid(pid, &st, 0); return -1; }
+        struct timespec ts = { 0, 50 * 1000 * 1000 }; nanosleep(&ts, NULL);
+    }
     return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
 }
 
