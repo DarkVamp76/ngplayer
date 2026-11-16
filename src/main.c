@@ -1753,6 +1753,14 @@ static void ma_random(void) {
     dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
 }
 static void ma_poll(void) {
+#ifdef __EMSCRIPTEN__
+    {   /* safety net: the page should always answer (it has its own time limits); if it never does, do not stay "loading" for ever */
+        static Uint32 busy_since;
+        if (dl_state != 1) busy_since = 0;
+        else if (!busy_since) busy_since = SDL_GetTicks() | 1;
+        else if (SDL_GetTicks() - busy_since > 75000) { dl_rc = 28; dl_state = 3; busy_since = 0; }
+    }
+#endif
     if (dl_state == 2 || dl_state == 3) {
         SDL_WaitThread(dl_thr, NULL); dl_thr = NULL;
         if (dl_random) {
