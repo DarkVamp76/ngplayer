@@ -1419,6 +1419,25 @@ static void seek_order(int target) {
  * A little 3D die at the bottom of the playlist. A click rolls it (it tumbles while the module is fetched) and it settles on a face. */
 static void ma_random(void);
 static int ma_busy(void);
+
+/* ---- Random mode (RND): at the end of the Mod Archive list "next" (button, key, lock screen) and the end of a song draw a new random
+ * module instead of wrapping around to the first entry. Remembered between runs. ---- */
+static int g_rand;
+static Uint32 rand_fail_t;                 /* a draw that failed: wait a few seconds before the next try (the song end would retry every frame) */
+static int last_of_group(int i) {
+    for (int j = i + 1; j < npl; j++) if ((pl[j].ma_id > 0) == (pl[i].ma_id > 0)) return 0;
+    return 1;
+}
+static void next_user(int d) {              /* next / previous as the user asks for it */
+    if (d > 0 && g_rand && cur >= 0 && cur < npl && pl[cur].ma_id > 0 && last_of_group(cur)) {
+        if (!ma_busy() && (!rand_fail_t || SDL_GetTicks() - rand_fail_t > 5000)) ma_random();
+        return;
+    }
+    next_prev(d);
+}
+static void song_end_advance(void) {        /* song ended -> next entry (a new random one at the end of the list in random mode) */
+    if (g_ended && cur >= 0 && (npl > 1 || (g_rand && npl == 1 && pl[cur].ma_id > 0))) next_user(1);
+}
 static int dice_roll, dice_stop_req;         /* rolling / the module has arrived, stop as soon as the roll was long enough */
 static float dice_t, dice_since, dice_hop, dice_ang[3], dice_vel[3];
 
@@ -1511,6 +1530,26 @@ static void draw_dice(float cx, float cy, float s) {
     if (!ma_busy() && clicked(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f)) { ma_random(); click = 0; }
 }
 
+#ifdef __EMSCRIPTEN__
+EM_JS(int, web_rand_get, (void), { try { return localStorage.getItem('ngp.random') === '1' ? 1 : 0; } catch (e) { return 0; } });
+EM_JS(void, web_rand_set, (int v), { try { localStorage.setItem('ngp.random', v ? '1' : '0'); } catch (e) {} });
+#endif
+/* RND chip next to the dice: switches the random mode (see next_user) */
+static void draw_rand_chip(float x, float y, float w) {
+    const float h = 22;
+    int hv = hit(x, y, w, h);
+    rrect(x, y, w, h, 7, alpha(g_rand ? VC[0] : (hv ? VC[2] : EDGE), g_rand ? 0.32f : 0.30f));
+    text(x + (w - text_width("RND", 11)) / 2, y + 5.5f, 11, g_rand ? TXT : DIM, "RND");
+    if (clicked(x, y, w, h)) {
+        g_rand = !g_rand;
+#ifdef __EMSCRIPTEN__
+        web_rand_set(g_rand);
+#endif
+        snprintf(toast_txt, sizeof toast_txt, g_rand ? "Random mode on" : "Random mode off"); toast_t = 1.8f;
+        click = 0;
+    }
+}
+
 /* ---------------------------------------------------------------- The-Mod-Archive-Dialog (Download per ID oder Link) */
 static int ma_open, ma_eat;
 static char ma_buf[256]; static int ma_len;
@@ -1573,7 +1612,7 @@ static void ma_poll(void) {
         SDL_WaitThread(dl_thr, NULL); dl_thr = NULL;
         if (dl_random) {
             dice_stop_req = 1;                                     /* the dice settles */
-            if (dl_state == 3) { snprintf(toast_txt, sizeof toast_txt, "Mod Archive did not answer"); toast_t = 3.0f; }
+            if (dl_state == 3) { snprintf(toast_txt, sizeof toast_txt, "Mod Archive did not answer"); toast_t = 3.0f; rand_fail_t = SDL_GetTicks(); }
             dl_random = 0;
         }
         if (dl_state == 2) {
@@ -1724,6 +1763,7 @@ static void draw_ui(double t) {
         }
         { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
         draw_dice(x + w - 44, y + h - 33, 12.5f);
+        draw_rand_chip(x + w - 104, y + h - 44, 38);
         if (npl && !nvis) text(x + 18, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
         if (!npl) {
             text(x + 18, y + 60, 14, DIM, "No files.");
@@ -1839,8 +1879,8 @@ static void draw_ui(double t) {
                 else { rect(ccx - 7, ccy - 8, 5, 16, ic); rect(ccx + 2, ccy - 8, 5, 16, ic); }
             } else { tri(ccx - 6, ccy - 8, ccx - 6, ccy + 8, ccx + 6, ccy, ic); rect(ccx + 6, ccy - 8, 3, 16, ic); }
             if (clicked(x, cy - r, 2 * r, 2 * r)) {
-                if (i == 0) next_prev(-1);
-                else if (i == 2) next_prev(1);
+                if (i == 0) next_user(-1);
+                else if (i == 2) next_user(1);
                 else if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); }
                 else g_paused = !g_paused;
                 click = 0;
@@ -2069,8 +2109,8 @@ static void draw_ui_portrait(float W, float H) {
                 else { rect(ccx - 7, ccy - 8, 5, 16, ic); rect(ccx + 2, ccy - 8, 5, 16, ic); }
             } else { tri(ccx - 6, ccy - 8, ccx - 6, ccy + 8, ccx + 6, ccy, ic); rect(ccx + 6, ccy - 8, 3, 16, ic); }
             if (clicked(x, cy - r, 2 * r, 2 * r)) {
-                if (i == 0) next_prev(-1);
-                else if (i == 2) next_prev(1);
+                if (i == 0) next_user(-1);
+                else if (i == 2) next_user(1);
                 else if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); }
                 else g_paused = !g_paused;
                 click = 0;
@@ -2084,7 +2124,8 @@ static void draw_ui_portrait(float W, float H) {
             if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; click = 0; }
         }
         draw_dice(bx + 262, cy, 9.5f);            /* random dice (portrait: between LIST and the volume slider) */
-        float vx = bx + 296, vw = bw - 296 - 22;
+        draw_rand_chip(bx + 282, cy - 11, 36);
+        float vx = bx + 328, vw = bw - 328 - 22;
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
         rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
         float kx = vx + 3 + (vw - 6) * g_vol;
@@ -2157,6 +2198,7 @@ static void settings_load(void) {
         if (sscanf(line, "window_w=%d", &v) == 1 && v >= 360 && v <= 16384) g_win_w = v;
         else if (sscanf(line, "window_h=%d", &v) == 1 && v >= 480 && v <= 16384) g_win_h = v;
         else if (sscanf(line, "orb=%d", &v) == 1) g_orb = v != 0;
+        else if (sscanf(line, "random=%d", &v) == 1) g_rand = v != 0;
         else if (sscanf(line, "window_x=%d", &v) == 1) g_win_x = v;
         else if (sscanf(line, "window_y=%d", &v) == 1) g_win_y = v;
     }
@@ -2218,7 +2260,7 @@ static void settings_save(void) {
         SDL_GetWindowPosition(win, &px, &py);
         if ((px || py) && (px & 0xFFFF0000) != 0x2FFF0000 && (px & 0xFFFF0000) != 0x1FFF0000) { g_win_x = px; g_win_y = py; }      /* Wayland has no window position (SDL returns 0,0 or the "centered" flag): then keep the old value */
     }
-    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\norb=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_orb ? 1 : 0);
+    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\norb=%d\nrandom=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_orb ? 1 : 0, g_rand ? 1 : 0);
     fclose(f);
 }
 #endif
@@ -2477,9 +2519,18 @@ static void media_sync(void) {
 EMSCRIPTEN_KEEPALIVE void ng_web_media(int cmd) {
     if (cmd == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; }
     else if (cmd == 1) g_paused = 1;
-    else if (cmd == 2) next_prev(1);
-    else if (cmd == 3) next_prev(-1);
+    else if (cmd == 2) next_user(1);
+    else if (cmd == 3) next_user(-1);
     media_sync();
+}
+/* Timer that runs even while the screen is locked (iOS stops requestAnimationFrame, so iter() does not run): finishes a download (a new
+ * random module), moves on when a song has ended and keeps the lock screen in sync. */
+static void bg_tick(void *arg) {
+    (void)arg;
+    ma_poll();
+    if (!shot) song_end_advance();
+    media_sync();
+    emscripten_async_call(bg_tick, NULL, 400);
 }
 #endif
 
@@ -2591,8 +2642,8 @@ static void iter(void) {
                 case SDLK_SPACE: g_paused = !g_paused; break;
                 case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) > 0) play_index_sub(cur, song_subsong(g_song) - 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
                 case SDLK_RIGHT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0++; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) + 1 < song_subsongs(g_song)) play_index_sub(cur, song_subsong(g_song) + 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) + 1); break;
-                case SDLK_UP: next_prev(-1); break;
-                case SDLK_DOWN: next_prev(1); break;
+                case SDLK_UP: next_user(-1); break;
+                case SDLK_DOWN: next_user(1); break;
                 case SDLK_r: if (cur >= 0) play_index_sub(cur, g_open_sub); break;
                 case SDLK_F5: g_lag_ms -= 5; if (g_lag_ms < 0) g_lag_ms = 0; break;
                 case SDLK_F6: g_lag_ms += 5; if (g_lag_ms > 300) g_lag_ms = 300; break;
@@ -2663,7 +2714,7 @@ static void iter(void) {
         analyse((float)dt);
 
         /* Songende -> naechster Titel */
-        if (g_ended && npl > 1 && cur >= 0 && !shot) next_prev(1);
+        if (!shot) song_end_advance();
 
         glViewport(0, 0, dw, dh);
         glClearColor(BG0.r, BG0.g, BG0.b, 1);
@@ -2807,6 +2858,8 @@ int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
     g_mobile = EM_ASM_INT({ return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 1 : 0; });
     web_media_setup();
+    g_rand = web_rand_get();
+    emscripten_async_call(bg_tick, NULL, 400);
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
     if (getenv("NGPLAYER_TEST_PLOPEN")) g_plopen = 1;        /* test hook: playlist overlay open (phone layout) */
