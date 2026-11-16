@@ -2088,6 +2088,7 @@ static void draw_ui_portrait(float W, float H) {
         draw_seal(M + aw - 12, cy0 + 6, 21, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
         if (g_orb) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
         else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
+        draw_rand_chip(M + aw - 56, cy0 + oh + M + (avail - oh - M) - 34, 44);       /* RND in the lower right corner of the pattern / orb card */
         float vuw = 130, spw = aw - vuw - M;
         if (!nosp) { draw_spectrum(M, sy, spw, sh); draw_level(M + spw + M, sy, vuw, sh); }
     }
@@ -2124,9 +2125,8 @@ static void draw_ui_portrait(float W, float H) {
             text(lx + (lw - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
             if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; click = 0; }
         }
-        draw_dice(bx + 262, cy, 9.5f);            /* random dice (portrait: between LIST and the volume slider) */
-        draw_rand_chip(bx + 282, cy - 11, 36);
-        float vx = bx + 328, vw = bw - 328 - 22;
+        draw_dice(bx + 266, cy, 13.0f);           /* random dice (portrait: between LIST and the volume slider), big enough for a finger */
+        float vx = bx + 306, vw = bw - 306 - 22;
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
         rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
         float kx = vx + 3 + (vw - 6) * g_vol;
