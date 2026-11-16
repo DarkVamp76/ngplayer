@@ -2381,6 +2381,10 @@ EM_JS(void, web_media_setup, (void), {
     var a = new Audio(URL.createObjectURL(new Blob([b], { type: 'audio/wav' })));
     a.loop = true;
     Module.ngMediaEl = a;
+    /* Heartbeat for the locked screen: the browser stops requestAnimationFrame and throttles timers, but the media element keeps playing and
+     * keeps firing timeupdate (a few times per second). Each one lets the app finish a download, move on at the end of a song and refresh the
+     * lock screen (ng_web_media 4). */
+    a.addEventListener('timeupdate', function () { Module._ng_web_media(4); });
     Module.ngLoopUrl = a.src;
     /* when the page goes to the background (screen lock) put the element where the song is now */
     var park = function () {
@@ -2515,12 +2519,13 @@ static void media_sync(void) {
         if (changed || g_len_s != ps_len || rate != ps_rate || jump || tn - ps_t > 15000) media_push_position();
     }
 }
-/* Commands from the lock screen: 0 play, 1 pause, 2 next, 3 previous */
+/* Commands from the lock screen: 0 play, 1 pause, 2 next, 3 previous; 4 = heartbeat from the silent audio element */
 EMSCRIPTEN_KEEPALIVE void ng_web_media(int cmd) {
     if (cmd == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; }
     else if (cmd == 1) g_paused = 1;
     else if (cmd == 2) next_user(1);
     else if (cmd == 3) next_user(-1);
+    else if (cmd == 4) { ma_poll(); if (!shot) song_end_advance(); }      /* heartbeat, see web_media_setup */
     media_sync();
 }
 /* Timer that runs even while the screen is locked (iOS stops requestAnimationFrame, so iter() does not run): finishes a download (a new
