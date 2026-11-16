@@ -7,6 +7,8 @@
 int net_cache_dir(char *out, size_t cap);
 /* Laedt url nach dest (erst in dest.part, dann atomar umbenannt). 0 = ok, sonst Fehlercode (curl-Exitcode, -1 = Start/Rename) */
 int net_get(const char *url, const char *dest, int timeout_s);
+/* Set to 1 from another thread: a running net_get kills its curl process and returns -1 at once (reset it to 0 before the next download) */
+extern volatile int net_cancel;
 /* Ist curl verfuegbar? */
 int net_have_curl(void);
 

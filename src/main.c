@@ -1715,10 +1715,12 @@ static void ma_need_download(int idx) {
 static int dl_thread(void *p) {
     if (!dl_id) {                                          /* random module: ask The Mod Archive for an ID first; a draw that fails is repeated with a new ID (up to 3 times, not after 40 s) */
         Uint32 t0 = SDL_GetTicks();
-        for (int tries = 0; tries < 3 && SDL_GetTicks() - t0 < 40000; tries++) {
+        for (int tries = 0; tries < 3 && SDL_GetTicks() - t0 < 40000 && !net_cancel; tries++) {
             int id = ma_random_id();
-            if (!id) continue;
-            if (!ma_download(id, dl_path, sizeof dl_path)) { dl_id = id; dl_rc = 0; dl_state = 2; return 0; }
+            if (!id) { fprintf(stderr, "ngplayer: random draw %d: no ID (%u ms)\n", tries + 1, SDL_GetTicks() - t0); continue; }
+            int rc = ma_download(id, dl_path, sizeof dl_path);
+            if (!rc) { dl_id = id; dl_rc = 0; dl_state = 2; return 0; }
+            fprintf(stderr, "ngplayer: random draw %d: #%d failed (code %d, %u ms)\n", tries + 1, id, rc, SDL_GetTicks() - t0);
         }
         dl_rc = 28; dl_state = 3; return 0;
     }
@@ -1744,7 +1746,7 @@ static void ma_start(void) {
     if (!net_have_curl()) { snprintf(ma_msg, sizeof ma_msg, "curl not found - please install it."); ma_msg_err = 1; return; }
     dl_id = id; dl_state = 1;
     snprintf(ma_msg, sizeof ma_msg, "Downloading module #%d ...", id); ma_msg_err = 0;
-    dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
+    net_cancel = 0; dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
 }
 static void ma_random(void) {
     if (dl_state == 1) return;
@@ -1755,7 +1757,7 @@ static void ma_random(void) {
 #endif
     if (!net_have_curl()) { snprintf(toast_txt, sizeof toast_txt, "curl not found - please install it"); toast_t = 3.0f; return; }
     dl_id = 0; dl_random = 1; dl_state = 1; dice_start();
-    dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
+    net_cancel = 0; dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
 }
 static void ma_poll(void) {
 #ifdef __EMSCRIPTEN__
@@ -1765,9 +1767,18 @@ static void ma_poll(void) {
         else if (!busy_since) busy_since = SDL_GetTicks() | 1;
         else if (SDL_GetTicks() - busy_since > 75000) { dl_rc = 28; dl_state = 3; busy_since = 0; }
     }
+#else
+    {   /* Linux: the same safety net; a download that has not finished after 60 s is cancelled (kills the curl process, the thread then returns) */
+        static Uint32 busy_since;
+        if (dl_state != 1) busy_since = 0;
+        else if (!busy_since) busy_since = SDL_GetTicks() | 1;
+        else if (SDL_GetTicks() - busy_since > 60000 && !net_cancel) { fprintf(stderr, "ngplayer: download took more than 60 s, cancelled\n"); net_cancel = 1; }
+        else if (SDL_GetTicks() - busy_since > 75000) { fprintf(stderr, "ngplayer: download thread does not answer, given up\n"); if (dl_thr) SDL_DetachThread(dl_thr); dl_thr = NULL; dl_rc = 28; dl_state = 3; busy_since = 0; }
+    }
 #endif
     if (dl_state == 2 || dl_state == 3) {
-        SDL_WaitThread(dl_thr, NULL); dl_thr = NULL;
+        if (dl_thr) SDL_WaitThread(dl_thr, NULL);
+        dl_thr = NULL;
         if (dl_random) {
             dice_stop_req = 1;                                     /* the dice settles */
             if (dl_state == 3) { snprintf(toast_txt, sizeof toast_txt, "Mod Archive did not answer"); toast_t = 3.0f; rand_fail_t = SDL_GetTicks(); }
