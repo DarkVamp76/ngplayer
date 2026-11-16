@@ -50,7 +50,7 @@ int net_get(const char *url, const char *dest, int timeout_s) {
     char part[1100], tmo[16];
     snprintf(part, sizeof part, "%s.part", dest);
     snprintf(tmo, sizeof tmo, "%d", timeout_s > 0 ? timeout_s : 30);
-    char *argv[] = { "curl", "-fsSL", "--max-time", tmo, "-A", "ngPlayer/0.1", "-o", part, (char *)url, NULL };
+    char *argv[] = { "curl", "-fsSL", "--connect-timeout", "8", "--max-time", tmo, "-A", "ngPlayer/0.1", "-o", part, (char *)url, NULL };
     int r = run_curl(argv);
     if (r) { unlink(part); return r; }
     if (rename(part, dest)) { unlink(part); return -1; }
@@ -69,7 +69,7 @@ int ma_download(int id, char *out, size_t cap) {
     if (!stat(out, &sb) && sb.st_size > 0) return 0;                 /* Cache-Treffer */
     const char *base = getenv("NGPLAYER_MA_URL");                    /* Testhaken */
     snprintf(url, sizeof url, "%s?moduleid=%d", base ? base : "https://api.modarchive.org/downloads.php", id);
-    int r = net_get(url, out, 60);
+    int r = net_get(url, out, 30);
     if (r) return r;
     /* Fehlerseite statt Modul? (HTML/leer) -> verwerfen, damit sie nicht im Cache bleibt */
     FILE *f = fopen(out, "rb"); unsigned char h[16] = {0}; size_t n = f ? fread(h, 1, sizeof h, f) : 0; if (f) fclose(f);
@@ -96,7 +96,7 @@ int ma_random_id(void) {
     char dir[900], page[1000];
     if (net_cache_dir(dir, sizeof dir)) return 0;
     snprintf(page, sizeof page, "%s/random.html", dir);
-    if (net_get("https://modarchive.org/index.php?request=view_random", page, 25)) return 0;
+    if (net_get("https://modarchive.org/index.php?request=view_random", page, 15)) return 0;
     FILE *f = fopen(page, "rb");
     if (!f) return 0;
     char *buf = (char *)malloc(1 << 20);
