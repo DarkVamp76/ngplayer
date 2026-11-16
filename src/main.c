@@ -1455,14 +1455,10 @@ static void m3_rot(float m[3][3], int axis, float a) {
     int i = (axis + 1) % 3, j = (axis + 2) % 3;
     m[axis][axis] = 1; m[i][i] = c; m[i][j] = -s; m[j][i] = s; m[j][j] = c;
 }
-static void draw_dice(float cx, float cy, float s) {
-    static const float F[6][3][3] = {           /* face: normal, u, v (value 1..6, opposite faces add up to 7) */
-        { {0, 0, 1}, {1, 0, 0}, {0, 1, 0} },   { {1, 0, 0}, {0, 0, -1}, {0, 1, 0} },   { {0, 1, 0}, {1, 0, 0}, {0, 0, -1} },
-        { {0, -1, 0}, {1, 0, 0}, {0, 0, 1} },  { {-1, 0, 0}, {0, 0, 1}, {0, 1, 0} },   { {0, 0, -1}, {-1, 0, 0}, {0, 1, 0} } };
-    static const signed char PIP[6][6][2] = {
-        { {0, 0} }, { {-1, 1}, {1, -1} }, { {-1, 1}, {0, 0}, {1, -1} }, { {-1, -1}, {-1, 1}, {1, -1}, {1, 1} },
-        { {-1, -1}, {-1, 1}, {0, 0}, {1, -1}, {1, 1} }, { {-1, -1}, {-1, 0}, {-1, 1}, {1, -1}, {1, 0}, {1, 1} } };
-    static const int NPIP[6] = { 1, 2, 3, 4, 5, 6 };
+static unsigned g_fid, dice_fid = ~0u;      /* frame counter: the dice state advances once per frame, however often it is drawn */
+static void dice_step(void) {
+    if (dice_fid == g_fid) return;
+    dice_fid = g_fid;
     float dt = (float)g_dt > 0.1f ? 0.1f : (float)g_dt;
     dice_t += dt;
     if (dice_roll) {
@@ -1478,7 +1474,17 @@ static void draw_dice(float cx, float cy, float s) {
         }
     }
     dice_hop += ((dice_roll ? 1.0f : 0.0f) - dice_hop) * (dt * 8 > 1 ? 1 : dt * 8);
-    int hv = hit(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f);
+}
+static void dice_render(float cx, float cy, float s, int interactive) {
+    static const float F[6][3][3] = {           /* face: normal, u, v (value 1..6, opposite faces add up to 7) */
+        { {0, 0, 1}, {1, 0, 0}, {0, 1, 0} },   { {1, 0, 0}, {0, 0, -1}, {0, 1, 0} },   { {0, 1, 0}, {1, 0, 0}, {0, 0, -1} },
+        { {0, -1, 0}, {1, 0, 0}, {0, 0, 1} },  { {-1, 0, 0}, {0, 0, 1}, {0, 1, 0} },   { {0, 0, -1}, {-1, 0, 0}, {0, 1, 0} } };
+    static const signed char PIP[6][6][2] = {
+        { {0, 0} }, { {-1, 1}, {1, -1} }, { {-1, 1}, {0, 0}, {1, -1} }, { {-1, -1}, {-1, 1}, {1, -1}, {1, 1} },
+        { {-1, -1}, {-1, 1}, {0, 0}, {1, -1}, {1, 1} }, { {-1, -1}, {-1, 0}, {-1, 1}, {1, -1}, {1, 0}, {1, 1} } };
+    static const int NPIP[6] = { 1, 2, 3, 4, 5, 6 };
+    dice_step();
+    int hv = interactive ? hit(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f) : 0;
     float sc0 = s * (hv && !dice_roll ? 1.14f : 1.0f);
     float hop = dice_roll ? fabsf(sinf(dice_since * 9.0f)) * s * 0.9f * dice_hop : 0;
 
@@ -1528,7 +1534,25 @@ static void draw_dice(float cx, float cy, float s) {
         polyline(xy, 5, 0.9f, 3.0f, alpha(mix(VC[0], C(1, 1, 1, 1), 0.35f), 0.30f + 0.55f * fc[f].sh));
     }
     set_additive(0);
-    if (!ma_busy() && clicked(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f)) { ma_random(); click = 0; }
+    if (interactive && !ma_busy() && clicked(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f)) { ma_random(); click = 0; }
+}
+static void draw_dice(float cx, float cy, float s) { dice_render(cx, cy, s, 1); }
+
+/* While a random module is being fetched the dice dances over the whole screen, big: it flies a loop that covers the screen, tumbling and
+ * hopping, on a dimmed screen. It grows in when the roll starts and shrinks away when the module has arrived (it settles on a face). */
+static float dice_big;
+static void draw_dice_big(float W, float H) {
+    float dt = (float)g_dt > 0.1f ? 0.1f : (float)g_dt;
+    dice_big += ((dice_roll ? 1.0f : 0.0f) - dice_big) * (dt * 5 > 1 ? 1 : dt * 5);
+    if (dice_big < 0.02f) return;
+    dice_step();
+    float m = W < H ? W : H, s = 0.15f * m * dice_big, t = dice_t;
+    rect(0, 0, W, H, C(0.02f, 0.03f, 0.07f, 0.55f * dice_big));
+    float ax = W * 0.5f - s * 1.9f, ay = H * 0.5f - s * 2.2f;
+    if (ax < 0) ax = 0;
+    if (ay < 0) ay = 0;
+    float cx = W * 0.5f + ax * sinf(0.95f * t + 0.5f * sinf(0.37f * t)), cy = H * 0.5f + ay * sinf(1.35f * t + 1.0f);
+    dice_render(cx, cy, s, 0);
 }
 
 #ifdef __EMSCRIPTEN__
@@ -2717,6 +2741,7 @@ static void iter(void) {
         tlast = now;
         if (dt > 0.1) dt = 0.1;
         g_dt = dt;
+        g_fid++;
         analyse((float)dt);
 
         /* Songende -> naechster Titel */
@@ -2734,6 +2759,7 @@ static void iter(void) {
         ma_poll();
         draw_ui((double)(now - t0) / freq);
         draw_ma_dialog((double)(now - t0) / freq);
+        draw_dice_big(view_w, view_h);
         draw_ctx_menu();
         set_additive(0);
         flush();
@@ -2869,6 +2895,7 @@ int main(int argc, char **argv) {
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
     if (getenv("NGPLAYER_TEST_PLOPEN")) g_plopen = 1;        /* test hook: playlist overlay open (phone layout) */
+    if (getenv("NGPLAYER_TEST_DICE")) dice_start();        /* test hook: the big dancing dice, as while a random module is fetched */
     SDL_AudioSpec want, have;
     SDL_zero(want);
     want.freq = g_rate; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = AUDIO_SAMPLES; want.callback = audio_cb;
