@@ -324,7 +324,7 @@ static void do_tick(XXPlayer *p){
           if (I->vibdepth) {
               int amp = I->vibdepth;
               if (I->vibsweep) { amp = I->vibdepth * (c->avcnt < I->vibsweep ? c->avcnt : I->vibsweep) / I->vibsweep; if (c->keyon) c->avcnt++; } 
-              double wv = I->vibtype == 0 ? sin(c->avpos * 2 * M_PI / 256.0) * 64 : I->vibtype == 1 ? ((c->avpos & 255) < 128 ? 64 : -64) : I->vibtype == 2 ? (64 - (c->avpos & 255) * 128.0 / 256) : ((c->avpos & 255) * 128.0 / 256 - 64);
+              double wv = I->vibtype == 0 ? sin((c->avpos & 63) * 2 * M_PI / 64.0) * 64 :   /* libopenmpt: the sine runs on a 64 step table, one cycle per 64 position units (measured on forsake.xm: rate 35 aliases) */ I->vibtype == 1 ? ((c->avpos & 255) < 128 ? 64 : -64) : I->vibtype == 2 ? (64 - (c->avpos & 255) * 128.0 / 256) : ((c->avpos & 255) * 128.0 / 256 - 64);
               per += wv * amp / 16.0; c->avpos += I->vibrate;
           } }
         if (eff == 0x21 && 0) {}
