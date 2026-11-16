@@ -1717,11 +1717,13 @@ static int dl_thread(void *p) {
         Uint32 t0 = SDL_GetTicks();
         for (int tries = 0; tries < 3 && SDL_GetTicks() - t0 < 40000 && !net_cancel; tries++) {
             int id = ma_random_id();
-            if (!id) { fprintf(stderr, "ngplayer: random draw %d: no ID (%u ms)\n", tries + 1, SDL_GetTicks() - t0); continue; }
+            if (!id) { fprintf(stderr, "ngplayer: random draw %d: no ID (%u ms)\n", tries + 1, SDL_GetTicks() - t0); net_log("random draw try %d: no ID (%u ms)", tries + 1, SDL_GetTicks() - t0); continue; }
             int rc = ma_download(id, dl_path, sizeof dl_path);
-            if (!rc) { dl_id = id; dl_rc = 0; dl_state = 2; return 0; }
+            if (!rc) { net_log("random draw try %d: #%d ok (%u ms)", tries + 1, id, SDL_GetTicks() - t0); dl_id = id; dl_rc = 0; dl_state = 2; return 0; }
             fprintf(stderr, "ngplayer: random draw %d: #%d failed (code %d, %u ms)\n", tries + 1, id, rc, SDL_GetTicks() - t0);
+            net_log("random draw try %d: #%d failed, code %d (%u ms)", tries + 1, id, rc, SDL_GetTicks() - t0);
         }
+        net_log("random draw: given up after %u ms%s", SDL_GetTicks() - t0, net_cancel ? " (cancelled)" : "");
         dl_rc = 28; dl_state = 3; return 0;
     }
     dl_rc = ma_download(dl_id, dl_path, sizeof dl_path);
@@ -1757,6 +1759,7 @@ static void ma_random(void) {
 #endif
     if (!net_have_curl()) { snprintf(toast_txt, sizeof toast_txt, "curl not found - please install it"); toast_t = 3.0f; return; }
     dl_id = 0; dl_random = 1; dl_state = 1; dice_start();
+    net_log("random draw started (playlist %d, current %d, song ended %d)", npl, cur, g_ended);
     net_cancel = 0; dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
 }
 static void ma_poll(void) {
@@ -1772,8 +1775,8 @@ static void ma_poll(void) {
         static Uint32 busy_since;
         if (dl_state != 1) busy_since = 0;
         else if (!busy_since) busy_since = SDL_GetTicks() | 1;
-        else if (SDL_GetTicks() - busy_since > 60000 && !net_cancel) { fprintf(stderr, "ngplayer: download took more than 60 s, cancelled\n"); net_cancel = 1; }
-        else if (SDL_GetTicks() - busy_since > 75000) { fprintf(stderr, "ngplayer: download thread does not answer, given up\n"); if (dl_thr) SDL_DetachThread(dl_thr); dl_thr = NULL; dl_rc = 28; dl_state = 3; busy_since = 0; }
+        else if (SDL_GetTicks() - busy_since > 60000 && !net_cancel) { fprintf(stderr, "ngplayer: download took more than 60 s, cancelled\n"); net_log("download took more than 60 s, cancelled"); net_cancel = 1; }
+        else if (SDL_GetTicks() - busy_since > 75000) { fprintf(stderr, "ngplayer: download thread does not answer, given up\n"); net_log("download thread does not answer after 75 s, given up"); if (dl_thr) SDL_DetachThread(dl_thr); dl_thr = NULL; dl_rc = 28; dl_state = 3; busy_since = 0; }
     }
 #endif
     if (dl_state == 2 || dl_state == 3) {
@@ -1796,6 +1799,7 @@ static void ma_poll(void) {
                 j = npl - 1;
             }
             play_index(j); list_follow = 1;
+            net_log("module #%d (%s) %s", dl_id, pl[j].path, g_song ? "playing" : g_error);
             if (g_song) { const char *tt = song_title(g_song); if (tt && tt[0]) snprintf(pl[j].label, sizeof pl[j].label, "%s", tt); }   /* Titel des Lieds statt der ID anzeigen */
             ma_buf[0] = 0; ma_len = 0; ma_show(0);
 #ifdef __EMSCRIPTEN__
@@ -1803,6 +1807,7 @@ static void ma_poll(void) {
 #endif
         } else {
             if (dl_want >= 0) { snprintf(toast_txt, sizeof toast_txt, "Mod Archive did not answer"); toast_t = 3.0f; }
+            net_log("download #%d failed, code %d", dl_id, dl_rc);
             const char *m = dl_rc == 100 ? "Server returned no module file (does the ID exist?)." : dl_rc == 22 ? "Module not found (server error)." : (dl_rc == 6 || dl_rc == 7 || dl_rc == 28) ? "Cannot reach the server." : "Download failed.";
             snprintf(ma_msg, sizeof ma_msg, "%s (Code %d)", m, dl_rc); ma_msg_err = 1;
         }

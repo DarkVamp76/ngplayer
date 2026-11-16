@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <time.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -26,6 +27,22 @@ int net_cache_dir(char *out, size_t cap) {
 }
 
 volatile int net_cancel;
+
+void net_log(const char *fmt, ...) {
+#ifdef __EMSCRIPTEN__
+    (void)fmt;
+#else
+    char dir[900], path[1000], old[1010], msg[400];
+    if (net_cache_dir(dir, sizeof dir)) return;
+    snprintf(path, sizeof path, "%s/ngplayer.log", dir);
+    struct stat sb;
+    if (!stat(path, &sb) && sb.st_size > 65536) { snprintf(old, sizeof old, "%s.old", path); rename(path, old); }
+    va_list ap; va_start(ap, fmt); vsnprintf(msg, sizeof msg, fmt, ap); va_end(ap);
+    FILE *f = fopen(path, "a"); if (!f) return;
+    time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm); char ts[32]; strftime(ts, sizeof ts, "%Y-%m-%d %H:%M:%S", &tm);
+    fprintf(f, "%s %s\n", ts, msg); fclose(f);
+#endif
+}
 
 #ifdef __EMSCRIPTEN__
 /* Web-Version: kein Hilfsprozess curl */
