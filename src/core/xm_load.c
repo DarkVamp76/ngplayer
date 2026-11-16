@@ -1,5 +1,6 @@
 /* XM-Loader (Format-ID 4 wie im Original, Detect 0x7a2a / Loader 0x8810). GPL-3.0-or-later */
 #include "core.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -64,6 +65,7 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
     /* Instrumente */
     s->inst = calloc(nins + 1, sizeof(XInst));
     s->xsmp = calloc(nins * 16 + 1, sizeof(XSmp));
+    int nm0 = 0, nm32 = 0;                     /* sample names padded with 0 (ModPlug) or with spaces (FastTracker 2) */
     for (unsigned i = 1; i <= nins; i++) {
         if (o + 29 > n) break;
         unsigned ihs = rd32(b + o), ns = rd16(b + o + 27);
@@ -86,6 +88,7 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
                 if (sh + (size_t)(k + 1) * shs > n) break;
                 uint32_t len = rd32(h), ls = rd32(h + 4), ll = rd32(h + 8);
                 int type = h[14];
+                if (h[39] == 0) nm0++; else if (h[39] == ' ') nm32++;
                 m->vol = h[12]; m->finetune = (int8_t)h[13]; m->pan = h[15]; m->relnote = (int8_t)h[16];
                 m->is16 = (type & 16) != 0;
                 m->loop = (type & 3) != 0; m->pingpong = (type & 3) == 2;
@@ -107,5 +110,10 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
             o = dat;
         } else o += ihs;
     }
+    /* ModPlug Tracker 1.0 - 1.16 writes "FastTracker v2.00" like FT2 itself, but pads the sample names with 0 instead of spaces (libopenmpt tells them apart
+     * this way and mixes them with its older, quieter levels). Gain relative to our FT2 mix level, measured on 3 files (4, 6 and 20 channels: 0.485, 0.415, 0.275):
+     * 0.485 * (4 / channels) ^ 0.353. The "v 2.00" variant (ModPlug alpha) follows the same law. */
+    if (!s->mixgain && !memcmp(b + 38, "FastTracker v2.00   ", 20) && nm0 > 0 && nm32 == 0) s->mixgain = 0.485 * pow(4.0 / (nch ? nch : 1), 0.353);
+    else if (s->mixgain > 0) s->mixgain = 0.485 * pow(4.0 / (nch ? nch : 1), 0.353);
     return 0;
 }
