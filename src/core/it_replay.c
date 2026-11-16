@@ -815,7 +815,7 @@ ITPlayer *itp_new(const ITSong *s, int rate){
     ITPlayer *p = calloc(1, sizeof *p); p->s = s; p->rate = rate;
     g_it200 = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217 || s->cwt == 0x888)); g_linear = (s->flags & 8) != 0;
     /* Schism Tracker: libopenmpt setzt kPeriodsAreHertz zurueck bei Datum < 2015-01-29 (1916 Tage nach 2009-10-31), und bei Datum < 2021-05-02 (4201) ohne Linear-Slides */
-    g_tabfreq = g_it200 || (s->schism_days >= 0 && (s->schism_days < 1916 || (s->schism_days < 4201 && !g_linear))); g_swapcancel = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217)) || s->cwt == 0x888 || s->cwt >= 0x1000; p->speed = s->speed; p->tempo = s->tempo; p->gvol = s->gv;
+    g_tabfreq = g_it200 || (s->cmwt == 0x202 && s->cwt == 0x214) || (s->schism_days >= 0 && (s->schism_days < 1916 || (s->schism_days < 4201 && !g_linear))); g_swapcancel = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217)) || s->cwt == 0x888 || s->cwt >= 0x1000; p->speed = s->speed; p->tempo = s->tempo; p->gvol = s->gv;
     p->tick_count = 1; p->row_count = 0; p->process_row = NEXT_ORDER; p->process_order = -1; p->break_row = 0;
     p->visited = calloc((size_t)(s->nord + 1) * 256, 1);
     p->K = 1.0 / 65536.0;     /* gegen libopenmpt kalibriert (Faktor 4 gegenueber Schism-Skalierung) */
@@ -823,6 +823,8 @@ ITPlayer *itp_new(const ITSong *s, int rate){
      * Measured on 5 files (12-18 channels, mix volume 53..100): factor 0.38-0.47, no clear dependence on channels or mix volume
      * (a 1/channels law fitted 4 files but missed the 5th by 23 %), so a constant is used. */
     if (s->cwt == 0x217 && s->cmwt == 0x200) p->K *= 0.42;
+    /* ModPlug Tracker b3.2 .. 1.09 (cwtv 0x214, cmwt 0x202): same older mix levels. Measured on one file (9 channels, mix volume 65): factor 0.515. */
+    if (s->cwt == 0x214 && s->cmwt == 0x202) p->K *= 0.515;
     { const char *e = getenv("ITGAIN"); if (e) p->K *= atof(e); }
     for (int i = 0; i < 64; i++) {
         V *c = &p->ch[i];
