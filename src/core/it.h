@@ -35,6 +35,7 @@ typedef struct {
     int flags;                 /* 1 Stereo, 4 Instrumente, 8 linear, 16 alte Effekte, 32 Gxx-Link */
     int cwt, cmwt;
     int gv, mv, speed, tempo, sep, pwd;
+    unsigned rsv;      /* header bytes 0x3C..0x3F: 0 in ModPlug files, a value in Impulse Tracker 2.14p4/p5 files (same cwtv/cmwt) */
     int schism_days;   /* Schism Tracker: Tage seit 2009-10-31 (aus cwt bzw. Header-Feld), sonst -1 */
     uint8_t chpan[64], chvol[64];
     uint8_t orders[256];
