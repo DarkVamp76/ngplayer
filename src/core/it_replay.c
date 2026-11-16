@@ -816,7 +816,7 @@ ITPlayer *itp_new(const ITSong *s, int rate){
     g_it200 = (s->cmwt == 0x200 && (s->cwt == 0x888 || ((s->cwt == 0x214 || s->cwt == 0x217) && s->rsv == 0)));   /* rsv != 0: real Impulse Tracker 2.14p4/p5, plain IT behaviour */ g_linear = (s->flags & 8) != 0;
     /* OpenMPT up to 1.28 (cwtv 0x5000..0x5128): table based periods too (measured: 0x5122, 0x5123, 0x5128 correlate much better with the table, 0x5130 and 0x5131 with the exact formula; 0x5129 not measured) */
     /* Schism Tracker: libopenmpt setzt kPeriodsAreHertz zurueck bei Datum < 2015-01-29 (1916 Tage nach 2009-10-31), und bei Datum < 2021-05-02 (4201) ohne Linear-Slides */
-    g_tabfreq = g_it200 || (s->cmwt == 0x202 && s->cwt == 0x214) || (s->cwt >= 0x5000 && s->cwt < 0x5129) || (s->schism_days >= 0 && (s->schism_days < 1916 || (s->schism_days < 4201 && !g_linear))); g_swapcancel = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217)) || s->cwt == 0x888 || s->cwt >= 0x1000; p->speed = s->speed; p->tempo = s->tempo; p->gvol = s->gv;
+    g_tabfreq = g_it200 || (s->cmwt == 0x202 && s->cwt == 0x214) || (s->cwt == 0x888 && s->cmwt == 0x888) || (s->cwt >= 0x5000 && s->cwt < 0x5129) || (s->schism_days >= 0 && (s->schism_days < 1916 || (s->schism_days < 4201 && !g_linear))); g_swapcancel = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217)) || s->cwt == 0x888 || s->cwt >= 0x1000; p->speed = s->speed; p->tempo = s->tempo; p->gvol = s->gv;
     p->tick_count = 1; p->row_count = 0; p->process_row = NEXT_ORDER; p->process_order = -1; p->break_row = 0;
     p->visited = calloc((size_t)(s->nord + 1) * 1024, 1);
     p->K = 1.0 / 65536.0;     /* gegen libopenmpt kalibriert (Faktor 4 gegenueber Schism-Skalierung) */
@@ -829,6 +829,9 @@ ITPlayer *itp_new(const ITSong *s, int rate){
         int nch = s->nch > 0 ? s->nch : 1, mvv = s->mv > 0 ? s->mv : 1;
         p->K *= 2.927 * pow(nch, -0.4925) * pow(mvv, -0.1522);
     }
+    /* IT files from OpenMPT 1.18 (cwtv 0x888 / cmwt 0x888): libopenmpt mixes them louder than the current OpenMPT levels (measured on one file, 10 channels,
+     * mix volume 128: factor 1.62, RMS ratio 0.62 -> 1.00); the table periods are switched on above (correlation 0.77 -> 0.95). */
+    if (s->cwt == 0x888 && s->cmwt == 0x888) p->K *= 1.62;
     { const char *e = getenv("ITGAIN"); if (e) p->K *= atof(e); }
     for (int i = 0; i < 64; i++) {
         V *c = &p->ch[i];
