@@ -16,6 +16,17 @@ if [ -z "$LINUXDEPLOY" ]; then
     chmod +x "$LINUXDEPLOY"
 fi
 
+# Where SDL2 is the sdl2-compat shim (e.g. Arch / CachyOS), it loads SDL3 at run time: bundle that library too, otherwise the AppImage
+# does not start on systems without SDL3.
+EXTRA_LIB=""
+SDL2LIB=$(ldd build/ngplayer | awk '/libSDL2/ {print $3; exit}')
+if [ -n "$SDL2LIB" ] && grep -q "missing in SDL3 library" "$SDL2LIB" 2>/dev/null; then
+    SDL3LIB=$(ldconfig -p | awk '/libSDL3\.so\.0 / {print $NF; exit}')
+    [ -n "$SDL3LIB" ] || { echo "SDL2 is sdl2-compat but libSDL3.so.0 was not found" >&2; exit 1; }
+    EXTRA_LIB="--library $SDL3LIB"
+    echo "sdl2-compat found, bundling $SDL3LIB"
+fi
+
 cp assets/ngplayer-256.png "$WORK/ngplayer.png"
 cp assets/ngplayer.svg "$WORK/ngplayer.svg"
 cd "$WORK"
@@ -25,6 +36,6 @@ export APPIMAGE_EXTRACT_AND_RUN=1
 "$LINUXDEPLOY" --appdir AppDir \
     --executable ../ngplayer \
     --desktop-file ../../packaging/ngplayer.desktop \
-    --icon-file ngplayer.png --icon-file ngplayer.svg \
+    --icon-file ngplayer.png --icon-file ngplayer.svg $EXTRA_LIB \
     --output appimage
 ls -la "$OUT"
