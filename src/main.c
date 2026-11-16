@@ -120,7 +120,7 @@ static entry *pl;
 static int npl, cur = -1;
 static float list_scroll;
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
-static int g_orb;                     /* 1 = Orb statt Pattern-Ansicht (Taste V / Button) */
+static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel flight (key V / button) */
 static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
 static int list_follow;
 static int g_pltab;                      /* playlist tab: 0 = FILES (local), 1 = MOD ARCHIVE (online) */
@@ -313,7 +313,7 @@ static void play_index_sub(int idx, int sub) {
     g_song = s;
     g_rendered = 0; g_lastord = g_lastrow = -1; g_resync = 1;
     if (g_dev) SDL_UnlockAudioDevice(g_dev);
-    if (g_portrait && g_mobile && song_channels(s) > 8) g_orb = 1;      /* phone, portrait, more than 8 voices: Orb view (scopes are too heavy) */
+    if (g_portrait && g_mobile && song_channels(s) > 8) g_vmode = 1;      /* phone, portrait, more than 8 voices: Orb view (scopes are too heavy) */
     view_reset = 1;
     g_open_sub = s ? song_subsong(s) : 0;
 #ifdef __EMSCRIPTEN__
@@ -451,16 +451,17 @@ static void mmss(char *buf, size_t cap, double sec) { int s = (int)sec; snprintf
 static float glow_l, glow_r;
 static double g_dt;
 static void draw_pattern(float x, float y, float w, float h);
+static void draw_voxel(float x, float y, float w, float h);
 /* Umschalter Pattern | Orb oben in der Karte (auch per Touch/Klick) */
 static void view_switch(float x, float y, float w) {
-    float cw = 62, bx = g_portrait ? x + w - 14 - 2 * cw + 4 : x + w / 2 - cw, by = y + 8;
-    for (int i = 0; i < 2; i++) {
+    float cw = 62, bx = g_portrait ? x + w - 14 - 3 * cw + 4 : x + w / 2 - 1.5f * cw, by = y + 8;
+    static const char *const NAME[3] = { "PATTERN", "ORB", "VOXEL" };
+    for (int i = 0; i < 3; i++) {
         float xx = bx + i * cw;
-        int on = (i == 1) == (g_orb != 0), hv = hit(xx, by, cw - 4, 20);
+        int on = (i == g_vmode), hv = hit(xx, by, cw - 4, 20);
         rrect(xx, by, cw - 4, 20, 6, on ? alpha(VC[2], 0.25f) : alpha(FAINT, hv ? 0.30f : 0.16f));
-        const char *l = i ? "ORB" : "PATTERN";
-        text(xx + (cw - 4 - text_width(l, 11)) / 2, by + 4, 11, on ? VC[2] : alpha(DIM, 0.9f), l);
-        if (clicked(xx, by, cw - 4, 20)) { g_orb = i; click = 0; }
+        text(xx + (cw - 4 - text_width(NAME[i], 11)) / 2, by + 4, 11, on ? VC[2] : alpha(DIM, 0.9f), NAME[i]);
+        if (clicked(xx, by, cw - 4, 20)) { g_vmode = i; click = 0; }
     }
 }
 
@@ -919,6 +920,58 @@ static void draw_orb(float x, float y, float w, float h) {
         if (e > 0.12f) blob(sx[i], sy[i], 3.0f + 5.0f * e, alpha(c, 0.30f * e * (0.3f + 0.7f * d)));
     }
     set_additive(0);
+    view_switch(x, y, w);
+}
+
+/* ================================================================== Voxel spectrum
+ * The spectrum as 3D voxel columns in perspective: one long column per frequency band running from the front into the depth (to the horizon); the height
+ * is the current level of the band and the same along the whole depth. Same colours as the spectrum bars (VC[0] -> VC[1] -> VC[2]), light tops, fog in the
+ * distance. Drawn back to front (depth blocks), outer columns first, with front, top and inner side faces. */
+static float vx_lv[NBANDS];
+static void draw_voxel(float x, float y, float w, float h) {
+    float dt = (float)g_dt; if (dt > 0.1f) dt = 0.1f;
+    for (int b = 0; b < NBANDS; b++) {           /* mix neighbouring bands a little and smooth in time: calm columns */
+        float l = band[b > 0 ? b - 1 : b], r = band[b < NBANDS - 1 ? b + 1 : b];
+        float v = 0.6f * band[b] + 0.2f * (l + r);
+        vx_lv[b] += (v - vx_lv[b]) * (v > vx_lv[b] ? 0.75f : 0.22f);
+    }
+    card(x, y, w, h, 0);
+    text(x + 18, y + 10, 12, DIM, "VOXEL");
+    float ax = x + 12, ay = y + 34, aw = w - 24, ah = h - 46;
+    if (aw < 60 || ah < 60) { view_switch(x, y, w); return; }
+    const int NSEG = g_mobile ? 10 : 16;
+    const float Z0 = 12.0f, DZ = g_mobile ? 5.0f : 3.2f, CAMY = 17.0f, HMAX = 15.0f, CW = 1.0f;
+    float hor = ay + ah * 0.20f, cx = ax + aw * 0.5f, fx = aw * 0.178f, fy = ah * 0.55f;
+    col fogc = mix(BG1, VC[1], 0.20f);
+    rect_grad(ax, ay, aw, ah, mix(BG0, VC[0], 0.03f), mix(BG1, VC[1], 0.14f));       /* backdrop */
+    {   /* floor lines towards the vanishing point */
+        float zf = Z0 + NSEG * DZ;
+        for (int b = 0; b <= NBANDS; b += 8) {
+            float wx = (b - NBANDS / 2) * CW;
+            float xy[4] = { cx + wx / Z0 * fx, hor + CAMY / Z0 * fy, cx + wx / zf * fx, hor + CAMY / zf * fy };
+            polyline(xy, 2, 0.5f, 3.0f, alpha(FAINT, 0.18f));
+        }
+    }
+    for (int sg = NSEG - 1; sg >= 0; sg--) {
+        float zn = Z0 + sg * DZ, zf = zn + DZ * 0.88f;
+        float fgt = (float)sg / NSEG; fgt = fgt * fgt;
+        float sn = 1.0f / zn, sf = 1.0f / zf;
+        for (int m = 0; m < NBANDS; m++) {
+            int b = m < NBANDS / 2 ? m : NBANDS - 1 - (m - NBANDS / 2);               /* from the left edge inwards, then from the right edge inwards */
+            float hh = (vx_lv[b] < 0.02f ? 0.02f : vx_lv[b]) * HMAX, wx0 = (b - NBANDS / 2) * CW + 0.08f, wx1 = wx0 + CW * 0.84f;
+            float xn0 = cx + wx0 * sn * fx, xn1 = cx + wx1 * sn * fx, xf0 = cx + wx0 * sf * fx, xf1 = cx + wx1 * sf * fx;
+            float ybn = hor + CAMY * sn * fy, ytn = hor + (CAMY - hh) * sn * fy;
+            float ybf = hor + CAMY * sf * fy, ytf = hor + (CAMY - hh) * sf * fy;
+            float u = (float)b / (NBANDS - 1);
+            col lo = u < 0.5f ? mix(VC[0], VC[1], u * 2) : mix(VC[1], VC[2], (u - 0.5f) * 2);
+            float fg = fgt * 0.85f;
+            col topc = mix(mix(lo, C(1, 1, 1, 1), 0.35f), fogc, fg), frontc = mix(lo, fogc, fg), sidec = mix(mix(lo, BG0, 0.45f), fogc, fg);
+            if (b >= NBANDS / 2) { tri(xn0, ybn, xn0, ytn, xf0, ytf, sidec); tri(xn0, ybn, xf0, ytf, xf0, ybf, sidec); }
+            else                 { tri(xn1, ybn, xn1, ytn, xf1, ytf, sidec); tri(xn1, ybn, xf1, ytf, xf1, ybf, sidec); }
+            if (sg == 0) rect_grad(xn0, ytn, xn1 - xn0, ybn - ytn, mix(frontc, C(1, 1, 1, 1), 0.10f), alpha(frontc, 0.55f));   /* front face of the nearest block only */
+            tri(xn0, ytn, xn1, ytn, xf0, ytf, topc); tri(xn1, ytn, xf1, ytf, xf0, ytf, topc);
+        }
+    }
     view_switch(x, y, w);
 }
 
@@ -2025,7 +2078,8 @@ static void draw_ui(double t) {
     view_update();
     overview_update((float)g_dt);
     draw_overview(ax, cy0, aw, oh);
-    if (g_orb) draw_orb(ax, cy0 + oh + M, aw, avail - oh - M);
+    if (g_vmode == 1) draw_orb(ax, cy0 + oh + M, aw, avail - oh - M);
+    else if (g_vmode == 2) draw_voxel(ax, cy0 + oh + M, aw, avail - oh - M);
     else draw_pattern(ax, cy0 + oh + M, aw, avail - oh - M);
     if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "PTM") || !strcmp(song_format(g_song), "ULT") || !strcmp(song_format(g_song), "669") || !strcmp(song_format(g_song), "MED") || !strcmp(song_format(g_song), "PSM") || !strcmp(song_format(g_song), "IT"));
     float vuw = 300, spw = aw - vuw - M;
@@ -2062,9 +2116,9 @@ static void draw_ui(double t) {
         {
             char l1[160] = "Space pause  \xb7  Left/Right seek (subsong)  \xb7  Up/Down track  \xb7  Shift+arrows channels", l2[160];
 #ifdef __EMSCRIPTEN__
-            snprintf(l2, sizeof l2, "O Mod Archive  \xb7  V orb  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms", g_lag_ms);
+            snprintf(l2, sizeof l2, "O Mod Archive  \xb7  V view  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms", g_lag_ms);
 #else
-            snprintf(l2, sizeof l2, "O Mod Archive  \xb7  V orb  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms  \xb7  Esc quit", g_lag_ms);
+            snprintf(l2, sizeof l2, "O Mod Archive  \xb7  V view  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms  \xb7  Esc quit", g_lag_ms);
 #endif
             fit_text(l1, hmax, 12); fit_text(l2, hmax, 12);
             text(bx + 190, cy - 20, 12, FAINT, l1);
@@ -2256,7 +2310,8 @@ static void draw_ui_portrait(float W, float H) {
     } else {
         draw_overview(M, cy0, aw, oh);
         draw_seal(M + aw - 12, cy0 + 6, 21, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
-        if (g_orb) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
+        if (g_vmode == 1) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
+        else if (g_vmode == 2) draw_voxel(M, cy0 + oh + M, aw, avail - oh - M);
         else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
         draw_rand_chip(M + aw - 56, cy0 + oh + M + (avail - oh - M) - 34, 44);       /* RND in the lower right corner of the pattern / orb card */
         float vuw = 130, spw = aw - vuw - M;
@@ -2368,7 +2423,8 @@ static void settings_load(void) {
         int v;
         if (sscanf(line, "window_w=%d", &v) == 1 && v >= 360 && v <= 16384) g_win_w = v;
         else if (sscanf(line, "window_h=%d", &v) == 1 && v >= 480 && v <= 16384) g_win_h = v;
-        else if (sscanf(line, "orb=%d", &v) == 1) g_orb = v != 0;
+        else if (sscanf(line, "orb=%d", &v) == 1) g_vmode = v != 0;                  /* older settings files */
+        else if (sscanf(line, "view=%d", &v) == 1 && v >= 0 && v <= 2) g_vmode = v;
         else if (sscanf(line, "random=%d", &v) == 1) g_rand = v != 0;
         else if (sscanf(line, "window_x=%d", &v) == 1) g_win_x = v;
         else if (sscanf(line, "window_y=%d", &v) == 1) g_win_y = v;
@@ -2431,7 +2487,7 @@ static void settings_save(void) {
         SDL_GetWindowPosition(win, &px, &py);
         if ((px || py) && (px & 0xFFFF0000) != 0x2FFF0000 && (px & 0xFFFF0000) != 0x1FFF0000) { g_win_x = px; g_win_y = py; }      /* Wayland has no window position (SDL returns 0,0 or the "centered" flag): then keep the old value */
     }
-    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\norb=%d\nrandom=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_orb ? 1 : 0, g_rand ? 1 : 0);
+    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\nview=%d\nrandom=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_vmode, g_rand ? 1 : 0);
     fclose(f);
 }
 #endif
@@ -2813,7 +2869,7 @@ static void iter(void) {
                 if (ma_open) { ma_key(&e.key); break; }
                 switch (e.key.keysym.sym) {
                 case SDLK_o: ma_show(1); break;
-                case SDLK_v: g_orb = !g_orb; break;
+                case SDLK_v: g_vmode = (g_vmode + 1) % 3; break;
                 case SDLK_ESCAPE: running = 0; break;
                 case SDLK_SPACE: g_paused = !g_paused; break;
                 case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) > 0) play_index_sub(cur, song_subsong(g_song) - 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
@@ -3041,6 +3097,7 @@ int main(int argc, char **argv) {
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
     if (getenv("NGPLAYER_TEST_PLOPEN")) g_plopen = 1;        /* test hook: playlist overlay open (phone layout) */
+    if (getenv("NGPLAYER_TEST_VOXEL")) g_vmode = 2;               /* test hook: voxel flight view */
     if (getenv("NGPLAYER_TEST_DICE")) { dice_start(); if (getenv("NGPLAYER_TEST_DICE")[0] == '2') dice_stop_req = 1; }        /* test hook: the big dancing dice, as while a random module is fetched */
     SDL_AudioSpec want, have;
     SDL_zero(want);
