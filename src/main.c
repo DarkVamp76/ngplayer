@@ -1419,6 +1419,26 @@ static void seek_order(int target) {
  * A little 3D die at the bottom of the playlist. A click rolls it (it tumbles while the module is fetched) and it settles on a face. */
 static void ma_random(void);
 static int ma_busy(void);
+
+/* ---- Random mode (RND): at the end of the Mod Archive list "next" (button, key, lock screen) and the end of a song draw a new random
+ * module instead of wrapping around to the first entry. Remembered between runs. ---- */
+static int g_rand;
+static Uint32 rand_fail_t;                 /* a draw that failed: wait a few seconds before the next try (the song end would retry every frame) */
+static int last_of_group(int i) {
+    for (int j = i + 1; j < npl; j++) if ((pl[j].ma_id > 0) == (pl[i].ma_id > 0)) return 0;
+    return 1;
+}
+static void next_user(int d) {              /* next / previous as the user asks for it */
+    if (d > 0 && g_rand && cur >= 0 && cur < npl && pl[cur].ma_id > 0 && last_of_group(cur)) {
+        if (ma_busy()) { snprintf(toast_txt, sizeof toast_txt, "Still loading ..."); toast_t = 1.5f; }
+        else if (!rand_fail_t || SDL_GetTicks() - rand_fail_t > 5000) { snprintf(toast_txt, sizeof toast_txt, "Drawing a random module ..."); toast_t = 2.5f; ma_random(); }
+        return;
+    }
+    next_prev(d);
+}
+static void song_end_advance(void) {        /* song ended -> next entry (a new random one at the end of the list in random mode) */
+    if (g_ended && cur >= 0 && (npl > 1 || (g_rand && npl == 1 && pl[cur].ma_id > 0))) next_user(1);
+}
 static int dice_roll, dice_stop_req;         /* rolling / the module has arrived, stop as soon as the roll was long enough */
 static float dice_t, dice_since, dice_hop, dice_ang[3], dice_vel[3];
 
@@ -1435,14 +1455,10 @@ static void m3_rot(float m[3][3], int axis, float a) {
     int i = (axis + 1) % 3, j = (axis + 2) % 3;
     m[axis][axis] = 1; m[i][i] = c; m[i][j] = -s; m[j][i] = s; m[j][j] = c;
 }
-static void draw_dice(float cx, float cy, float s) {
-    static const float F[6][3][3] = {           /* face: normal, u, v (value 1..6, opposite faces add up to 7) */
-        { {0, 0, 1}, {1, 0, 0}, {0, 1, 0} },   { {1, 0, 0}, {0, 0, -1}, {0, 1, 0} },   { {0, 1, 0}, {1, 0, 0}, {0, 0, -1} },
-        { {0, -1, 0}, {1, 0, 0}, {0, 0, 1} },  { {-1, 0, 0}, {0, 0, 1}, {0, 1, 0} },   { {0, 0, -1}, {-1, 0, 0}, {0, 1, 0} } };
-    static const signed char PIP[6][6][2] = {
-        { {0, 0} }, { {-1, 1}, {1, -1} }, { {-1, 1}, {0, 0}, {1, -1} }, { {-1, -1}, {-1, 1}, {1, -1}, {1, 1} },
-        { {-1, -1}, {-1, 1}, {0, 0}, {1, -1}, {1, 1} }, { {-1, -1}, {-1, 0}, {-1, 1}, {1, -1}, {1, 0}, {1, 1} } };
-    static const int NPIP[6] = { 1, 2, 3, 4, 5, 6 };
+static unsigned g_fid, dice_fid = ~0u;      /* frame counter: the dice state advances once per frame, however often it is drawn */
+static void dice_step(void) {
+    if (dice_fid == g_fid) return;
+    dice_fid = g_fid;
     float dt = (float)g_dt > 0.1f ? 0.1f : (float)g_dt;
     dice_t += dt;
     if (dice_roll) {
@@ -1458,7 +1474,17 @@ static void draw_dice(float cx, float cy, float s) {
         }
     }
     dice_hop += ((dice_roll ? 1.0f : 0.0f) - dice_hop) * (dt * 8 > 1 ? 1 : dt * 8);
-    int hv = hit(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f);
+}
+static void dice_render(float cx, float cy, float s, int interactive) {
+    static const float F[6][3][3] = {           /* face: normal, u, v (value 1..6, opposite faces add up to 7) */
+        { {0, 0, 1}, {1, 0, 0}, {0, 1, 0} },   { {1, 0, 0}, {0, 0, -1}, {0, 1, 0} },   { {0, 1, 0}, {1, 0, 0}, {0, 0, -1} },
+        { {0, -1, 0}, {1, 0, 0}, {0, 0, 1} },  { {-1, 0, 0}, {0, 0, 1}, {0, 1, 0} },   { {0, 0, -1}, {-1, 0, 0}, {0, 1, 0} } };
+    static const signed char PIP[6][6][2] = {
+        { {0, 0} }, { {-1, 1}, {1, -1} }, { {-1, 1}, {0, 0}, {1, -1} }, { {-1, -1}, {-1, 1}, {1, -1}, {1, 1} },
+        { {-1, -1}, {-1, 1}, {0, 0}, {1, -1}, {1, 1} }, { {-1, -1}, {-1, 0}, {-1, 1}, {1, -1}, {1, 0}, {1, 1} } };
+    static const int NPIP[6] = { 1, 2, 3, 4, 5, 6 };
+    dice_step();
+    int hv = interactive ? hit(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f) : 0;
     float sc0 = s * (hv && !dice_roll ? 1.14f : 1.0f);
     float hop = dice_roll ? fabsf(sinf(dice_since * 9.0f)) * s * 0.9f * dice_hop : 0;
 
@@ -1508,7 +1534,45 @@ static void draw_dice(float cx, float cy, float s) {
         polyline(xy, 5, 0.9f, 3.0f, alpha(mix(VC[0], C(1, 1, 1, 1), 0.35f), 0.30f + 0.55f * fc[f].sh));
     }
     set_additive(0);
-    if (!ma_busy() && clicked(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f)) { ma_random(); click = 0; }
+    if (interactive && !ma_busy() && clicked(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f)) { ma_random(); click = 0; }
+}
+static void draw_dice(float cx, float cy, float s) { dice_render(cx, cy, s, 1); }
+
+/* While a random module is being fetched the dice dances over the whole screen, big: it flies a loop that covers the screen, tumbling and
+ * hopping, on a dimmed screen. It grows in when the roll starts and shrinks away when the module has arrived (it settles on a face). */
+static float dice_big;
+static void draw_dice_big(float W, float H) {
+    float dt = (float)g_dt > 0.1f ? 0.1f : (float)g_dt;
+    dice_big += ((dice_roll ? 1.0f : 0.0f) - dice_big) * (dt * 5 > 1 ? 1 : dt * 5);
+    if (dice_big < 0.02f) return;
+    dice_step();
+    float m = W < H ? W : H, s = 0.15f * m * dice_big, t = dice_t;
+    rect(0, 0, W, H, C(0.02f, 0.03f, 0.07f, 0.55f * dice_big));
+    float ax = W * 0.5f - s * 1.9f, ay = H * 0.5f - s * 2.2f;
+    if (ax < 0) ax = 0;
+    if (ay < 0) ay = 0;
+    float cx = W * 0.5f + ax * sinf(0.95f * t + 0.5f * sinf(0.37f * t)), cy = H * 0.5f + ay * sinf(1.35f * t + 1.0f);
+    dice_render(cx, cy, s, 0);
+}
+
+#ifdef __EMSCRIPTEN__
+EM_JS(int, web_rand_get, (void), { try { return localStorage.getItem('ngp.random') === '1' ? 1 : 0; } catch (e) { return 0; } });
+EM_JS(void, web_rand_set, (int v), { try { localStorage.setItem('ngp.random', v ? '1' : '0'); } catch (e) {} });
+#endif
+/* RND chip next to the dice: switches the random mode (see next_user) */
+static void draw_rand_chip(float x, float y, float w) {
+    const float h = 22;
+    int hv = hit(x, y, w, h);
+    rrect(x, y, w, h, 7, alpha(g_rand ? VC[0] : (hv ? VC[2] : EDGE), g_rand ? 0.32f : 0.30f));
+    text(x + (w - text_width("RND", 11)) / 2, y + 5.5f, 11, g_rand ? TXT : DIM, "RND");
+    if (clicked(x, y, w, h)) {
+        g_rand = !g_rand;
+#ifdef __EMSCRIPTEN__
+        web_rand_set(g_rand);
+#endif
+        snprintf(toast_txt, sizeof toast_txt, g_rand ? "Random mode on" : "Random mode off"); toast_t = 1.8f;
+        click = 0;
+    }
 }
 
 /* ---------------------------------------------------------------- The-Mod-Archive-Dialog (Download per ID oder Link) */
@@ -1573,7 +1637,7 @@ static void ma_poll(void) {
         SDL_WaitThread(dl_thr, NULL); dl_thr = NULL;
         if (dl_random) {
             dice_stop_req = 1;                                     /* the dice settles */
-            if (dl_state == 3) { snprintf(toast_txt, sizeof toast_txt, "Mod Archive did not answer"); toast_t = 3.0f; }
+            if (dl_state == 3) { snprintf(toast_txt, sizeof toast_txt, "Mod Archive did not answer"); toast_t = 3.0f; rand_fail_t = SDL_GetTicks(); }
             dl_random = 0;
         }
         if (dl_state == 2) {
@@ -1724,6 +1788,7 @@ static void draw_ui(double t) {
         }
         { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
         draw_dice(x + w - 44, y + h - 33, 12.5f);
+        draw_rand_chip(x + w - 104, y + h - 44, 38);
         if (npl && !nvis) text(x + 18, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
         if (!npl) {
             text(x + 18, y + 60, 14, DIM, "No files.");
@@ -1839,8 +1904,8 @@ static void draw_ui(double t) {
                 else { rect(ccx - 7, ccy - 8, 5, 16, ic); rect(ccx + 2, ccy - 8, 5, 16, ic); }
             } else { tri(ccx - 6, ccy - 8, ccx - 6, ccy + 8, ccx + 6, ccy, ic); rect(ccx + 6, ccy - 8, 3, 16, ic); }
             if (clicked(x, cy - r, 2 * r, 2 * r)) {
-                if (i == 0) next_prev(-1);
-                else if (i == 2) next_prev(1);
+                if (i == 0) next_user(-1);
+                else if (i == 2) next_user(1);
                 else if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); }
                 else g_paused = !g_paused;
                 click = 0;
@@ -2047,6 +2112,7 @@ static void draw_ui_portrait(float W, float H) {
         draw_seal(M + aw - 12, cy0 + 6, 21, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
         if (g_orb) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
         else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
+        draw_rand_chip(M + aw - 56, cy0 + oh + M + (avail - oh - M) - 34, 44);       /* RND in the lower right corner of the pattern / orb card */
         float vuw = 130, spw = aw - vuw - M;
         if (!nosp) { draw_spectrum(M, sy, spw, sh); draw_level(M + spw + M, sy, vuw, sh); }
     }
@@ -2069,8 +2135,8 @@ static void draw_ui_portrait(float W, float H) {
                 else { rect(ccx - 7, ccy - 8, 5, 16, ic); rect(ccx + 2, ccy - 8, 5, 16, ic); }
             } else { tri(ccx - 6, ccy - 8, ccx - 6, ccy + 8, ccx + 6, ccy, ic); rect(ccx + 6, ccy - 8, 3, 16, ic); }
             if (clicked(x, cy - r, 2 * r, 2 * r)) {
-                if (i == 0) next_prev(-1);
-                else if (i == 2) next_prev(1);
+                if (i == 0) next_user(-1);
+                else if (i == 2) next_user(1);
                 else if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); }
                 else g_paused = !g_paused;
                 click = 0;
@@ -2083,8 +2149,8 @@ static void draw_ui_portrait(float W, float H) {
             text(lx + (lw - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
             if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; click = 0; }
         }
-        draw_dice(bx + 262, cy, 9.5f);            /* random dice (portrait: between LIST and the volume slider) */
-        float vx = bx + 296, vw = bw - 296 - 22;
+        draw_dice(bx + 266, cy, 13.0f);           /* random dice (portrait: between LIST and the volume slider), big enough for a finger */
+        float vx = bx + 306, vw = bw - 306 - 22;
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
         rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
         float kx = vx + 3 + (vw - 6) * g_vol;
@@ -2157,6 +2223,7 @@ static void settings_load(void) {
         if (sscanf(line, "window_w=%d", &v) == 1 && v >= 360 && v <= 16384) g_win_w = v;
         else if (sscanf(line, "window_h=%d", &v) == 1 && v >= 480 && v <= 16384) g_win_h = v;
         else if (sscanf(line, "orb=%d", &v) == 1) g_orb = v != 0;
+        else if (sscanf(line, "random=%d", &v) == 1) g_rand = v != 0;
         else if (sscanf(line, "window_x=%d", &v) == 1) g_win_x = v;
         else if (sscanf(line, "window_y=%d", &v) == 1) g_win_y = v;
     }
@@ -2218,7 +2285,7 @@ static void settings_save(void) {
         SDL_GetWindowPosition(win, &px, &py);
         if ((px || py) && (px & 0xFFFF0000) != 0x2FFF0000 && (px & 0xFFFF0000) != 0x1FFF0000) { g_win_x = px; g_win_y = py; }      /* Wayland has no window position (SDL returns 0,0 or the "centered" flag): then keep the old value */
     }
-    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\norb=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_orb ? 1 : 0);
+    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\norb=%d\nrandom=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_orb ? 1 : 0, g_rand ? 1 : 0);
     fclose(f);
 }
 #endif
@@ -2339,6 +2406,10 @@ EM_JS(void, web_media_setup, (void), {
     var a = new Audio(URL.createObjectURL(new Blob([b], { type: 'audio/wav' })));
     a.loop = true;
     Module.ngMediaEl = a;
+    /* Heartbeat for the locked screen: the browser stops requestAnimationFrame and throttles timers, but the media element keeps playing and
+     * keeps firing timeupdate (a few times per second). Each one lets the app finish a download, move on at the end of a song and refresh the
+     * lock screen (ng_web_media 4). */
+    a.addEventListener('timeupdate', function () { Module._ng_web_media(4); });
     Module.ngLoopUrl = a.src;
     /* when the page goes to the background (screen lock) put the element where the song is now */
     var park = function () {
@@ -2473,13 +2544,23 @@ static void media_sync(void) {
         if (changed || g_len_s != ps_len || rate != ps_rate || jump || tn - ps_t > 15000) media_push_position();
     }
 }
-/* Commands from the lock screen: 0 play, 1 pause, 2 next, 3 previous */
+/* Commands from the lock screen: 0 play, 1 pause, 2 next, 3 previous; 4 = heartbeat from the silent audio element */
 EMSCRIPTEN_KEEPALIVE void ng_web_media(int cmd) {
     if (cmd == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; }
     else if (cmd == 1) g_paused = 1;
-    else if (cmd == 2) next_prev(1);
-    else if (cmd == 3) next_prev(-1);
+    else if (cmd == 2) next_user(1);
+    else if (cmd == 3) next_user(-1);
+    else if (cmd == 4) { ma_poll(); if (!shot) song_end_advance(); }      /* heartbeat, see web_media_setup */
     media_sync();
+}
+/* Timer that runs even while the screen is locked (iOS stops requestAnimationFrame, so iter() does not run): finishes a download (a new
+ * random module), moves on when a song has ended and keeps the lock screen in sync. */
+static void bg_tick(void *arg) {
+    (void)arg;
+    ma_poll();
+    if (!shot) song_end_advance();
+    media_sync();
+    emscripten_async_call(bg_tick, NULL, 400);
 }
 #endif
 
@@ -2591,8 +2672,8 @@ static void iter(void) {
                 case SDLK_SPACE: g_paused = !g_paused; break;
                 case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) > 0) play_index_sub(cur, song_subsong(g_song) - 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
                 case SDLK_RIGHT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0++; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) + 1 < song_subsongs(g_song)) play_index_sub(cur, song_subsong(g_song) + 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) + 1); break;
-                case SDLK_UP: next_prev(-1); break;
-                case SDLK_DOWN: next_prev(1); break;
+                case SDLK_UP: next_user(-1); break;
+                case SDLK_DOWN: next_user(1); break;
                 case SDLK_r: if (cur >= 0) play_index_sub(cur, g_open_sub); break;
                 case SDLK_F5: g_lag_ms -= 5; if (g_lag_ms < 0) g_lag_ms = 0; break;
                 case SDLK_F6: g_lag_ms += 5; if (g_lag_ms > 300) g_lag_ms = 300; break;
@@ -2660,10 +2741,11 @@ static void iter(void) {
         tlast = now;
         if (dt > 0.1) dt = 0.1;
         g_dt = dt;
+        g_fid++;
         analyse((float)dt);
 
         /* Songende -> naechster Titel */
-        if (g_ended && npl > 1 && cur >= 0 && !shot) next_prev(1);
+        if (!shot) song_end_advance();
 
         glViewport(0, 0, dw, dh);
         glClearColor(BG0.r, BG0.g, BG0.b, 1);
@@ -2677,6 +2759,7 @@ static void iter(void) {
         ma_poll();
         draw_ui((double)(now - t0) / freq);
         draw_ma_dialog((double)(now - t0) / freq);
+        draw_dice_big(view_w, view_h);
         draw_ctx_menu();
         set_additive(0);
         flush();
@@ -2807,9 +2890,12 @@ int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
     g_mobile = EM_ASM_INT({ return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 1 : 0; });
     web_media_setup();
+    g_rand = web_rand_get();
+    emscripten_async_call(bg_tick, NULL, 400);
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
     if (getenv("NGPLAYER_TEST_PLOPEN")) g_plopen = 1;        /* test hook: playlist overlay open (phone layout) */
+    if (getenv("NGPLAYER_TEST_DICE")) dice_start();        /* test hook: the big dancing dice, as while a random module is fetched */
     SDL_AudioSpec want, have;
     SDL_zero(want);
     want.freq = g_rate; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = AUDIO_SAMPLES; want.callback = audio_cb;
