@@ -72,13 +72,16 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
         XInst *I = &s->inst[i];
         if (ihs < 29) ihs = 29;
         if (ns > 16) ns = 16;
-        if (ns && ihs >= 243 && o + 243 <= n) {
-            unsigned shs = rd32(b + o + 29);
-            memcpy(I->keymap, b + o + 33, 96);
-            load_env(&I->venv, b + o + 129, b[o + 225], b[o + 227], b[o + 228], b[o + 229], b[o + 233]);
-            load_env(&I->penv, b + o + 177, b[o + 226], b[o + 230], b[o + 231], b[o + 232], b[o + 234]);
-            I->vibtype = b[o + 235]; I->vibsweep = b[o + 236]; I->vibdepth = b[o + 237]; I->vibrate = b[o + 238];
-            I->fadeout = rd16(b + o + 239);
+        if (ns && ihs >= 33 && o + 33 <= n) {
+            /* The instrument header can be shorter than 263 bytes (CelestialComposer writes 38): the missing fields count as zero, the sample headers still follow
+             * at o + ihs (libopenmpt reads such instruments the same way). */
+            uint8_t ib[263] = {0}; { size_t cp = ihs < 263 ? ihs : 263; if (cp > n - o) cp = n - o; memcpy(ib, b + o, cp); }
+            unsigned shs = rd32(ib + 29);
+            memcpy(I->keymap, ib + 33, 96);
+            load_env(&I->venv, ib + 129, ib[225], ib[227], ib[228], ib[229], ib[233]);
+            load_env(&I->penv, ib + 177, ib[226], ib[230], ib[231], ib[232], ib[234]);
+            I->vibtype = ib[235]; I->vibsweep = ib[236]; I->vibdepth = ib[237]; I->vibrate = ib[238];
+            I->fadeout = rd16(ib + 239);
             if (shs < 18) shs = 40;
             size_t sh = o + ihs, dat = sh + (size_t)ns * shs;
             I->nsmp = ns;
