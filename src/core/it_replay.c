@@ -820,12 +820,15 @@ ITPlayer *itp_new(const ITSong *s, int rate){
     p->tick_count = 1; p->row_count = 0; p->process_row = NEXT_ORDER; p->process_order = -1; p->break_row = 0;
     p->visited = calloc((size_t)(s->nord + 1) * 1024, 1);
     p->K = 1.0 / 65536.0;     /* gegen libopenmpt kalibriert (Faktor 4 gegenueber Schism-Skalierung) */
-    /* Files saved by ModPlug Tracker 1.17/1.18 (cwtv 0x217, cmwt 0x200): libopenmpt mixes them with its older, quieter mix levels.
-     * Measured on 5 files (12-18 channels, mix volume 53..100): factor 0.38-0.47, no clear dependence on channels or mix volume
-     * (a 1/channels law fitted 4 files but missed the 5th by 23 %), so a constant is used. */
-    if (s->cwt == 0x217 && s->cmwt == 0x200 && s->rsv == 0) p->K *= 0.42;   /* with a value in the reserved header field it is Impulse Tracker 2.14p4/p5 (libopenmpt tells them apart the same way) */
-    /* ModPlug Tracker b3.2 .. 1.09 (cwtv 0x214, cmwt 0x202): same older mix levels. Measured on one file (9 channels, mix volume 65): factor 0.515. */
-    if (s->cwt == 0x214 && s->cmwt == 0x202) p->K *= 0.515;
+    /* Files saved by ModPlug Tracker (1.09-1.18: cwtv 0x217 / cmwt 0x200 without a value in the reserved header field, and b3.2-1.09: 0x214 / 0x202):
+     * libopenmpt mixes them with its older, quieter levels. The gain depends on the channel count and a little on the mix volume. Fitted on 6 files of the
+     * first class (8..18 channels, mix volume 32..100, max error 7 %: factor 0.375..0.630; a constant 0.42 was off by up to 33 %):
+     *     factor = 2.927 * channels^-0.4925 * mv^-0.1522
+     * The second class (one file, 9 channels, mv 65, measured 0.515) was not part of the fit; the law predicts 0.526 for it. */
+    if ((s->cwt == 0x217 && s->cmwt == 0x200 && s->rsv == 0) || (s->cwt == 0x214 && s->cmwt == 0x202)) {
+        int nch = s->nch > 0 ? s->nch : 1, mvv = s->mv > 0 ? s->mv : 1;
+        p->K *= 2.927 * pow(nch, -0.4925) * pow(mvv, -0.1522);
+    }
     { const char *e = getenv("ITGAIN"); if (e) p->K *= atof(e); }
     for (int i = 0; i < 64; i++) {
         V *c = &p->ch[i];
