@@ -1440,14 +1440,16 @@ static void song_end_advance(void) {        /* song ended -> next entry (a new r
     if (g_ended && cur >= 0 && (npl > 1 || (g_rand && npl == 1 && pl[cur].ma_id > 0))) next_user(1);
 }
 static int dice_roll, dice_stop_req;         /* rolling / the module has arrived, stop as soon as the roll was long enough */
-static float dice_t, dice_since, dice_hop, dice_ang[3], dice_vel[3];
+static float dice_t, dice_since, dice_hop, dice_w[3], dice_Rm[3][3] = { {1, 0, 0}, {0, 1, 0}, {0, 0, 1} };   /* orientation + angular velocity */
 
 static void dice_start(void) {
     dice_roll = 1; dice_stop_req = 0; dice_since = 0;
-    dice_vel[0] = 7.5f; dice_vel[1] = -9.5f; dice_vel[2] = 5.5f;
+    dice_w[0] = 7.5f; dice_w[1] = -9.5f; dice_w[2] = 5.5f;
 }
 static void m3_mul(float r[3][3], const float a[3][3], const float b[3][3]) {
-    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) r[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+    float t[3][3];
+    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) t[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+    memcpy(r, t, sizeof t);
 }
 static void m3_rot(float m[3][3], int axis, float a) {
     float c = cosf(a), s = sinf(a);
@@ -1455,83 +1457,201 @@ static void m3_rot(float m[3][3], int axis, float a) {
     int i = (axis + 1) % 3, j = (axis + 2) % 3;
     m[axis][axis] = 1; m[i][i] = c; m[i][j] = -s; m[j][i] = s; m[j][j] = c;
 }
+static void m3_axis(float m[3][3], const float ax[3], float a) {   /* rotation by a around the unit vector ax (Rodrigues) */
+    float c = cosf(a), s = sinf(a), t = 1 - c, x = ax[0], y = ax[1], z = ax[2];
+    float r[3][3] = { { t * x * x + c, t * x * y - s * z, t * x * z + s * y }, { t * x * y + s * z, t * y * y + c, t * y * z - s * x },
+                      { t * x * z - s * y, t * y * z + s * x, t * z * z + c } };
+    memcpy(m, r, sizeof r);
+}
+static void dice_view(float V[3][3]) {                     /* the slightly wobbling view tilt */
+    float V1[3][3], V2[3][3];
+    m3_rot(V1, 0, 0.45f + 0.05f * sinf(dice_t * 0.9f)); m3_rot(V2, 1, -0.55f + 0.10f * sinf(dice_t * 1.1f));
+    m3_mul(V, V1, V2);
+}
+
+/* ---- the die: an icosahedron (D20), flat shaded facets with a number on each face ---- */
+typedef struct { float v[12][3]; int tri[20][3]; float n[20][3], u[20][3], w[20][3]; int num[20]; } d20_t;
+static d20_t D20; static int d20_ready;
+static void d20_init(void) {
+    const float ph = 1.6180340f, nl = 1.0f / sqrtf(1 + ph * ph);
+    static const signed char B[12][3] = { {0, 1, 1}, {0, 1, -1}, {0, -1, 1}, {0, -1, -1}, {1, 1, 0}, {1, -1, 0}, {-1, 1, 0}, {-1, -1, 0}, {1, 0, 1}, {-1, 0, 1}, {1, 0, -1}, {-1, 0, -1} };
+    for (int i = 0; i < 12; i++) {           /* (0,±1,±φ) (±1,±φ,0) (±φ,0,±1) : the table cycles which coordinate carries φ */
+        float a = (float)B[i][0], b = (float)B[i][1], c = (float)B[i][2], x, y, z;
+        if (i < 4) { x = 0; y = b; z = c * ph; } else if (i < 8) { x = a; y = b * ph; z = 0; } else { x = a * ph; y = 0; z = c; }
+        D20.v[i][0] = x * nl; D20.v[i][1] = y * nl; D20.v[i][2] = z * nl;
+    }
+    int nf = 0;
+    float edge2 = 4.0f * nl * nl;
+    for (int a = 0; a < 12; a++) for (int b = a + 1; b < 12; b++) for (int c = b + 1; c < 12; c++) {
+        int p[3] = { a, b, c }; int ok = 1;
+        for (int e = 0; e < 3; e++) {
+            const float *P = D20.v[p[e]], *Q = D20.v[p[(e + 1) % 3]];
+            float dd = (P[0] - Q[0]) * (P[0] - Q[0]) + (P[1] - Q[1]) * (P[1] - Q[1]) + (P[2] - Q[2]) * (P[2] - Q[2]);
+            if (fabsf(dd - edge2) > 0.02f) ok = 0;
+        }
+        if (!ok || nf >= 20) continue;
+        D20.tri[nf][0] = a; D20.tri[nf][1] = b; D20.tri[nf][2] = c; nf++;
+    }
+    for (int f = 0; f < 20; f++) {
+        float g[3] = { 0, 0, 0 };
+        for (int k = 0; k < 3; k++) for (int e = 0; e < 3; e++) g[e] += D20.v[D20.tri[f][k]][e] / 3.0f;
+        float l = sqrtf(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+        for (int e = 0; e < 3; e++) D20.n[f][e] = g[e] / l;
+        const float *P = D20.v[D20.tri[f][0]];                    /* u: from the centre of the face to its first corner, v = n x u (so u x v = n) */
+        float u[3] = { P[0] - g[0], P[1] - g[1], P[2] - g[2] }, ul = sqrtf(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+        for (int e = 0; e < 3; e++) D20.u[f][e] = u[e] / ul;
+        const float *n = D20.n[f], *uu = D20.u[f];
+        D20.w[f][0] = n[1] * uu[2] - n[2] * uu[1]; D20.w[f][1] = n[2] * uu[0] - n[0] * uu[2]; D20.w[f][2] = n[0] * uu[1] - n[1] * uu[0];
+    }
+    for (int f = 0; f < 20; f++) D20.num[f] = 0;                  /* numbers 1..20, opposite faces add up to 21 */
+    int k = 1;
+    for (int f = 0; f < 20; f++) {
+        if (D20.num[f]) continue;
+        int o = -1; float best = 2;
+        for (int g = 0; g < 20; g++) { float d = D20.n[f][0] * D20.n[g][0] + D20.n[f][1] * D20.n[g][1] + D20.n[f][2] * D20.n[g][2]; if (d < best) { best = d; o = g; } }
+        D20.num[f] = k; D20.num[o] = 21 - k; k++;
+    }
+    d20_ready = 1;
+}
+/* digits as strokes on a 2 x 4 grid (y up): x y pairs, -1 starts the next stroke, -2 ends the glyph */
+static const signed char DG[10][30] = {
+    { 0, 0, 2, 0, 2, 4, 0, 4, 0, 0, -2 },
+    { 0, 3, 1, 4, 1, 0, -2 },
+    { 0, 4, 2, 4, 2, 2, 0, 2, 0, 0, 2, 0, -2 },
+    { 0, 4, 2, 4, 2, 0, 0, 0, -1, 0, 2, 2, 2, -2 },
+    { 0, 4, 0, 2, 2, 2, -1, 2, 4, 2, 0, -2 },
+    { 2, 4, 0, 4, 0, 2, 2, 2, 2, 0, 0, 0, -2 },
+    { 2, 4, 0, 4, 0, 0, 2, 0, 2, 2, 0, 2, -2 },
+    { 0, 4, 2, 4, 1, 0, -2 },
+    { 0, 0, 2, 0, 2, 4, 0, 4, 0, 0, -1, 0, 2, 2, 2, -2 },
+    { 2, 2, 0, 2, 0, 4, 2, 4, 2, 0, 0, 0, -2 } };
+/* a number written in the plane of a face: centre c, axes u (right) and v (up), height h (in model units) */
+static void d20_number(int num, const float P[3], const float U[3], const float W[3], float h, float sx, float cx, float py, float lw, col c, float depth) {
+    int dg[2], nd = 0;
+    if (num >= 10) dg[nd++] = num / 10;
+    dg[nd++] = num % 10;
+    float gw = h * 0.5f, gap = h * 0.22f, tot = nd * gw + (nd - 1) * gap, x0 = -tot * 0.5f;
+    for (int d = 0; d < nd; d++, x0 += gw + gap) {
+        const signed char *g = DG[dg[d]];
+        float xy[16]; int np = 0;
+        for (int i = 0;; i += 2) {
+            if (g[i] < 0) {
+                if (np > 1) polyline(xy, np, lw, 2.2f, c);
+                np = 0;
+                if (g[i] == -2) break;
+                i -= 1; continue;
+            }
+            float a = x0 + g[i] * 0.5f * gw, b = (g[i + 1] * 0.25f - 0.5f) * h;
+            float X = P[0] + a * U[0] + b * W[0], Y = P[1] + a * U[1] + b * W[1], Z = P[2] + a * U[2] + b * W[2];
+            float pz = 1.0f / (1.0f - 0.10f * Z);
+            xy[np * 2] = cx + X * sx * pz; xy[np * 2 + 1] = py - Y * sx * pz; np++;
+        }
+    }
+    (void)depth;
+}
 static unsigned g_fid, dice_fid = ~0u;      /* frame counter: the dice state advances once per frame, however often it is drawn */
 static void dice_step(void) {
     if (dice_fid == g_fid) return;
     dice_fid = g_fid;
+    if (!d20_ready) d20_init();
     float dt = (float)g_dt > 0.1f ? 0.1f : (float)g_dt;
     dice_t += dt;
+    float wl = sqrtf(dice_w[0] * dice_w[0] + dice_w[1] * dice_w[1] + dice_w[2] * dice_w[2]);
     if (dice_roll) {
         dice_since += dt;
-        for (int k = 0; k < 3; k++) dice_ang[k] += dice_vel[k] * dt;
         if (dice_stop_req && dice_since > 1.1f) dice_roll = 0;
     } else {
-        float damp = expf(-dt * 4.5f), q = 1.5707963f;
-        for (int k = 0; k < 3; k++) {
-            dice_vel[k] *= damp;
-            dice_ang[k] += dice_vel[k] * dt;
-            if (fabsf(dice_vel[k]) < 2.5f) dice_ang[k] += (roundf(dice_ang[k] / q) * q - dice_ang[k]) * (dt * 10 > 1 ? 1 : dt * 10);   /* come to rest on a face */
+        float damp = expf(-dt * 3.5f);
+        for (int k = 0; k < 3; k++) dice_w[k] *= damp;
+        wl *= damp;
+    }
+    if (wl > 1e-4f) {                                       /* tumble */
+        float ax[3] = { dice_w[0] / wl, dice_w[1] / wl, dice_w[2] / wl }, dR[3][3];
+        m3_axis(dR, ax, wl * dt); m3_mul(dice_Rm, dR, dice_Rm);
+    }
+    if (!dice_roll && wl < 3.0f) {                          /* come to rest with the best facing face turned to the viewer */
+        float V[3][3], tg[3], bn[3] = { 0, 0, 1 }, best = -2;
+        dice_view(V);
+        for (int k = 0; k < 3; k++) tg[k] = V[2][k];                      /* V^T * (0,0,1) = third row of V */
+        for (int f = 0; f < 20; f++) {
+            float c[3], d;
+            for (int k = 0; k < 3; k++) c[k] = dice_Rm[k][0] * D20.n[f][0] + dice_Rm[k][1] * D20.n[f][1] + dice_Rm[k][2] * D20.n[f][2];
+            d = c[0] * tg[0] + c[1] * tg[1] + c[2] * tg[2];
+            if (d > best) { best = d; bn[0] = c[0]; bn[1] = c[1]; bn[2] = c[2]; }
         }
+        float ax[3] = { bn[1] * tg[2] - bn[2] * tg[1], bn[2] * tg[0] - bn[0] * tg[2], bn[0] * tg[1] - bn[1] * tg[0] };
+        float al = sqrtf(ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]);
+        if (al > 1e-5f) {
+            float ang = atan2f(al, best), k = dt * 9 > 1 ? 1 : dt * 9, dR[3][3];
+            for (int e = 0; e < 3; e++) ax[e] /= al;
+            m3_axis(dR, ax, ang * k); m3_mul(dice_Rm, dR, dice_Rm);
+        }
+    }
+    {   /* keep the matrix orthonormal */
+        float *r0 = dice_Rm[0], *r1 = dice_Rm[1], *r2 = dice_Rm[2];
+        float l = sqrtf(r0[0] * r0[0] + r0[1] * r0[1] + r0[2] * r0[2]); for (int k = 0; k < 3; k++) r0[k] /= l;
+        float d = r0[0] * r1[0] + r0[1] * r1[1] + r0[2] * r1[2]; for (int k = 0; k < 3; k++) r1[k] -= d * r0[k];
+        l = sqrtf(r1[0] * r1[0] + r1[1] * r1[1] + r1[2] * r1[2]); for (int k = 0; k < 3; k++) r1[k] /= l;
+        r2[0] = r0[1] * r1[2] - r0[2] * r1[1]; r2[1] = r0[2] * r1[0] - r0[0] * r1[2]; r2[2] = r0[0] * r1[1] - r0[1] * r1[0];
     }
     dice_hop += ((dice_roll ? 1.0f : 0.0f) - dice_hop) * (dt * 8 > 1 ? 1 : dt * 8);
 }
 static void dice_render(float cx, float cy, float s, int interactive) {
-    static const float F[6][3][3] = {           /* face: normal, u, v (value 1..6, opposite faces add up to 7) */
-        { {0, 0, 1}, {1, 0, 0}, {0, 1, 0} },   { {1, 0, 0}, {0, 0, -1}, {0, 1, 0} },   { {0, 1, 0}, {1, 0, 0}, {0, 0, -1} },
-        { {0, -1, 0}, {1, 0, 0}, {0, 0, 1} },  { {-1, 0, 0}, {0, 0, 1}, {0, 1, 0} },   { {0, 0, -1}, {-1, 0, 0}, {0, 1, 0} } };
-    static const signed char PIP[6][6][2] = {
-        { {0, 0} }, { {-1, 1}, {1, -1} }, { {-1, 1}, {0, 0}, {1, -1} }, { {-1, -1}, {-1, 1}, {1, -1}, {1, 1} },
-        { {-1, -1}, {-1, 1}, {0, 0}, {1, -1}, {1, 1} }, { {-1, -1}, {-1, 0}, {-1, 1}, {1, -1}, {1, 0}, {1, 1} } };
-    static const int NPIP[6] = { 1, 2, 3, 4, 5, 6 };
     dice_step();
     int hv = interactive ? hit(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f) : 0;
-    float sc0 = s * (hv && !dice_roll ? 1.14f : 1.0f);
+    float sc0 = s * 1.32f * (hv && !dice_roll ? 1.14f : 1.0f);
     float hop = dice_roll ? fabsf(sinf(dice_since * 9.0f)) * s * 0.9f * dice_hop : 0;
 
-    float Rx[3][3], Ry[3][3], Rz[3][3], T1[3][3], T2[3][3], R[3][3], V1[3][3], V2[3][3], M[3][3];
-    m3_rot(Rz, 2, dice_ang[2]); m3_rot(Ry, 1, dice_ang[1]); m3_rot(Rx, 0, dice_ang[0]);
-    m3_mul(T1, Ry, Rz); m3_mul(R, Rx, T1);
-    m3_rot(V1, 0, 0.55f + 0.05f * sinf(dice_t * 0.9f)); m3_rot(V2, 1, -0.65f + 0.10f * sinf(dice_t * 1.1f));
-    m3_mul(T2, V1, V2); m3_mul(M, T2, R);
+    float V[3][3], M[3][3];
+    dice_view(V); m3_mul(M, V, dice_Rm);
 
     float py = cy - hop;
-    rrect(cx - sc0 * 1.15f, cy + s * 1.55f, sc0 * 2.3f, s * 0.38f, s * 0.19f, C(0, 0, 0, 0.30f * (1.0f - 0.45f * dice_hop)));   /* shadow */
-    struct { float x[4], y[4]; float nz, sh; int v; } fc[6];
+    rrect(cx - sc0 * 0.85f, cy + s * 1.55f, sc0 * 1.7f, s * 0.36f, s * 0.18f, C(0, 0, 0, 0.30f * (1.0f - 0.45f * dice_hop)));   /* shadow */
+    float PX[12][3];
+    for (int i = 0; i < 12; i++) for (int k = 0; k < 3; k++) PX[i][k] = M[k][0] * D20.v[i][0] + M[k][1] * D20.v[i][1] + M[k][2] * D20.v[i][2];
     const float lx = -0.40f, ly = 0.70f, lz = 0.59f;
-    for (int f = 0; f < 6; f++) {
-        float n[3], u[3], v[3];
+    float hx = lx, hy = ly, hz = lz + 1.0f, hl = sqrtf(hx * hx + hy * hy + hz * hz); hx /= hl; hy /= hl; hz /= hl;   /* highlight half vector */
+    struct { float x[3], y[3]; float sh; int v; } fc[20];
+    col gold = mix(VC[0], C(1.0f, 0.86f, 0.55f, 1), 0.70f);
+    for (int f = 0; f < 20; f++) {
+        float n[3], u[3], w[3];
         for (int k = 0; k < 3; k++) {
-            n[k] = M[k][0] * F[f][0][0] + M[k][1] * F[f][0][1] + M[k][2] * F[f][0][2];
-            u[k] = M[k][0] * F[f][1][0] + M[k][1] * F[f][1][1] + M[k][2] * F[f][1][2];
-            v[k] = M[k][0] * F[f][2][0] + M[k][1] * F[f][2][1] + M[k][2] * F[f][2][2];
+            n[k] = M[k][0] * D20.n[f][0] + M[k][1] * D20.n[f][1] + M[k][2] * D20.n[f][2];
+            u[k] = M[k][0] * D20.u[f][0] + M[k][1] * D20.u[f][1] + M[k][2] * D20.u[f][2];
+            w[k] = M[k][0] * D20.w[f][0] + M[k][1] * D20.w[f][1] + M[k][2] * D20.w[f][2];
         }
-        fc[f].nz = n[2]; fc[f].v = n[2] > 0.02f;
-        float dl = n[0] * lx + n[1] * ly + n[2] * lz;
-        fc[f].sh = 0.30f + 0.70f * (dl > 0 ? dl : 0);
+        fc[f].v = n[2] > 0.02f;
         if (!fc[f].v) continue;
-        static const signed char CS[4][2] = { {-1, 1}, {1, 1}, {1, -1}, {-1, -1} };
-        for (int c = 0; c < 4; c++) {
-            float X = n[0] + CS[c][0] * u[0] + CS[c][1] * v[0], Y = n[1] + CS[c][0] * u[1] + CS[c][1] * v[1], Z = n[2] + CS[c][0] * u[2] + CS[c][1] * v[2];
-            float pz = 1.0f / (1.0f - 0.10f * Z);
-            fc[f].x[c] = cx + X * sc0 * pz; fc[f].y[c] = py - Y * sc0 * pz;
+        float dl = n[0] * lx + n[1] * ly + n[2] * lz, nh = n[0] * hx + n[1] * hy + n[2] * hz;
+        float sh = 0.28f + 0.72f * (dl > 0 ? dl : 0), spec = nh > 0 ? powf(nh, 26.0f) : 0;
+        fc[f].sh = sh;
+        for (int c = 0; c < 3; c++) {
+            float pz = 1.0f / (1.0f - 0.10f * PX[D20.tri[f][c]][2]);
+            fc[f].x[c] = cx + PX[D20.tri[f][c]][0] * sc0 * pz; fc[f].y[c] = py - PX[D20.tri[f][c]][1] * sc0 * pz;
         }
-        col body = mix(C(0.06f, 0.08f, 0.16f, 0.97f), mix(C(0.20f, 0.27f, 0.46f, 0.97f), VC[0], 0.22f), fc[f].sh);
+        col body = mix(C(0.05f, 0.06f, 0.15f, 0.98f), mix(C(0.22f, 0.20f, 0.52f, 0.98f), VC[0], 0.25f), sh);
+        body = mix(body, C(1, 1, 1, 0.98f), spec * 0.55f);
         tri(fc[f].x[0], fc[f].y[0], fc[f].x[1], fc[f].y[1], fc[f].x[2], fc[f].y[2], body);
-        tri(fc[f].x[0], fc[f].y[0], fc[f].x[2], fc[f].y[2], fc[f].x[3], fc[f].y[3], body);
-        col pc = mix(VC[0], C(1, 1, 1, 1), 0.75f);
-        for (int p = 0; p < NPIP[f]; p++) {
-            float gx = PIP[f][p][0] * 0.55f, gy = PIP[f][p][1] * 0.55f;
-            float X = n[0] + gx * u[0] + gy * v[0], Y = n[1] + gx * u[1] + gy * v[1], Z = n[2] + gx * u[2] + gy * v[2];
-            float pz = 1.0f / (1.0f - 0.10f * Z), r = sc0 * pz * 0.17f * (0.45f + 0.55f * n[2]);
-            rrect(cx + X * sc0 * pz - r, py - Y * sc0 * pz - r, 2 * r, 2 * r, r, alpha(pc, 0.55f + 0.45f * fc[f].sh));
-        }
+        float gx = (fc[f].x[0] + fc[f].x[1] + fc[f].x[2]) / 3, gy = (fc[f].y[0] + fc[f].y[1] + fc[f].y[2]) / 3, q = 0.80f, ix[3], iy[3];
+        for (int c = 0; c < 3; c++) { ix[c] = gx + (fc[f].x[c] - gx) * q; iy[c] = gy + (fc[f].y[c] - gy) * q; }   /* inset facet: a gem-like bevel */
+        col inner = mix(body, mix(C(0.45f, 0.50f, 0.95f, 0.98f), VC[0], 0.3f), 0.20f + 0.20f * sh);
+        tri(ix[0], iy[0], ix[1], iy[1], ix[2], iy[2], inner);
     }
-    set_additive(1);                                          /* glow, edges and pip light */
-    blob(cx, py, s * 1.5f, alpha(VC[0], 0.10f + 0.16f * dice_hop + (hv ? 0.10f : 0.0f)));
-    for (int f = 0; f < 6; f++) {
+    set_additive(1);                                          /* glow, number engraving and edges */
+    blob(cx, py, s * 1.7f, alpha(VC[0], 0.10f + 0.16f * dice_hop + (hv ? 0.10f : 0.0f)));
+    for (int f = 0; f < 20; f++) {
         if (!fc[f].v) continue;
-        float xy[10] = { fc[f].x[0], fc[f].y[0], fc[f].x[1], fc[f].y[1], fc[f].x[2], fc[f].y[2], fc[f].x[3], fc[f].y[3], fc[f].x[0], fc[f].y[0] };
-        polyline(xy, 5, 0.9f, 3.0f, alpha(mix(VC[0], C(1, 1, 1, 1), 0.35f), 0.30f + 0.55f * fc[f].sh));
+        float n[3], u[3], w[3], P[3];
+        for (int k = 0; k < 3; k++) {
+            n[k] = M[k][0] * D20.n[f][0] + M[k][1] * D20.n[f][1] + M[k][2] * D20.n[f][2];
+            u[k] = M[k][0] * D20.u[f][0] + M[k][1] * D20.u[f][1] + M[k][2] * D20.u[f][2];
+            w[k] = M[k][0] * D20.w[f][0] + M[k][1] * D20.w[f][1] + M[k][2] * D20.w[f][2];
+            P[k] = n[k] * 0.795f;                                       /* centre of the face (inradius of the unit icosahedron) */
+        }
+        float xy[8] = { fc[f].x[0], fc[f].y[0], fc[f].x[1], fc[f].y[1], fc[f].x[2], fc[f].y[2], fc[f].x[0], fc[f].y[0] };
+        polyline(xy, 4, 0.9f, 3.0f, alpha(mix(VC[0], C(1, 1, 1, 1), 0.35f), 0.25f + 0.55f * fc[f].sh));
+        float vis = n[2] > 0.15f ? 1.0f : (n[2] - 0.02f) / 0.13f;
+        if (sc0 > 30) d20_number(D20.num[f], P, u, w, 0.30f, sc0, cx, py, 0.5f + 0.012f * sc0, alpha(gold, (0.45f + 0.55f * fc[f].sh) * vis), 0);
     }
     set_additive(0);
     if (interactive && !ma_busy() && clicked(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f)) { ma_random(); click = 0; }
@@ -2895,7 +3015,7 @@ int main(int argc, char **argv) {
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
     if (getenv("NGPLAYER_TEST_PLOPEN")) g_plopen = 1;        /* test hook: playlist overlay open (phone layout) */
-    if (getenv("NGPLAYER_TEST_DICE")) dice_start();        /* test hook: the big dancing dice, as while a random module is fetched */
+    if (getenv("NGPLAYER_TEST_DICE")) { dice_start(); if (getenv("NGPLAYER_TEST_DICE")[0] == '2') dice_stop_req = 1; }        /* test hook: the big dancing dice, as while a random module is fetched */
     SDL_AudioSpec want, have;
     SDL_zero(want);
     want.freq = g_rate; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = AUDIO_SAMPLES; want.callback = audio_cb;
