@@ -9,6 +9,8 @@ int net_cache_dir(char *out, size_t cap);
 int net_get(const char *url, const char *dest, int timeout_s);
 /* Set to 1 from another thread: a running net_get kills its curl process and returns -1 at once (reset it to 0 before the next download) */
 extern volatile int net_cancel;
+/* Appends a line to <cache>/ngplayer.log (timestamp + text, the file is rotated at 64 KB): traces of downloads and random draws for bug reports. Thread safe enough for one line writes. */
+void net_log(const char *fmt, ...);
 /* Ist curl verfuegbar? */
 int net_have_curl(void);
 
