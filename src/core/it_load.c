@@ -14,7 +14,8 @@ static void load_env(ITEnv *e, const uint8_t *p){
 }
 
 static int load_inst(ITInst *in, const uint8_t *b, size_t n, size_t o){
-    if (o + 554 > n || memcmp(b + o, "IMPI", 4)) return -1;
+    if (o + 554 > n) return -1;
+    if (memcmp(b + o, "IMPI", 4)) return 0;   /* damaged signature: the instrument stays empty, the rest of the module still plays (like libopenmpt) */
     const uint8_t *p = b + o;
     in->nna = p[17]; in->dct = p[18]; in->dca = p[19]; in->fadeout = r16(p + 20); in->pps = (int8_t)p[22]; in->ppc = p[23];
     in->gbv = p[24]; in->dfp = p[25]; in->rv = p[26]; in->rp = p[27]; in->ifc = p[58]; in->ifr = p[59];
