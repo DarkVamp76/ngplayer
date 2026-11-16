@@ -70,7 +70,7 @@ static int load_pat(ITSong *s, int pi, const uint8_t *b, size_t n, size_t o){
     if (o == 0) { s->rows[pi] = 64; s->pat[pi] = NULL; return 0; }
     if (o + 8 > n) return -1;
     unsigned plen = r16(b + o), rows = r16(b + o + 2);
-    if (rows < 1 || rows > 200 || o + 8 + plen > n) return -2;
+    if (rows < 1 || rows > 1024 || o + 8 + plen > n) return -2;   /* IT itself allows 32..200 rows, OpenMPT up to 1024 */
     ITCell *c = calloc((size_t)rows * 64, sizeof(ITCell)); if (!c) return -3;
     uint8_t mask[64] = {0}, ln[64] = {0}, li[64] = {0}, lv[64] = {0}, lc[64] = {0}, lp[64] = {0};
     const uint8_t *p = b + o + 8, *end = p + plen; unsigned r = 0;
