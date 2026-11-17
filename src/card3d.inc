@@ -5,10 +5,10 @@
 #include <math.h>
 #include "card3d_data.h"
 
-typedef struct { const int16_t *v; const uint8_t *vc, *pal; const uint16_t *idx; int nv, nt; const int16_t *tv; const uint16_t *tuv, *tidx; int ntt, ntv; const uint16_t *tex; int tw, th; float aspect; } C3Model;
+typedef struct { const int16_t *v; const uint8_t *vc, *pal; const uint16_t *idx; int nv, nt; const int16_t *tv; const uint16_t *tuv, *tidx; int ntt, ntv; const uint16_t *tex; int tw, th; float aspect; const int16_t *bv; const uint16_t *buv, *bidx; int nbv, nbt; const uint8_t *bpal, *bpix; int bw, bh; } C3Model;
 static const C3Model C3M[2] = {
-    { c3_GF1_v, c3_GF1_vc, c3_GF1_pal, c3_GF1_i, C3_GF1_NV, C3_GF1_NT, c3_GF1_tv, c3_GF1_tuv, c3_GF1_ti, C3_GF1_NTT, C3_GF1_NTV, c3_GF1_tex, C3_GF1_TW, C3_GF1_TH, C3_GF1_ASPECT },
-    { c3_IW_v, c3_IW_vc, c3_IW_pal, c3_IW_i, C3_IW_NV, C3_IW_NT, c3_IW_tv, c3_IW_tuv, c3_IW_ti, C3_IW_NTT, C3_IW_NTV, c3_IW_tex, C3_IW_TW, C3_IW_TH, C3_IW_ASPECT },
+    { c3_GF1_v, c3_GF1_vc, c3_GF1_pal, c3_GF1_i, C3_GF1_NV, C3_GF1_NT, c3_GF1_tv, c3_GF1_tuv, c3_GF1_ti, C3_GF1_NTT, C3_GF1_NTV, c3_GF1_tex, C3_GF1_TW, C3_GF1_TH, C3_GF1_ASPECT, c3_GF1_bv, c3_GF1_buv, c3_GF1_bi, C3_GF1_NBV, C3_GF1_NBT, c3_GF1_bpal, c3_GF1_bpix, C3_GF1_BW, C3_GF1_BH },
+    { c3_IW_v, c3_IW_vc, c3_IW_pal, c3_IW_i, C3_IW_NV, C3_IW_NT, c3_IW_tv, c3_IW_tuv, c3_IW_ti, C3_IW_NTT, C3_IW_NTV, c3_IW_tex, C3_IW_TW, C3_IW_TH, C3_IW_ASPECT, c3_IW_bv, c3_IW_buv, c3_IW_bi, C3_IW_NBV, C3_IW_NBT, c3_IW_bpal, c3_IW_bpix, C3_IW_BW, C3_IW_BH },
 };
 #define C3_BOX 0.80f                                        /* box aspect = model aspect * this: head room for the edge-on view */
 static float c3_box_aspect(int mi) { return C3M[mi].aspect * C3_BOX; }
@@ -28,7 +28,7 @@ static const char *C3_FS =
     " float sh=umode==1?0.62+0.55*d:0.36+0.64*d;\n"
     " o=vec4(base*sh,1.0); }\n";
 
-typedef struct { GLuint vao[2], vbo[2], ebo[2], tex, fbo, color, depth; int ready, w, h; } C3Gl;
+typedef struct { GLuint vao[3], vbo[3], ebo[3], tex, btex, fbo, color, depth; int ready, w, h; } C3Gl;
 static C3Gl c3gl[2];
 static GLuint c3_prog;
 static GLint c3_mvp, c3_mv, c3_umode, c3_utex;
@@ -69,16 +69,16 @@ static void c3_setup(int mi) {
     }
     const float Q = 1.0f / 20000.0f;
     typedef struct { float x, y, z, u, v; unsigned char r, g, b, a; } V3;
-    int counts[2] = { m->nv, m->ntv }, tcnt[2] = { m->nt, m->ntt };
-    glGenVertexArrays(2, g->vao); glGenBuffers(2, g->vbo); glGenBuffers(2, g->ebo);
-    for (int p = 0; p < 2; p++) {
+    int counts[3] = { m->nv, m->ntv, m->nbv }, tcnt[3] = { m->nt, m->ntt, m->nbt };
+    glGenVertexArrays(3, g->vao); glGenBuffers(3, g->vbo); glGenBuffers(3, g->ebo);
+    for (int p = 0; p < 3; p++) {
         int n = counts[p];
         V3 *vb3 = (V3 *)malloc(sizeof(V3) * (size_t)n);
         for (int i = 0; i < n; i++) {
-            const int16_t *s = p ? m->tv : m->v;
+            const int16_t *s = p == 2 ? m->bv : (p ? m->tv : m->v);
             V3 *o = &vb3[i];
-            o->x = s[3 * i] * Q; o->y = s[3 * i + 1] * Q; o->z = s[3 * i + 2] * Q + (p ? 0.0002f : 0.0f);   /* the board texture sits a hair above the board */
-            o->u = p ? m->tuv[2 * i] / 65535.0f : 0; o->v = p ? m->tuv[2 * i + 1] / 65535.0f : 0;
+            o->x = s[3 * i] * Q; o->y = s[3 * i + 1] * Q; o->z = s[3 * i + 2] * Q + (p == 1 ? 0.0002f : 0.0f);   /* the front texture sits a hair above the board (the back quad is baked a hair below) */
+            { const uint16_t *uv = p == 2 ? m->buv : m->tuv; o->u = p ? uv[2 * i] / 65535.0f : 0; o->v = p ? uv[2 * i + 1] / 65535.0f : 0; }
             if (p) { o->r = o->g = o->b = 255; } else { const uint8_t *pl = m->pal + 3 * m->vc[i]; o->r = pl[0]; o->g = pl[1]; o->b = pl[2]; }
             o->a = 255;
         }
@@ -87,7 +87,7 @@ static void c3_setup(int mi) {
         glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(V3) * (size_t)n), vb3, GL_STATIC_DRAW);
         free(vb3);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g->ebo[p]);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(sizeof(uint16_t) * 3 * (size_t)tcnt[p]), p ? m->tidx : m->idx, GL_STATIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(sizeof(uint16_t) * 3 * (size_t)tcnt[p]), p == 2 ? m->bidx : (p ? m->tidx : m->idx), GL_STATIC_DRAW);
         glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, 0, sizeof(V3), (const void *)0);
         glEnableVertexAttribArray(1); glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof(V3), (const void *)(3 * sizeof(float)));
         glEnableVertexAttribArray(2); glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, 1, sizeof(V3), (const void *)(5 * sizeof(float)));
@@ -100,6 +100,21 @@ static void c3_setup(int mi) {
     glGenerateMipmap(GL_TEXTURE_2D);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    {                                                                /* the back of the board: 4 bit indexed picture, made from the model's parts by the bake tool */
+        uint16_t *px = (uint16_t *)malloc(sizeof(uint16_t) * (size_t)m->bw * (size_t)m->bh);
+        for (int i = 0; i < m->bw * m->bh; i++) {
+            int idx = (i & 1) ? (m->bpix[i >> 1] & 15) : (m->bpix[i >> 1] >> 4);
+            const uint8_t *pl = m->bpal + 3 * idx;
+            px[i] = (uint16_t)(((pl[0] >> 3) << 11) | ((pl[1] >> 2) << 5) | (pl[2] >> 3));
+        }
+        glGenTextures(1, &g->btex);
+        glBindTexture(GL_TEXTURE_2D, g->btex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, m->bw, m->bh, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, px);
+        free(px);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
     g->w = g_mobile ? 320 : 512; g->h = (int)(g->w / c3_box_aspect(mi) + 0.5f);       /* off-screen target, shown at about half this size: smooth edges through the mip maps */
     glGenTextures(1, &g->color);
     glBindTexture(GL_TEXTURE_2D, g->color);
@@ -145,6 +160,9 @@ static void card3d_frame(int mi, int fw, int fh) {
     glBindTexture(GL_TEXTURE_2D, g->tex);
     glBindVertexArray(g->vao[1]); glUniform1i(c3_umode, 1);
     glDrawElements(GL_TRIANGLES, m->ntt * 3, GL_UNSIGNED_SHORT, (const void *)0);
+    glBindTexture(GL_TEXTURE_2D, g->btex);
+    glBindVertexArray(g->vao[2]);
+    glDrawElements(GL_TRIANGLES, m->nbt * 3, GL_UNSIGNED_SHORT, (const void *)0);
     glDisable(GL_DEPTH_TEST);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, g->color);
