@@ -2029,7 +2029,7 @@ static void draw_ui(double t) {
             if (bend > tl) tl = bend;
             float x0 = 0.5f * (tl + tr) - chw / 2;
             if (x0 < tl + 8) x0 = tl + 8;
-            draw_chips(x0, hy + 7 - (chip_kind() == 0 ? 0.0f : 0.13f * chh), chh);   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
+            { static const float lift[4] = { 0.0f, 0.05f, 0.03f, 0.08f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
         }
     }
 
