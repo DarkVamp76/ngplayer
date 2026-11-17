@@ -396,12 +396,11 @@ static void adv_pos(const XSmp *m, double *pos, int *dir, double step, int *on){
         } else while (*pos >= m->le) *pos -= (m->le - m->ls);
     } else if (*pos >= m->len) *on = 0;
 }
-static void pan_add(int lin, double sm, int pan, double *l, double *r){
+static void pan_add(double sm, int pan, double *l, double *r){
     /* XM pan law as libopenmpt: square root (equal power), L = sqrt(1-p), R = sqrt(p), p = pan/255. Scaled by 1/sqrt(2) so that a centered voice keeps the
      * level of the former linear law (0.5 per side); hard panned voices are 3 dB quieter than before. Measured on 9 XM files: with the plain square root law
      * the RMS ratio to libopenmpt goes from 0.72 to 1.00 and the left/right balance matches (e.g. 1.31 vs 1.33 for mpxvm_fumix121, linear: 1.52). */
     double pr = pan / 255.0; pr = pr < 0 ? 0 : pr > 1 ? 1 : pr;
-    if (lin) { *l += sm * (1.0 - pr); *r += sm * pr; return; }       /* files with zero padded sample names: linear law (see xm_load) */
     *l += sm * 0.70710678 * sqrt(1.0 - pr); *r += sm * 0.70710678 * sqrt(pr);
 }
 int xxm_render(XXPlayer *p, int16_t *out, int n){
@@ -430,7 +429,7 @@ int xxm_render(XXPlayer *p, int16_t *out, int n){
                     int L = xf_len(); double w = (double)(c->xf - 1) / L; gnew = 1.0;
                     { static int md = -1; if (md < 0) { const char *e = getenv("XMMODE"); md = e ? atoi(e) : 0; } if (md == 1) { w = 1; gnew = 0; } else if (md == 2) { w = 0; gnew = 1; } }
                     const XSmp *om = &s->xsmp[c->osmpi]; int oon = 1, en = 0;
-                    if (!solo_skip) { double v = read_smp(om, c->opos, &en); if (!en) { pan_add(s->linpan, v * c->ofvol * w, c->oopan, tl, tr); cs[i] += v * c->ofvol * w; } }
+                    if (!solo_skip) { double v = read_smp(om, c->opos, &en); if (!en) { pan_add(v * c->ofvol * w, c->oopan, tl, tr); cs[i] += v * c->ofvol * w; } }
                     adv_pos(om, &c->opos, &c->odir, c->ostep, &oon); c->xf--;
                 }
                 if (!c->on || c->smpi < 0) continue;
@@ -439,7 +438,7 @@ int xxm_render(XXPlayer *p, int16_t *out, int n){
                 if (!solo_skip) { int en = 0; double v = read_smp(m, c->pos, &en); if (en) { c->on = 0; continue; }
                     double rf = p->tklen > 0 ? (double)(p->tkpos + 1) / p->tklen : 1.0; if (rf > 1) rf = 1;
                     double vol = c->vprev + (c->fvol - c->vprev) * rf;
-                    pan_add(s->linpan, v * vol * gnew, (int)(c->pprev + (c->opan - c->pprev) * rf + 0.5), tl, tr); cs[i] += v * vol * gnew; }
+                    pan_add(v * vol * gnew, (int)(c->pprev + (c->opan - c->pprev) * rf + 0.5), tl, tr); cs[i] += v * vol * gnew; }
                 adv_pos(m, &c->pos, &c->dir, c->step, &c->on);
             }
             if (p->edl) {                          /* echo DSP: output = dry * (1 - mix) + delayed * mix; the delay line is fed with the dry + feedback mix */
