@@ -33,8 +33,17 @@ static int period_fine(const XSong *s, int note, uint32_t c2spd){
     }
     if ((s->fmt == 2 || (s->fmt == 1 && getenv("XMODHZ") == NULL)) && c2spd && note >= 0) {
         int d = note / 12 - 4;
+        uint64_t hz;
+        if (s->fmt == 2 && s->pt_tuning) {   /* S3M: integer ST3 period table like libopenmpt: period = (T[n] << 5) >> octave, hz = c2spd * 1712 * 32 / period */
+            static const uint32_t T3[12] = {1712,1616,1524,1440,1356,1280,1208,1140,1076,1016,960,907};
+            uint64_t per = d >= 0 ? ((uint64_t)T3[note % 12] << 5) >> d : ((uint64_t)T3[note % 12] << 5) << -d;
+            if (per < 1) per = 1;
+            uint64_t pp = per * 8363 / c2spd; if (pp < 1) pp = 1;   /* period scaled to the sample rate (integer), then the frequency from it */
+            hz = (uint64_t)8363 * 1712 * 32 / pp;
+        } else {
         uint64_t m = (uint64_t)c2spd * ST16[note % 12];
-        uint64_t hz = (16 - d >= 0) ? (m >> (16 - d)) : (m << (d - 16));
+        hz = (16 - d >= 0) ? (m >> (16 - d)) : (m << (d - 16));
+        }
         if (hz < 1) hz = 1;
         return (int)(14318184.0 * PK / (double)hz);
     }
