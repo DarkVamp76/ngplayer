@@ -43,6 +43,24 @@ typedef long GLintptr;
 #define GL_LINK_STATUS 0x8B82
 #define GL_UNPACK_ALIGNMENT 0x0CF5
 #define GL_PACK_ALIGNMENT 0x0D05
+#define GL_DEPTH_BUFFER_BIT 0x100
+#define GL_DEPTH_TEST 0x0B71
+#define GL_LESS 0x0201
+#define GL_LEQUAL 0x0203
+#define GL_RGB 0x1907
+#define GL_UNSIGNED_SHORT_5_6_5 0x8363
+#define GL_UNSIGNED_SHORT 0x1403
+#define GL_UNSIGNED_INT 0x1405
+#define GL_STATIC_DRAW 0x88E4
+#define GL_ELEMENT_ARRAY_BUFFER 0x8893
+#define GL_FRAMEBUFFER 0x8D40
+#define GL_RENDERBUFFER 0x8D41
+#define GL_COLOR_ATTACHMENT0 0x8CE0
+#define GL_DEPTH_ATTACHMENT 0x8D00
+#define GL_DEPTH_COMPONENT24 0x81A6
+#define GL_FRAMEBUFFER_COMPLETE 0x8CD5
+#define GL_TEXTURE0 0x84C0
+#define GL_CULL_FACE 0x0B44
 
 #define GLFUNCS(X) \
     X(void, glClearColor, (GLfloat, GLfloat, GLfloat, GLfloat)) \
@@ -82,7 +100,23 @@ typedef long GLintptr;
     X(void, glBufferSubData, (GLenum, GLintptr, GLsizeiptr, const void *)) \
     X(void, glEnableVertexAttribArray, (GLuint)) \
     X(void, glVertexAttribPointer, (GLuint, GLint, GLenum, unsigned char, GLsizei, const void *)) \
-    X(void, glGenerateMipmap, (GLenum))
+    X(void, glGenerateMipmap, (GLenum)) \
+    X(void, glDisable, (GLenum)) \
+    X(void, glDepthFunc, (GLenum)) \
+    X(void, glActiveTexture, (GLenum)) \
+    X(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *)) \
+    X(void, glDrawArraysInstanced, (GLenum, GLint, GLsizei, GLsizei)) \
+    X(void, glVertexAttribDivisor, (GLuint, GLuint)) \
+    X(void, glUniform3f, (GLint, GLfloat, GLfloat, GLfloat)) \
+    X(void, glUniformMatrix4fv, (GLint, GLsizei, unsigned char, const GLfloat *)) \
+    X(void, glGenFramebuffers, (GLsizei, GLuint *)) \
+    X(void, glBindFramebuffer, (GLenum, GLuint)) \
+    X(void, glFramebufferTexture2D, (GLenum, GLenum, GLenum, GLuint, GLint)) \
+    X(void, glGenRenderbuffers, (GLsizei, GLuint *)) \
+    X(void, glBindRenderbuffer, (GLenum, GLuint)) \
+    X(void, glRenderbufferStorage, (GLenum, GLenum, GLsizei, GLsizei)) \
+    X(void, glFramebufferRenderbuffer, (GLenum, GLenum, GLenum, GLuint)) \
+    X(GLenum, glCheckFramebufferStatus, (GLenum))
 
 #define X(ret, name, args) static ret(*name) args;
 GLFUNCS(X)
