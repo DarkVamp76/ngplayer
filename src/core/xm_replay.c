@@ -1,5 +1,6 @@
 /* XM-Replayer (FT2-Semantik, Prototyp; wird gegen Referenz-Renders kalibriert). GPL-3.0-or-later */
 #include "core.h"
+#include "xm_amiga.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -66,7 +67,13 @@ static int rd_inst_smp(const XSong *s, int inst, int note, int *smpi){
 static double note_period(const XSong *s, int note, int relnote, int ft){
     int n = note + relnote;           /* 1-basiert */
     if (s->linear) return 7680.0 - (n - 1) * 64 - (double)(ft / 2);      /* FT2 / libopenmpt: integer division of the finetune (truncates towards zero), 0.78 cents for odd values */
-    return 27392.0 * pow(2.0, -((n - 1) + ft / 128.0) / 12.0);
+    {   /* Amiga frequencies: libopenmpt's table (ProTracker periods with its own finetune steps), octaves above halve (floor), below double */
+        int k = n - 1, oct = k >= 0 ? k / 12 : -((-k + 11) / 12), idx = k - oct * 12;
+        int fi = ft < -128 ? 0 : (ft > 127 ? 255 : ft + 128);
+        int v = ngp_xm_amiga_period[idx][fi], sh = oct - 4;
+        if (sh < 0) v <<= (-sh > 8 ? 8 : -sh); else v >>= (sh > 15 ? 15 : sh);
+        return (double)(v < 1 ? 1 : v);
+    }
 }
 static double period_hz(const XSong *s, double per){
     if (per < 1) per = 1;
