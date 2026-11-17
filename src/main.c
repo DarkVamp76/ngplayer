@@ -120,7 +120,8 @@ static entry *pl;
 static int npl, cur = -1;
 static float list_scroll;
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
-static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel flight (key V / button) */
+static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes (key V / buttons); the tab order is VIEW_ORDER */
+static const int VIEW_ORDER[4] = { 0, 3, 1, 2 };   /* PATTERN, SCOPES, ORB, VOXEL */
 static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
 static int list_follow;
 static int g_pltab;                      /* playlist tab: 0 = FILES (local), 1 = MOD ARCHIVE (online) */
@@ -455,10 +456,11 @@ static void draw_pattern(float x, float y, float w, float h);
 static void draw_voxel(float x, float y, float w, float h);
 /* Umschalter Pattern | Orb oben in der Karte (auch per Touch/Klick) */
 static void view_switch(float x, float y, float w) {
-    float cw = 62, bx = g_portrait ? x + w - 14 - 3 * cw + 4 : x + w / 2 - 1.5f * cw, by = y + 8;
-    static const char *const NAME[3] = { "PATTERN", "ORB", "VOXEL" };
-    for (int i = 0; i < 3; i++) {
-        float xx = bx + i * cw;
+    float cw = 62, bx = g_portrait ? x + w - 14 - 4 * cw + 4 : x + w / 2 - 2.0f * cw, by = y + 8;
+    static const char *const NAME[4] = { "PATTERN", "ORB", "VOXEL", "SCOPES" };
+    for (int t = 0; t < 4; t++) {
+        int i = VIEW_ORDER[t];
+        float xx = bx + t * cw;
         int on = (i == g_vmode), hv = hit(xx, by, cw - 4, 20);
         rrect(xx, by, cw - 4, 20, 6, on ? alpha(VC[2], 0.25f) : alpha(FAINT, hv ? 0.30f : 0.16f));
         text(xx + (cw - 4 - text_width(NAME[i], 11)) / 2, by + 4, 11, on ? VC[2] : alpha(DIM, 0.9f), NAME[i]);
@@ -597,6 +599,65 @@ static void chan_scope(int c, float bx2, float mid2, float bw2, float sh2, float
     polyline(pts, np, 1.0f * lw, 3.0f, alpha(mix(lc, C(1, 1, 1, 1), 0.3f), 0.35f + 0.65f * lvl));
 }
 
+/* One voice tile: scope, live panning, number, mute (click = mute, Ctrl+click = solo) */
+static void chan_tile(int c, float bx0, float by0, float bwd, float bht) {
+    unsigned long long mm = song_get_mute(), all = song_channels(g_song) >= 64 ? ~0ULL : ((1ULL << song_channels(g_song)) - 1);
+    rrect(bx0, by0, bwd, bht, 7, C(0.02f, 0.03f, 0.055f, 1));
+    float sh2 = bht - 24, mid2 = by0 + 5 + sh2 / 2;
+    chan_scope(c, bx0 + 6, mid2, bwd - 12, sh2, 1.0f);
+    /* Panning in Echtzeit, links -> rechts */
+    {
+        static float pan_disp[64];
+        float pw = bwd - 12, px0 = bx0 + 6, py = by0 + bht - 13;
+        float pt = (float)song_chan_pan(g_song, c);
+        pan_disp[c] += (pt - pan_disp[c]) * 0.35f;
+        float pn = pan_disp[c] / 255.0f, mxp = px0 + pw * pn, midx = px0 + pw * 0.5f;
+        col lc2 = VC[c % 3];
+        rrect(px0, py + 3, pw, 4, 2, alpha(FAINT, 0.30f));
+        rect(midx - 0.5f, py, 1, 10, alpha(FAINT, 0.7f));
+        float fx0 = mxp < midx ? mxp : midx, fw = fabsf(mxp - midx);
+        if (fw > 1) rrect(fx0, py + 3, fw, 4, 2, alpha(lc2, 0.55f));
+        set_additive(1);
+        blob(mxp, py + 5, 9, alpha(lc2, 0.30f));
+        set_additive(0);
+        rrect(mxp - 4, py + 1, 8, 8, 4, mix(lc2, C(1, 1, 1, 1), 0.35f));
+    }
+    char nb[16]; snprintf(nb, sizeof nb, "%02d", c + 1);
+    text(bx0 + 6, by0 + 2, 10, alpha(FAINT, 1.0f), nb);
+    if (clicked(bx0, by0, bwd, bht)) {
+        if (click_ctrl) mm = (mm == (all & ~(1ULL << c))) ? 0 : (all & ~(1ULL << c));
+        else mm ^= 1ULL << c;
+        song_set_mute(mm);
+    }
+    if ((mm >> c) & 1) {
+        rrect(bx0, by0, bwd, bht, 7, C(0.02f, 0.03f, 0.055f, 0.72f));
+        text(bx0 + bwd - text_width("MUTE", 10) - 6, by0 + 2, 10, WARN, "MUTE");
+    }
+}
+
+/* SCOPES view: one tile per voice in a grid that fills the card */
+static void draw_scopes(float x, float y, float w, float h) {
+    card(x, y, w, h, 0);
+    if (!g_portrait) text(x + 18, y + 12, 12, DIM, "SCOPES");
+    view_switch(x, y, w);
+    if (!g_song) { text(x + 18, y + 44, 14, FAINT, "No song loaded."); return; }
+    int nch = song_channels(g_song);
+    if (nch > 64) nch = 64;
+    float ax = x + 14, ay = y + 40, aw = w - 28, ah = h - 40 - 12;
+    if (aw < 60 || ah < 40 || nch < 1) return;
+    int bestc = 1; float bestd = 1e9f;
+    for (int cols = 1; cols <= nch; cols++) {            /* the column count that gives tiles closest to 2.6 : 1 */
+        int rows = (nch + cols - 1) / cols;
+        float tw = aw / cols, th = ah / rows, d = fabsf(logf((tw / th) / 2.6f));
+        if (th < 34) d += 5;
+        if (d < bestd) { bestd = d; bestc = cols; }
+    }
+    int cols = bestc, rows = (nch + cols - 1) / cols;
+    float gap = 6, tw = (aw - gap * (cols - 1)) / cols, th = (ah - gap * (rows - 1)) / rows;
+    for (int c = 0; c < nch; c++) chan_tile(c, ax + (c % cols) * (tw + gap), ay + (c / cols) * (th + gap), tw, th);
+}
+
+
 static void draw_pattern(float x, float y, float w, float h) {
     card(x, y, w, h, 0);
     if (!g_portrait) text(x + 18, y + 12, 12, DIM, "PATTERN");
@@ -638,70 +699,17 @@ static void draw_pattern(float x, float y, float w, float h) {
 
     /* Kanalkoepfe (Scope + Panning je Stimme). Passen nicht alle Stimmen in die Pattern-Spalten, bekommen ALLE Stimmen
      * ein Kopf-Raster mit je max. 16 pro Zeile (oben), das Pattern darunter scrollt mit Nummernleiste. */
-    float hy = y + 34, hh = 54;
+    float hy = y + 34, hh = 0;                 /* the PATTERN view shows the notes only; the scopes have their own tab (SCOPES) */
     int strip = nch > vis;
-    int pmax = g_portrait ? (nch > 16 ? 12 : 8) : 16;
-    int per = nch <= pmax ? nch : pmax, hrows = (nch + per - 1) / per;
-    float boxh = hrows == 1 ? 54.0f : (hrows == 2 ? 46.0f : 38.0f);
-    float gw = (w - 28) / per;
-    float labh = 0;
-#ifdef __EMSCRIPTEN__
-    int noscope = strip && nch > 32;       /* Web, ueber 32 Stimmen: keine Scope-/Panning-Kacheln, der Platz gehoert dem Pattern */
-#else
-    int noscope = 0;                       /* nativ: Kacheln immer */
-#endif
-    if (strip) { hh = noscope ? 0.0f : hrows * (boxh + 4) - 4; labh = 16; }
-    {
-        unsigned long long mm = song_get_mute(), all = nch >= 64 ? ~0ULL : ((1ULL << nch) - 1);
-        int n_hdr = noscope ? 0 : (strip ? nch : vis);
-        for (int i = 0; i < n_hdr; i++) {
-            int c = strip ? i : pat_ch0 + i;
-            float bx0, by0, bwd, bht;
-            if (strip) { bx0 = x + 14 + (c % per) * gw + 2; by0 = hy + (c / per) * (boxh + 4); bwd = gw - 4; bht = boxh; }
-            else { bx0 = ox + i * cw + 2; by0 = hy; bwd = cw - 4; bht = hh; }
-            rrect(bx0, by0, bwd, bht, 7, C(0.02f, 0.03f, 0.055f, 1));
-            if (strip && c >= pat_ch0 && c < pat_ch0 + vis) rrect(bx0, by0, bwd, bht, 7, alpha(VC[0], 0.13f));
-            float sh2 = bht - 24, mid2 = by0 + 5 + sh2 / 2;
-            chan_scope(c, bx0 + 6, mid2, bwd - 12, sh2, 1.0f);
-            /* Panning in Echtzeit, links -> rechts */
-            {
-                static float pan_disp[64];
-                float pw = bwd - 12, px0 = bx0 + 6, py = by0 + bht - 13;
-                float pt = (float)song_chan_pan(g_song, c);
-                pan_disp[c] += (pt - pan_disp[c]) * 0.35f;
-                float pn = pan_disp[c] / 255.0f, mxp = px0 + pw * pn, midx = px0 + pw * 0.5f;
-                col lc2 = VC[c % 3];
-                rrect(px0, py + 3, pw, 4, 2, alpha(FAINT, 0.30f));
-                rect(midx - 0.5f, py, 1, 10, alpha(FAINT, 0.7f));
-                float fx0 = mxp < midx ? mxp : midx, fw = fabsf(mxp - midx);
-                if (fw > 1) rrect(fx0, py + 3, fw, 4, 2, alpha(lc2, 0.55f));
-                set_additive(1);
-                blob(mxp, py + 5, 9, alpha(lc2, 0.30f));
-                set_additive(0);
-                rrect(mxp - 4, py + 1, 8, 8, 4, mix(lc2, C(1, 1, 1, 1), 0.35f));
-            }
-            char nb[16]; snprintf(nb, sizeof nb, "%02d", c + 1);
-            text(bx0 + 6, by0 + 2, 10, alpha(FAINT, 1.0f), nb);
-            /* Klick: stumm/laut, Strg+Klick: Solo */
-            if (clicked(bx0, by0, bwd, bht)) {
-                if (click_ctrl) mm = (mm == (all & ~(1ULL << c))) ? 0 : (all & ~(1ULL << c));
-                else mm ^= 1ULL << c;
-                song_set_mute(mm);
-            }
-            if ((mm >> c) & 1) {
-                rrect(bx0, by0, bwd, bht, 7, C(0.02f, 0.03f, 0.055f, 0.72f));
-                text(bx0 + bwd - text_width("MUTE", 10) - 6, by0 + 2, 10, WARN, "MUTE");
-            }
-        }
-    }
-    if (strip) {   /* Nummernleiste der sichtbaren Pattern-Spalten */
+    float labh = 16;
+    {   /* number bar of the visible columns: click = mute, Ctrl+click = solo */
         for (int i = 0; i < vis; i++) {
             char nb[16]; snprintf(nb, sizeof nb, "%02d", pat_ch0 + i + 1);
             float lx = ox + i * cw + 2;
             int c2 = pat_ch0 + i, muted = (int)((song_get_mute() >> c2) & 1);
             rrect(lx, hy + hh + 6, cw - 4, 14, 5, alpha(muted ? WARN : VC[0], muted ? 0.22f : 0.10f));
             text(lx + 6, hy + hh + 8, 10, muted ? WARN : alpha(DIM, 1.0f), nb);
-            if (noscope && clicked(lx, hy + hh + 6, cw - 4, 14)) {          /* ohne Kacheln: Klick auf die Nummer = stumm, Strg+Klick = Solo */
+            if (clicked(lx, hy + hh + 6, cw - 4, 14)) {
                 unsigned long long mm = song_get_mute(), all = nch >= 64 ? ~0ULL : ((1ULL << nch) - 1);
                 if (click_ctrl) mm = (mm == (all & ~(1ULL << c2))) ? 0 : (all & ~(1ULL << c2));
                 else mm ^= 1ULL << c2;
@@ -709,6 +717,7 @@ static void draw_pattern(float x, float y, float w, float h) {
             }
         }
     }
+    (void)strip;
     /* Zeilenbereich */
     float ry0 = hy + hh + 8 + labh, ry1 = y + h - 10;
     int nrows_vis = (int)((ry1 - ry0) / rowh);
@@ -2085,6 +2094,7 @@ static void draw_ui(double t) {
     overview_update((float)g_dt);
     draw_overview(ax, cy0, aw, oh);
     if (g_vmode == 1) draw_orb(ax, cy0 + oh + M, aw, avail - oh - M);
+    else if (g_vmode == 3) draw_scopes(ax, cy0 + oh + M, aw, avail - oh - M);
     else if (g_vmode == 2) draw_voxel(ax, cy0 + oh + M, aw, avail - oh - M);
     else draw_pattern(ax, cy0 + oh + M, aw, avail - oh - M);
     if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "PTM") || !strcmp(song_format(g_song), "ULT") || !strcmp(song_format(g_song), "669") || !strcmp(song_format(g_song), "MED") || !strcmp(song_format(g_song), "PSM") || !strcmp(song_format(g_song), "IT"));
@@ -2317,6 +2327,7 @@ static void draw_ui_portrait(float W, float H) {
         draw_overview(M, cy0, aw, oh);
         draw_seal(M + aw - 12, cy0 + 6, 21, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
         if (g_vmode == 1) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
+        else if (g_vmode == 3) draw_scopes(M, cy0 + oh + M, aw, avail - oh - M);
         else if (g_vmode == 2) draw_voxel(M, cy0 + oh + M, aw, avail - oh - M);
         else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
         draw_rand_chip(M + aw - 56, cy0 + oh + M + (avail - oh - M) - 34, 44);       /* RND in the lower right corner of the pattern / orb card */
@@ -2430,7 +2441,7 @@ static void settings_load(void) {
         if (sscanf(line, "window_w=%d", &v) == 1 && v >= 360 && v <= 16384) g_win_w = v;
         else if (sscanf(line, "window_h=%d", &v) == 1 && v >= 480 && v <= 16384) g_win_h = v;
         else if (sscanf(line, "orb=%d", &v) == 1) g_vmode = v != 0;                  /* older settings files */
-        else if (sscanf(line, "view=%d", &v) == 1 && v >= 0 && v <= 2) g_vmode = v;
+        else if (sscanf(line, "view=%d", &v) == 1 && v >= 0 && v <= 3) g_vmode = v;
         else if (sscanf(line, "random=%d", &v) == 1) g_rand = v != 0;
         else if (sscanf(line, "window_x=%d", &v) == 1) g_win_x = v;
         else if (sscanf(line, "window_y=%d", &v) == 1) g_win_y = v;
@@ -2875,7 +2886,7 @@ static void iter(void) {
                 if (ma_open) { ma_key(&e.key); break; }
                 switch (e.key.keysym.sym) {
                 case SDLK_o: ma_show(1); break;
-                case SDLK_v: g_vmode = (g_vmode + 1) % 3; break;
+                case SDLK_v: { int t = 0; for (int k = 0; k < 4; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % 4]; } break;
                 case SDLK_ESCAPE: running = 0; break;
                 case SDLK_SPACE: g_paused = !g_paused; break;
                 case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) > 0) play_index_sub(cur, song_subsong(g_song) - 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
@@ -3103,6 +3114,7 @@ int main(int argc, char **argv) {
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
     if (getenv("NGPLAYER_TEST_PLOPEN")) g_plopen = 1;        /* test hook: playlist overlay open (phone layout) */
+    if (getenv("NGPLAYER_TEST_SCOPES")) g_vmode = 3;               /* test hook: scopes view */
     if (getenv("NGPLAYER_TEST_VOXEL")) g_vmode = 2;               /* test hook: voxel flight view */
     if (getenv("NGPLAYER_TEST_DICE")) { dice_start(); if (getenv("NGPLAYER_TEST_DICE")[0] == '2') dice_stop_req = 1; }        /* test hook: the big dancing dice, as while a random module is fetched */
     SDL_AudioSpec want, have;
