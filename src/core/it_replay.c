@@ -739,11 +739,13 @@ static void update_channels(ITPlayer *p){
                 if (ok) { et = clampi(et, -256, 256); f *= pow(2.0, et / 192.0); }
             }
             if (c->flags & F_VIB) {
+                int mplv = s->cwt == 0x217 && s->cmwt == 0x200 && !s->rsv;   /* ModPlug-saved files keep the old behaviour (floor, advance after use) */
+                if (!(s->flags & 16) && !mplv) c->vibpos = (c->vibpos + 4 * c->vibspeed) & 255;   /* new effects: the position advances before it is used (libopenmpt, measured with a looped sine) */
                 int d = wave(c->vibtype, c->vibpos & 255), depth;
                 if (s->flags & 16) { depth = 5; d = -d; } else depth = 6;
-                d = (d * c->vibdepth) >> depth;
+                d = mplv ? (d * c->vibdepth) >> depth : (d * c->vibdepth) / (1 << depth);   /* truncated towards zero like libopenmpt */
                 f = freq_slide(p, f, d, 0);
-                if (!p->firsttick || !(s->flags & 16)) c->vibpos = (c->vibpos + 4 * c->vibspeed) & 255;
+                if ((mplv ? (!p->firsttick || !(s->flags & 16)) : ((s->flags & 16) && !p->firsttick))) c->vibpos = (c->vibpos + 4 * c->vibspeed) & 255;
             }
             if (c->smp->vid && c->smp->vis && s->cwt == 0x217 && s->cmwt == 0x200 && !s->rsv) {
                 /* ModPlug-saved files: sample auto-vibrato like libopenmpt's legacy code - the depth grows by 2 * sweep per tick (sweep 0 = full depth at once), the position
