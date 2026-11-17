@@ -2250,8 +2250,8 @@ static void draw_ui_portrait(float W, float H) {
                 float chh = 54, chw = chips_width(chh), rightE = M + aw - 60, x0 = rightE - chw;     /* narrow: may cover part of the time while it turns */
                 float tl = M + 16 + fmaxf(text_width(title, tsize), text_width(sub, 13)), tr = M + aw - 16 - text_width(tb, 28);
                 if (cx > tl) tl = cx;
-                if (tr - tl - 16 >= chw) x0 = tl + 8 + (tr - tl - 16 - chw) / 2;           /* wide (tablet): centred between the title and the time */
-                else if (x0 < cx + 6) x0 = cx + 6;
+                if (tr - tl >= 40) { x0 = 0.5f * (tl + tr) - chw / 2; if (x0 < tl + 4) x0 = tl + 4; }   /* centred between the title and the time; on a phone it may reach into the time, not into the title */
+                else if (x0 < cx + 6) x0 = cx + 6;                                          /* a very long title: lower right, may cover part of the time */
                 if (chw > 0 && x0 + chw <= M + aw - 6) draw_chips(x0, hy + 16, chh);
             }
         }
