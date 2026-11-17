@@ -379,7 +379,7 @@ static void do_effect(XPlayer *p, int chn, Ch *c, int tick){
                  } }
                c->dcf = 1; break;
     case 0x33: c->p74 = hz_shift(c->pD4, par * 80.0); c->dcf = 1; break;              /* 669 frequency adjust (constant offset) */
-    case 0x34: c->p74 = (tick & 1) ? hz_shift(c->pD4, par * 24.0) : c->pD4; c->dcf = 1; break;   /* 669 vibrato: two-state wobble */
+    case 0x34: c->p74 = (tick & 1) ? hz_shift(c->pD4, par * 668.0) : c->pD4; c->dcf = 1; break;   /* 669 vibrato: two-state wobble */
     case 9: if (par) c->mcc = par << 8;
             c->start38 = (int)((uint32_t)c->mcc > c->len ? c->len : (uint32_t)c->mcc); break;
     default: break;
