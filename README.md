@@ -51,7 +51,7 @@ Planned: DSM, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
 - Channel overview: volume bars with peak hold, last note, effect name and panning per channel
 - Time-continuous scrolling locked to the audio clock, drawn at the full refresh rate of your monitor
 - Spectrum analyser and level meters
-- Three views for the main area (key **V**): pattern, **orb** (a geodesic sphere shaped by the spectrum) and **voxel** (the spectrum as 3D voxel columns in perspective)
+- Four views for the main area (key **V**): **pattern** (the notes only; click a column number to mute, Ctrl+click for solo), **scopes** (one oscilloscope tile per voice with live panning), **orb** (a geodesic sphere shaped by the spectrum) and **voxel** (the spectrum as 3D voxel columns in perspective)
 - Seek inside a song (Left/Right), drag and drop for files and folders, playlist
 
 ## Technical details
