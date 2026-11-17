@@ -108,6 +108,8 @@ typedef long GLintptr;
     X(void, glDrawArraysInstanced, (GLenum, GLint, GLsizei, GLsizei)) \
     X(void, glVertexAttribDivisor, (GLuint, GLuint)) \
     X(void, glUniform3f, (GLint, GLfloat, GLfloat, GLfloat)) \
+    X(void, glUniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat)) \
+    X(void, glUniform1fv, (GLint, GLsizei, const GLfloat *)) \
     X(void, glUniformMatrix4fv, (GLint, GLsizei, unsigned char, const GLfloat *)) \
     X(void, glGenFramebuffers, (GLsizei, GLuint *)) \
     X(void, glBindFramebuffer, (GLenum, GLuint)) \
