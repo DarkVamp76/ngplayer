@@ -56,6 +56,7 @@ typedef struct {
     XInst *inst; int ninst;
     XSmp *xsmp; int nxsmp;
     int linear;                /* XM: lineare Frequenztabelle */
+    int xm_ft2;                /* XM: written by FastTracker 2 itself (arpeggio order as in FT2); other trackers use the order of libopenmpt */
     int restart;
     int *prows;                /* XM: Zeilen je Pattern (sonst 64) */
     int amiga;                 /* MOD: echtes Amiga-Format (M.K., M!K!, FLT4, 15 Samples) -> Paula-Tiefpass */

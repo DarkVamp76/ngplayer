@@ -118,6 +118,7 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
     /* If any sample header of the file has a non-zero 'reserved' byte (0xAD = ADPCM aside), libopenmpt floors the finetune of ALL samples to a multiple of 8,
      * whatever the tracker name or the frequency mode (measured with synthetic XM files over the whole finetune range: -35 -> -40, -28 -> -32, 4 -> 0, 11 -> 8). */
     if (any_res) for (int k = 0; k < s->nxsmp; k++) s->xsmp[k].finetune = (int8_t)(s->xsmp[k].finetune & ~7);
+    s->xm_ft2 = !memcmp(b + 38, "FastTracker v2.00   ", 20);                                      /* the tracker name decides (also for ModPlug files, which use the same name) */
     /* ModPlug Tracker 1.0 - 1.16 writes "FastTracker v2.00" like FT2 itself, but pads the sample names with 0 instead of spaces (libopenmpt tells them apart
      * this way and mixes them with its older, quieter levels). Gain relative to our FT2 mix level, measured on 3 files (4, 6 and 20 channels: 0.485, 0.415, 0.275):
      * 0.485 * (4 / channels) ^ 0.353. The "v 2.00" variant (ModPlug alpha) follows the same law. */
