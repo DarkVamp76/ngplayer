@@ -72,6 +72,7 @@ struct XPlayer {
     const XSong *s; int rate;
     Ch ch[NCH]; Voice v[NCH];
     int order, row, tick, speed, tempo; double tempof;   /* tempof: tempo as a fraction (0 = use tempo) */
+    int started;                     /* the first tick has been rendered (real MOD: the first tick still runs at the start tempo, like libopenmpt) */
     int d_ord, d_row;                /* Anzeigeposition: Zeile, die gerade gespielt wird */
     float *scb; int scl; unsigned scn;   /* Scope-Ringpuffer je Kanal (scb[ch*scl + pos]) */
     int delay_cnt, in_delay;
@@ -539,10 +540,14 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
         if (p->done) break;
         if (p->acc <= 0) {
             { static int xp=-1; if(xp<0) xp=getenv("XPOS")!=NULL; if(xp && p->tick==0) fprintf(stderr,"POS %.2f %d %d sp%d tp%d\n", xpos_t, p->order, p->row, p->speed, p->tempo); }
+            double tmp0 = p->tempof > 0 ? p->tempof : (double)p->tempo;       /* tempo before the first row is processed */
             do_tick(p);
             if (p->done) break;
             { static int tk=-1; if(tk<0){const char*e=getenv("XTK"); tk=e?atoi(e):1;}
-              double t = p->rate * 2.5 / (p->tempof > 0 ? p->tempof : (double)p->tempo);
+              double tmp = p->tempof > 0 ? p->tempof : (double)p->tempo;
+              if (!p->started && s->pt_tuning == 2) tmp = tmp0;                /* libopenmpt: a tempo command in the very first row only counts from the second tick on */
+              p->started = 1;
+              double t = p->rate * 2.5 / tmp;
               p->acc += tk==1 ? (double)(long)t : tk==2 ? (double)(long)(t+0.5) : t; }
             advance(p);
         }
