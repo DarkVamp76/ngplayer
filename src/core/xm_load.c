@@ -65,6 +65,7 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
     /* Instrumente */
     s->inst = calloc(nins + 1, sizeof(XInst));
     s->xsmp = calloc(nins * 16 + 1, sizeof(XSmp));
+    int any_res = 0;                           /* some sample header has a non-zero 'reserved' byte (0xAD = ADPCM aside) */
     int nm0 = 0, nm32 = 0;                     /* sample names padded with 0 (ModPlug) or with spaces (FastTracker 2) */
     for (unsigned i = 1; i <= nins; i++) {
         if (o + 29 > n) break;
@@ -93,9 +94,7 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
                 int type = h[14];
                 if (h[39] == 0) nm0++; else if (h[39] == ' ') nm32++;
                 m->vol = h[12]; m->finetune = (int8_t)h[13]; m->pan = h[15]; m->relnote = (int8_t)h[16];
-                /* A non-zero 'reserved' byte of the sample header (0xAD = ADPCM aside): libopenmpt then floors the finetune to a multiple of 8 (measured with
-                 * synthetic XM files over the whole finetune range: -28 -> -32, 4 -> 0, 11 -> 8, -1 -> -8). */
-                if (h[17] && h[17] != 0xAD) m->finetune = (int8_t)(m->finetune & ~7);
+                if (h[17] && h[17] != 0xAD) any_res = 1;
                 m->is16 = (type & 16) != 0;
                 m->loop = (type & 3) != 0; m->pingpong = (type & 3) == 2;
                 if (m->is16) { len >>= 1; ls >>= 1; ll >>= 1; }
@@ -116,6 +115,9 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
             o = dat;
         } else o += ihs;
     }
+    /* If any sample header of the file has a non-zero 'reserved' byte (0xAD = ADPCM aside), libopenmpt floors the finetune of ALL samples to a multiple of 8,
+     * whatever the tracker name or the frequency mode (measured with synthetic XM files over the whole finetune range: -35 -> -40, -28 -> -32, 4 -> 0, 11 -> 8). */
+    if (any_res) for (int k = 0; k < s->nxsmp; k++) s->xsmp[k].finetune = (int8_t)(s->xsmp[k].finetune & ~7);
     /* ModPlug Tracker 1.0 - 1.16 writes "FastTracker v2.00" like FT2 itself, but pads the sample names with 0 instead of spaces (libopenmpt tells them apart
      * this way and mixes them with its older, quieter levels). Gain relative to our FT2 mix level, measured on 3 files (4, 6 and 20 channels: 0.485, 0.415, 0.275):
      * 0.485 * (4 / channels) ^ 0.353. The "v 2.00" variant (ModPlug alpha) follows the same law. */
