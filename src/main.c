@@ -1599,6 +1599,49 @@ static void dice_step(void) {
     }
     dice_hop += ((dice_roll ? 1.0f : 0.0f) - dice_hop) * (dt * 8 > 1 ? 1 : dt * 8);
 }
+/* The shadow of the die on the floor, computed from the geometry: the 12 corners of the icosahedron are projected along the light onto a floor
+ * plane, the shadow is the convex hull of the projected corners (the shadow of a convex body). It is drawn as a few stacked, growing copies for a
+ * soft edge; the higher the die hops, the larger, fainter and softer the shadow becomes. Light direction as in the shading of the faces. */
+static void dice_shadow(float cx, float cy, float sc, float hopw, const float Rm[3][3], const float V[3][3]) {
+    const float lx = -0.40f, ly = 0.70f, lz = 0.59f, yf = -1.02f;
+    float Lw[3] = { V[0][0] * lx + V[1][0] * ly + V[2][0] * lz, V[0][1] * lx + V[1][1] * ly + V[2][1] * lz, V[0][2] * lx + V[1][2] * ly + V[2][2] * lz };   /* light in the world of the die */
+    if (Lw[1] < 0.30f) Lw[1] = 0.30f;
+    float P[12][2];
+    for (int i = 0; i < 12; i++) {
+        float p[3], q[3], S[3];
+        for (int k = 0; k < 3; k++) p[k] = Rm[k][0] * D20.v[i][0] + Rm[k][1] * D20.v[i][1] + Rm[k][2] * D20.v[i][2];
+        p[1] += hopw;
+        float t = (p[1] - yf) / Lw[1];
+        for (int k = 0; k < 3; k++) q[k] = p[k] - t * Lw[k];
+        q[1] = yf;
+        for (int k = 0; k < 3; k++) S[k] = V[k][0] * q[0] + V[k][1] * q[1] + V[k][2] * q[2];
+        float pz = 1.0f / (1.0f - 0.10f * S[2]);
+        P[i][0] = cx + S[0] * sc * pz; P[i][1] = cy - S[1] * sc * pz;
+    }
+    int idx[12], n = 0;                                          /* convex hull (monotone chain) */
+    for (int i = 0; i < 12; i++) idx[i] = i;
+    for (int i = 1; i < 12; i++) { int v = idx[i], j = i - 1; while (j >= 0 && (P[idx[j]][0] > P[v][0] || (P[idx[j]][0] == P[v][0] && P[idx[j]][1] > P[v][1]))) { idx[j + 1] = idx[j]; j--; } idx[j + 1] = v; }
+    int H[24];
+    for (int i = 0; i < 12; i++) { while (n >= 2) { float *a = P[H[n - 2]], *b = P[H[n - 1]], *c = P[idx[i]]; if ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) <= 0) n--; else break; } H[n++] = idx[i]; }
+    for (int i = 10, lo = n + 1; i >= 0; i--) { while (n >= lo) { float *a = P[H[n - 2]], *b = P[H[n - 1]], *c = P[idx[i]]; if ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) <= 0) n--; else break; } H[n++] = idx[i]; }
+    n--;
+    if (n < 3) return;
+    float gx = 0, gy = 0;
+    for (int i = 0; i < n; i++) { gx += P[H[i]][0]; gy += P[H[i]][1]; }
+    gx /= n; gy /= n;
+    float hf = hopw / 0.7f; hf = hf < 0 ? 0 : hf > 1 ? 1 : hf;      /* 0 = on the floor, 1 = at the top of the hop */
+    const int L = 7;
+    float total = 0.40f * (1.0f - 0.55f * hf), grow = 0.10f + 0.30f * hf;
+    for (int l = 0; l < L; l++) {
+        float u = (float)l / (L - 1), k = 1.0f + grow * (1.0f - u);
+        col c = C(0, 0, 0, total * 1.5f / L);
+        for (int i = 0; i < n; i++) {
+            float *a = P[H[i]], *b = P[H[(i + 1) % n]];
+            tri(gx, gy, gx + (a[0] - gx) * k, gy + (a[1] - gy) * k, gx + (b[0] - gx) * k, gy + (b[1] - gy) * k, c);
+        }
+    }
+    blob(gx, gy, sc * 0.45f, C(0, 0, 0, 0.22f * (1.0f - 0.8f * hf)));   /* contact darkening under the middle */
+}
 static void dice_render(float cx, float cy, float s, int interactive) {
     dice_step();
     int hv = interactive ? hit(cx - s * 1.6f, cy - s * 1.8f, s * 3.2f, s * 3.6f) : 0;
@@ -1609,7 +1652,7 @@ static void dice_render(float cx, float cy, float s, int interactive) {
     dice_view(V); m3_mul(M, V, dice_Rm);
 
     float py = cy - hop;
-    rrect(cx - sc0 * 0.85f, cy + s * 1.55f, sc0 * 1.7f, s * 0.36f, s * 0.18f, C(0, 0, 0, 0.30f * (1.0f - 0.45f * dice_hop)));   /* shadow */
+    dice_shadow(cx, cy, sc0, hop / sc0, dice_Rm, V);
     float PX[12][3];
     for (int i = 0; i < 12; i++) for (int k = 0; k < 3; k++) PX[i][k] = M[k][0] * D20.v[i][0] + M[k][1] * D20.v[i][1] + M[k][2] * D20.v[i][2];
     const float lx = -0.40f, ly = 0.70f, lz = 0.59f;
