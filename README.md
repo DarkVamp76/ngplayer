@@ -52,6 +52,7 @@ Planned: DSM, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
 - Time-continuous scrolling locked to the audio clock, drawn at the full refresh rate of your monitor
 - Spectrum analyser and level meters
 - Four views for the main area (key **V**): **pattern** (the notes only; click a column number to mute, Ctrl+click for solo), **scopes** (one oscilloscope tile per voice with live panning), **orb** (a geodesic sphere shaped by the spectrum) and **voxel** (the spectrum as stacks of real voxel cubes in perspective)
+- A turning 3D model of the sound card in the header, chosen by the number of voices: the Paula chip (up to 4 voices), the Gravis UltraSound (GF1, up to 14), the UltraSound PnP (AMD InterWave, 15 to 32) and the Terratec EWS64 (more than 32 voices)
 - Seek inside a song (Left/Right), drag and drop for files and folders, playlist
 
 ## Technical details

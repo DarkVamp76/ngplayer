@@ -1260,12 +1260,12 @@ static void chip_dip(float x, float y, float h, float beat) {            /* Paul
     z = chip_tsz(17, k); text(cx - text_width("8364R7", z) / 2, y + 57 * k - z * 0.8f, z, ink, "8364R7");
     z = chip_tsz(14, k); text(cx - text_width("1589  27", z) / 2, y + 77 * k - z * 0.8f, z, ink, "1589  27");
 }
-/* Welcher Chip: 0 = Paula (TFMX, MOD bis 4 Kanaele), 1 = GF1 (bis 14 Kanaele), 2 = InterWave (ab 15 Kanaelen) */
+/* Which chip: 0 = Paula (TFMX, MOD up to 4 channels), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices) */
 static int chip_kind(void) {
     const char *f = song_format(g_song);
     int n = song_channels(g_song);
     if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || (!strcmp(f, "MOD") && n <= 4)) return 0;
-    return n >= 15 ? 2 : 1;
+    return n > 32 ? 3 : (n >= 15 ? 2 : 1);
 }
 #include "card3d.inc"
 static float chips_width(float h) {                       /* Breite des Chipbereichs (0 = keiner) */
