@@ -28,7 +28,7 @@ static int mod15_plausible(const uint8_t *b, size_t len){
 }
 
 int xmod_load(XSong *s, const uint8_t *b, size_t len){
-    memset(s, 0, sizeof *s); s->fmt = 1; s->gvol = 255; for (int i = 0; i < 32; i++) { s->chpan[i] = -1; s->chen[i] = 1; }
+    memset(s, 0, sizeof *s); s->fmt = 1; s->pt_tuning = 2; s->gvol = 255; for (int i = 0; i < 32; i++) { s->chpan[i] = -1; s->chen[i] = 1; }
     s->maxvol = 0x40; s->speed = 6; s->tempo = 0x7d;
     int nsm = 31, nch = 4, xchn = 0, ami = 0;
     if (len < 1084) nsm = 15;

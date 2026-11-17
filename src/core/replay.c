@@ -10,18 +10,19 @@
 /* Test: Periode ueber die ganzzahlige Hz-Frequenz zurueckfuehren (Rundungsrueckkopplung des Originals) */
 static double hzq(double x){ static int m=-1; if(m<0){const char*e=getenv("XHZ"); m=e?atoi(e):0;} return m==1?floor(x+0.5):m==2?ceil(x):floor(x); }
 static int qef(void){ static int m=-1; if(m<0){const char*e=getenv("XQ"); m=e?atoi(e):1;} return m; }
-static int qmod(void){ static int q=-1; if(q<0) q=getenv("XNOQM")==NULL; return q; }
+static double g_clk = 14318184.0;      /* 4 x Amiga clock: the period unit of the replayer; MOD uses the PAL clock (set in xplay_new) so that slide steps are ProTracker period units */
+static int qmod(void){ return g_clk == 14318184.0 && getenv("XNOQM") == NULL; }   /* MOD (PAL clock): slides keep the exact period like ProTracker / libopenmpt; the hz quantisation of the old tuning only with XMODNTSC */
 static int g_qc = 0;
 static int qper(int per){ int qc = g_qc;
-    if (per <= 0) return per; double hz = hzq(14318184.0 * PK / per); if (hz <= 0) return per;
-    double v = 14318184.0 * PK / hz; return qc==1 ? (int)ceil(v) : qc==2 ? (int)(v+0.5) : (int)v; }
+    if (per <= 0) return per; double hz = hzq(g_clk * PK / per); if (hz <= 0) return per;
+    double v = g_clk * PK / hz; return qc==1 ? (int)ceil(v) : qc==2 ? (int)(v+0.5) : (int)v; }
 /* S3M: Rate = (c2spd * ST[halbton]) >> (16 - Oktave), ST = floor(2^(s/12) * 65536) -- gemessen an 58/60 Noten (ngp_calib_notes) */
 static const uint32_t ST16[12] = {65536, 69432, 73561, 77935, 82570, 87480, 92681, 98193, 104031, 110217, 116771, 123715};
 static int period_fine(const XSong *s, int note, uint32_t c2spd){
-    if (s->fmt == 1 && getenv("XMODHZ") == NULL && getenv("XMODNTSC") == NULL && c2spd && note >= 0x18 && note < 0x18 + 84) {
+    if (s->fmt == 1 && s->pt_tuning && getenv("XMODHZ") == NULL && getenv("XMODNTSC") == NULL && c2spd && note >= 0x18 && note < 0x18 + 84) {
         /* MOD (PAL): the real ProTracker period of the note (table, not the 12 tone equal temperament) at the tuning of the sample: hz = c2spd * 428 / period */
         double hz = (double)c2spd * 428.0 / ngp_pt_periods[note - 0x18];
-        return (int)(14318184.0 * PK / hz);
+        return (int)(g_clk * PK / hz);
     }
     if ((s->fmt == 2 || (s->fmt == 1 && getenv("XMODHZ") == NULL)) && c2spd && note >= 0) {
         int d = note / 12 - 4;
@@ -212,7 +213,7 @@ static void e_sub(XPlayer *p, int chn, Ch *c, int par, int tick){
     case 1: if (!tick) c->pD4 -= (x << 2) * PK; break;
     case 2: if (!tick) c->pD4 += (x << 2) * PK; break;
     case 4: c->mb0 = (c->mb0 & 0xf0) | x; break;
-    case 5: c->c2spd = p->s->fmt == 1 ? ngp_finetune_c2spd_mod[x] : ngp_finetune_c2spd[x];
+    case 5: c->c2spd = (p->s->fmt == 1 && p->s->pt_tuning == 2) ? ngp_finetune_c2spd_mod[x] : ngp_finetune_c2spd[x];
             c->pD4 = period_fine(p->s, c->lastnote + c->d0, c->c2spd); break;
     case 7: c->mb0 = (c->mb0 & 0x0f) | (x << 4); break;
     case 8: c->pan5c = ngp_pan_tab[x]; break;   /* gemessen: S8x setzt echten Pan */
@@ -390,7 +391,7 @@ static void voice_update(XPlayer *p, int chn){
       else if (fv == 3) { v->vol = (int)ex; v->volf = v->vol; }
       else { v->vol = old; v->volf = old; } }
     v->pan = clampi(c->pan5c, 0, 255);
-    v->step = c->p74 > 0 ? hzq(14318184.0 * PK / c->p74) / p->rate : 0.0;
+    v->step = c->p74 > 0 ? hzq(g_clk * PK / c->p74) / p->rate : 0.0;
     if (c->sy && c->vib_d && c->vib_s) v->step *= pow(2.0, sin(c->vib_ph * 6.283185307179586 / 256.0) * c->vib_d / 384.0);   /* MED synth vibrato (depth scale estimated) */
 }
 
@@ -398,6 +399,7 @@ XPlayer *xplay_new(const XSong *s, int rate){
     if (s->fmt == 4) return (XPlayer *)xxm_new(s, rate);
     XPlayer *p = calloc(1, sizeof *p);
     { const char*e=getenv("XQC"); g_qc = e ? atoi(e) : (s->fmt == 1 ? 2 : 0); }
+    g_clk = (s->fmt == 1 && s->pt_tuning == 2 && !getenv("XMODNTSC") && !getenv("XMODHZ")) ? 14187579.6 : 14318184.0;     /* MOD: PAL clock (4 x 3546894.9) */
     p->s = s; p->rate = rate; p->speed = s->speed; p->tempo = s->tempo; p->tempof = s->tempo_exact; p->gvol = s->gvol ? s->gvol : 255;
     for (int i = 0; i < NCH; i++) p->ch[i].pan5c = (s->fmt == 1 && s->chpan[i] < 0) ? ((i % 4 == 0 || i % 4 == 3) ? 60 : 195) : (s->chpan[i] >= 0 ? s->chpan[i] : 128);
     p->tick = 0; p->acc = 0;
