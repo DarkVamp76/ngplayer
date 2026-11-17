@@ -17,7 +17,7 @@ int mtm_probe(const uint8_t *b, size_t n){
 
 int xmtm_load(XSong *s, const uint8_t *b, size_t n){
     memset(s, 0, sizeof *s);
-    s->fmt = 1; s->maxvol = 0x40; s->gvol = 255; s->speed = 6; s->tempo = 125;
+    s->fmt = 1; s->pt_tuning = 1; s->maxvol = 0x40; s->gvol = 255; s->speed = 6; s->tempo = 125;
     if (!mtm_probe(b, n)) return -1;
     memcpy(s->title, b + 4, 20); s->title[20] = 0;
     unsigned ntr = rd16(b + 24), npat = b[26] + 1u, nord = b[27] + 1u, clen = rd16(b + 28), nsm = b[30], rows = b[32], nch = b[33];
