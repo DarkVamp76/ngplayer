@@ -130,6 +130,9 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
      * 0.485 * (4 / channels) ^ 0.353. The "v 2.00" variant (ModPlug alpha) follows the same law. */
     if (!s->mixgain && !memcmp(b + 38, "FastTracker v2.00   ", 20) && nm0 > 0 && nm32 == 0) s->mixgain = 0.485 * pow(4.0 / (nch ? nch : 1), 0.353);
     else if (s->mixgain > 0) s->mixgain = 0.485 * pow(4.0 / (nch ? nch : 1), 0.353);
+    /* Pan law: libopenmpt pans files whose sample names are padded with 0 (more of them than with spaces) linearly, the others with the square root law
+     * (barbiegirl 0.984 -> 0.998). A heuristic found on the test set, not a documented rule. */
+    s->linpan = nm0 > nm32;
     /* libopenmpt floors the finetune of every sample to a multiple of 8 (FT2's own ft >> 3 table lookup) - except for the ModPlug files above, which are written with
      * zero padded sample names and keep the exact value (measured: heartland 0.837 -> 0.998, the_rain 0.890 -> 0.981, intros 0.972 -> 0.991, zebras_of_the_frozen_land
      * 0.947 -> 0.995; amnesia, lwh and voda, all ModPlug, get worse when floored). Trackers other than FT2 floor as well (synthetic files over the whole range). */
