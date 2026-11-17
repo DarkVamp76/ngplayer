@@ -1989,13 +1989,13 @@ static void draw_ui(double t) {
         }
         float chh = hh - 14, chw = chips_width(chh);      /* Soundchip-Grafik zwischen Titel und Zeit */
         float tmax = haw - 200 - (chw > 0 ? chw + 20 : 0);
-        if (chw > 0) draw_chips(ax + haw - 22 - 130 - chw, hy + 7, chh);
         float tsize = 26;
         while (tsize > 18 && text_width(title, tsize) > tmax) tsize -= 2;
         fit_text(title, tmax, tsize);
         text(ax + 22, hy + 10, tsize, TXT, title);
         fit_text(sub, tmax, 14);
         if (!g_error[0]) text(ax + 22, hy + 14 + tsize + 2, 14, DIM, sub);
+        float bend = ax + 22;                              /* right end of the badges, for centring the card */
         if (g_song) {
             float cx = ax + 22, cy = hy + hh - 30;
             char b[48];
@@ -2007,19 +2007,29 @@ static void draw_ui(double t) {
             int pf = song_paula_filter(g_song);
             if (pf >= 0) cx += chip(cx, cy, "PAULA-FILTER", pf ? VC[1] : DIM, pf);
             if (song_subsongs(g_song) > 1) { char sb[24]; snprintf(sb, sizeof sb, "SONG %d/%d", song_subsong(g_song) + 1, song_subsongs(g_song)); cx += chip(cx, cy, sb, VC[2], 1); }
+            bend = cx;
         }
         if (g_error[0]) text(ax + 22, hy + 14 + tsize + 2, 13, WARN, g_error);
         char tb[32];
         mmss(tb, sizeof tb, (double)g_frames / g_rate);
         text_right(ax + haw - 22, hy + 10, 34, TXT, tb);
+        float rw = text_width(tb, 34);                     /* width of the right column (time, order), for centring the card */
         if (g_song) {
             int o = g_view_valid ? g_view.order : -1;
             if (o >= 0) {
                 char ob[48]; snprintf(ob, sizeof ob, "ORDER %d / %d", o + 1, song_norders(g_song));
                 text_right(ax + haw - 22, hy + 48, 14, VC[0], ob);
+                if (text_width(ob, 14) > rw) rw = text_width(ob, 14);
             }
             if (g_paused) text_right(ax + haw - 22, hy + 66, 12, VC[2], "PAUSE");
             else if (g_ended) text_right(ax + haw - 22, hy + 66, 12, DIM, "ENDE");
+        }
+        if (chw > 0) {                                     /* the sound card sits in the middle between the title / badges and the time */
+            float tl = ax + 22 + fmaxf(text_width(title, tsize), text_width(sub, 14)), tr = ax + haw - 22 - rw;
+            if (bend > tl) tl = bend;
+            float x0 = 0.5f * (tl + tr) - chw / 2;
+            if (x0 < tl + 8) x0 = tl + 8;
+            draw_chips(x0, hy + 7, chh);
         }
     }
 
