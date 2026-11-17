@@ -606,7 +606,7 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
                     sm = acc * (v->volf / 255.0);
                 }
                 cs[i] = sm;
-                { double pr = s->linpan ? (v->pan >= 255 ? 1.0 : v->pan / 256.0) : (1.0 + 30.0 * v->pan / 255.0) / 32.0;   /* S3M gemessen: R = (2n+1)/32, n=pan>>4; MOD vorlaeufig */
+                { double pr = s->linpan ? (v->pan >= 255 ? 1.0 : v->pan / 256.0) : v->pan == 128 ? 0.5 : (1.0 + 30.0 * v->pan / 255.0) / 32.0;   /* pan 128 (mono S3M, never made by the ST3 pan table): exactly centred; S3M gemessen: R = (2n+1)/32, n=pan>>4; MOD vorlaeufig */
                   pr = pr < 0 ? 0 : pr > 1 ? 1 : pr;
                   l += sm * (1.0 - pr); r += sm * pr; }
                 v->pos += v->step;

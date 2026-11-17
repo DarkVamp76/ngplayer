@@ -57,6 +57,7 @@ int ngp_vibrato_delta(int pos, int wf, int depth){
     }
     /* gemessen (ngp_calib_hef + ICEFRONT Kanal 6/7): Betrag (v*depth + C)>>5, C=24 positiv, C=8 negativ.
        Offen: bei Tiefe 15 passt C_neg=16 besser (H8F), siehe STATUS.md */
-    int d = (v * depth + (pos < 0 ? 8 : 24)) >> 5;
+    static const uint8_t MS[32]={0,12,25,37,49,60,71,81,90,98,106,112,117,122,125,126,127,126,125,122,117,112,106,98,90,81,71,60,49,37,25,12};
+    int d = (wf & 3) == 0 ? (MS[idx] * depth) >> 4 : (v * depth) >> 5;
     return pos < 0 ? -d : d;
 }
