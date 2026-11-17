@@ -1279,7 +1279,7 @@ static void draw_chips(float x, float y, float h) {
     int k = chip_kind();
     float beat = g_paused ? 0.0f : g_beat;
     float cw = chips_width(h), sc = 1.0f + 0.07f * beat;
-    float gx = x + cw / 2, gy = k == 0 ? y + h * 0.08f + h * 0.25f : y + h / 2;
+    float gx = x + cw / 2, gy = y + h / 2;
     if (beat > 0.01f) {                                   /* Glow hinter dem Chip */
         set_additive(1);
         blob(gx, gy, (k == 0 ? cw * 0.30f : h * 0.55f) * (1.0f + 0.4f * beat), alpha(BEATC, 0.55f * beat));
@@ -1287,7 +1287,7 @@ static void draw_chips(float x, float y, float h) {
     }
     float hh = h * sc;                                    /* leicht wachsen, um die Mitte */
     float xx = x - (cw * sc - cw) / 2, yy = y - (hh - h) / 2;
-    if (k == 0) chip_dip(xx, yy + hh * 0.08f, hh * 0.5f, beat);
+    if (k == 0) chip_dip(xx, yy + hh * 0.25f, hh * 0.5f, beat);            /* the chip is half as high as the slot: centred in it */
     else { float b = 1.0f + 0.30f * beat; tex_quad(c3_texture(k - 1), xx, yy + hh * 0.57f - hh * 0.56f, cw * sc, hh * 1.12f, C(b, b, b, 1)); }
 }
 /* XTC-style water ripples behind the logo: one source per channel, amplitude follows the channel level */
@@ -2265,7 +2265,7 @@ static void draw_ui_portrait(float W, float H) {
                 if (cx > tl) tl = cx;
                 if (tr - tl >= 40) { x0 = 0.5f * (tl + tr) - chw / 2; if (x0 < tl + 4) x0 = tl + 4; }   /* centred between the title and the time; on a phone it may reach into the time, not into the title */
                 else if (x0 < cx + 6) x0 = cx + 6;                                          /* a very long title: lower right, may cover part of the time */
-                if (chw > 0 && x0 + chw <= M + aw - 6) draw_chips(x0, hy + 16 + (54 * k - chh) / 2, chh);
+                if (chw > 0 && x0 + chw <= M + aw - 6) draw_chips(x0, chip_kind() == 0 ? hy + hh / 2 - chh / 2 : hy + 16 + (54 * k - chh) / 2, chh);   /* the Paula chip in the middle of the card, the cards as before */
             }
         }
     }
