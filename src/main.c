@@ -2247,9 +2247,9 @@ static void draw_ui_portrait(float W, float H) {
             cx += chip(cx, cy, b, VC[2], 1);
             if (song_subsongs(g_song) > 1) { snprintf(b, sizeof b, "SONG %d/%d", song_subsong(g_song) + 1, song_subsongs(g_song)); cx += chip(cx, cy, b, VC[2], 1); }
             {   /* the sound card (the turning 3D model), lower right of the title card between the badges and the time column */
-                float chh = 38, chw = chips_width(chh), rightE = M + aw - 16 - 66, x0 = rightE - chw;
+                float chh = 54, chw = chips_width(chh), rightE = M + aw - 60, x0 = rightE - chw;     /* may cover part of the time while it turns */
                 if (x0 < cx + 6) x0 = cx + 6;
-                if (chw > 0 && x0 + chw <= M + aw - 16 - 50) draw_chips(x0, hy + 47, chh);
+                if (chw > 0 && x0 + chw <= M + aw - 6) draw_chips(x0, hy + 6, chh);
             }
         }
     }
