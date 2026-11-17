@@ -66,6 +66,7 @@ static int rd_inst_smp(const XSong *s, int inst, int note, int *smpi){
 }
 static double note_period(const XSong *s, int note, int relnote, int ft){
     int n = note + relnote;           /* 1-basiert */
+    if (s->linear && n > 119) n = 119;   /* libopenmpt caps the note (after the relative note) at 119 and adds the finetune afterwards (measured: period 128 - ft/2 for every note >= 119) */
     if (s->linear) return 7680.0 - (n - 1) * 64 - (double)(ft / 2);      /* FT2 / libopenmpt: integer division of the finetune (truncates towards zero), 0.78 cents for odd values */
     {   /* Amiga frequencies: libopenmpt's table (ProTracker periods with its own finetune steps), octaves above halve (floor), below double */
         int k = n - 1, oct = k >= 0 ? k / 12 : -((-k + 11) / 12), idx = k - oct * 12;
@@ -76,7 +77,7 @@ static double note_period(const XSong *s, int note, int relnote, int ft){
     }
 }
 static double period_hz(const XSong *s, double per){
-    if (per < (s->linear ? 128.0 : 30.0)) per = s->linear ? 128.0 : 30.0;   /* libopenmpt's highest pitch: period 30 (Amiga frequencies) or 128 (linear), measured with synthetic XM files */
+    if (per < (s->linear ? 1.0 : 30.0)) per = s->linear ? 1.0 : 30.0;   /* libopenmpt's highest pitch: period 30 (Amiga frequencies); linear: the note is capped at 119 instead (note_period), finetune added afterwards */
     if (s->linear) return 8363.0 * pow(2.0, (4608.0 - per) / 768.0);
     return 14317456.0 / per;
 }

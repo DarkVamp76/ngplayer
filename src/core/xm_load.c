@@ -115,13 +115,15 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
             o = dat;
         } else o += ihs;
     }
-    /* libopenmpt floors the finetune of ALL samples to a multiple of 8 unless the file is a genuine FastTracker 2 file (tracker name and every 'reserved' byte of the sample headers 0, 0xAD = ADPCM aside), whatever the frequency mode (measured with synthetic XM files over the whole finetune range: -35 -> -40, -28 -> -32, 4 -> 0, 11 -> 8). */
     s->xm_ft2 = !memcmp(b + 38, "FastTracker v2.00   ", 20) || !memcmp(b + 38, "FastTracker v 2.00  ", 20);     /* the tracker name (ModPlug files and its alpha use these names too) */
-    if (any_res || !s->xm_ft2) for (int k = 0; k < s->nxsmp; k++) s->xsmp[k].finetune = (int8_t)(s->xsmp[k].finetune & ~7);
     /* ModPlug Tracker 1.0 - 1.16 writes "FastTracker v2.00" like FT2 itself, but pads the sample names with 0 instead of spaces (libopenmpt tells them apart
      * this way and mixes them with its older, quieter levels). Gain relative to our FT2 mix level, measured on 3 files (4, 6 and 20 channels: 0.485, 0.415, 0.275):
      * 0.485 * (4 / channels) ^ 0.353. The "v 2.00" variant (ModPlug alpha) follows the same law. */
     if (!s->mixgain && !memcmp(b + 38, "FastTracker v2.00   ", 20) && nm0 > 0 && nm32 == 0) s->mixgain = 0.485 * pow(4.0 / (nch ? nch : 1), 0.353);
     else if (s->mixgain > 0) s->mixgain = 0.485 * pow(4.0 / (nch ? nch : 1), 0.353);
+    /* libopenmpt floors the finetune of every sample to a multiple of 8 (FT2's own ft >> 3 table lookup) - except for the ModPlug files above, which are written with
+     * zero padded sample names and keep the exact value (measured: heartland 0.837 -> 0.998, the_rain 0.890 -> 0.981, intros 0.972 -> 0.991, zebras_of_the_frozen_land
+     * 0.947 -> 0.995; amnesia, lwh and voda, all ModPlug, get worse when floored). Trackers other than FT2 floor as well (synthetic files over the whole range). */
+    if (!(s->mixgain > 0 && s->xm_ft2 && !any_res)) for (int k = 0; k < s->nxsmp; k++) s->xsmp[k].finetune = (int8_t)(s->xsmp[k].finetune & ~7);
     return 0;
 }
