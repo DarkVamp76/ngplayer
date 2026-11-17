@@ -76,7 +76,7 @@ static double note_period(const XSong *s, int note, int relnote, int ft){
     }
 }
 static double period_hz(const XSong *s, double per){
-    if (per < 1) per = 1;
+    if (per < (s->linear ? 128.0 : 30.0)) per = s->linear ? 128.0 : 30.0;   /* libopenmpt's highest pitch: period 30 (Amiga frequencies) or 128 (linear), measured with synthetic XM files */
     if (s->linear) return 8363.0 * pow(2.0, (4608.0 - per) / 768.0);
     return 14317456.0 / per;
 }
@@ -323,7 +323,13 @@ static void do_tick(XXPlayer *p){
         int eff = x->eff, par = x->par, vc = x->vol1;
         if (!((eff == 0 && par) || eff == 4 || eff == 6) && ((x->eff2 == 0 && x->par2) || x->eff2 == 4 || x->eff2 == 6)) { eff = x->eff2; par = x->par2; }   /* arpeggio/vibrato from the second slot */
         double per = c->per;
-        if (eff == 0 && par) { int a = p->tick % 3; int semi = a == 1 ? par >> 4 : a == 2 ? par & 15 : 0; per = s->linear ? per - 64 * semi : per * pow(2.0, -semi / 12.0); }
+        if (eff == 0 && par) {
+            /* FastTracker 2: base, x, y, base, x, y ...; every other tracker (libopenmpt): the remaining ticks of the row decide: tick 0 = base, then (speed - tick) % 3 with 1 = x, 2 = y */
+            int a = s->xm_ft2 ? p->tick % 3 : (p->tick == 0 ? 0 : (p->speed - p->tick) % 3);
+            int semi = a == 1 ? par >> 4 : a == 2 ? par & 15 : 0;
+            if (s->linear) per -= 64 * semi;
+            else if (semi) per = per * note_period(s, c->note + semi, m->relnote, c->ft) / note_period(s, c->note, m->relnote, c->ft);     /* the table period of the arpeggio note */
+        }
         if (eff == 4 || eff == 6 || (vc >> 4) == 0xB) {
             double v = sine64(c->m_vpos, c->vwave); per += v * c->m_vd / 32.0; if (p->tick > 0) { c->m_vpos += c->m_vs; c->m_vpos &= 63; }
         }
