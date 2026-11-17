@@ -340,7 +340,7 @@ static void do_tick(XXPlayer *p){
               if (I->vibsweep) { if (c->keyon) c->avcnt++; amp = c->avcnt * ((I->vibdepth << 8) / I->vibsweep); if (amp > (I->vibdepth << 8)) amp = I->vibdepth << 8; }
               c->avpos += I->vibrate; int ap = c->avpos & 255;   /* libopenmpt: the position advances before it is used; 256 steps per cycle */
               double wv = I->vibtype == 0 ? (double)lround(sin(ap * 2 * M_PI / 256.0) * 64) : I->vibtype == 1 ? (ap < 128 ? 64 : -64) : I->vibtype == 2 ? (double)(((64 - (ap >> 1)) & 127) - 64) : (double)(((64 + (ap >> 1)) & 127) - 64);
-              per -= trunc(wv * amp / (64.0 * 256.0));   /* libopenmpt cuts the period offset towards zero (depth 1 must stay silent except at the peaks) */
+              per += floor(-(wv * amp) / (64.0 * 256.0));   /* libopenmpt cuts the period offset towards zero (depth 1 must stay silent except at the peaks) */
           } }
         if (eff == 0x21 && 0) {}
         /* Huellkurven */
