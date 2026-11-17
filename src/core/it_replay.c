@@ -22,7 +22,7 @@ typedef struct {
     double freq, ptarget; uint32_t c5;
     int note, new_note, new_inst, last_inst;
     int row_note, row_inst, row_vc, row_vp, row_cmd, row_par;
-    int kofp; int vol, chvol, instvol, pan, chpan; int fadeout; int vpos, ppos, tpos; int master; int cutoff, resonance; double fa0, fb0, fb1, fy[2][2];
+    int cut; int kofp; int vol, chvol, instvol, pan, chpan; int fadeout; int vpos, ppos, tpos; int master; int cutoff, resonance; double fa0, fb0, fb1, fy[2][2];
     int vibpos, vibdepth, vibspeed, vibtype, tremdepth, tremspeed, trempos, tremtype, tremdelta;
     int pbdepth, pbspeed, pbpos, pbtype, pbdelta;
     int avdepth, avpos;
@@ -127,7 +127,7 @@ static void key_off(ITPlayer *p, V *c){
     }
 }
 static void note_cut(ITPlayer *p, V *c){
-    (void)p;
+    (void)p; c->cut = 1;
     if ((c->row_note) && c->row_vc == V_TPORTA && c->row_note < 120) return;
     c->flags |= F_FADE | F_FAST; c->fadeout = 0; c->len = 0;
 }
@@ -206,7 +206,7 @@ static void note_change(ITPlayer *p, V *c, int ch, int note, int porta, int retr
     if (in && in->pps && !porta) {
         int d = (c->note - in->ppc - 1) * in->pps / 2; c->pan = clampi(c->pan + d, 0, 256);
     }
-    if (!porta) { c->fadeout = 65536; c->flags &= ~F_FADE; c->vpos = c->ppos = c->tpos = 0; c->kofp = 0; c->flags |= F_NEWNOTE;
+    if (!porta) { c->cut = 0; c->fadeout = 65536; c->flags &= ~F_FADE; c->vpos = c->ppos = c->tpos = 0; c->kofp = 0; c->flags |= F_NEWNOTE;
         if (in) { if (in->ifr & 0x80) c->resonance = in->ifr & 0x7F; if (in->ifc & 0x80) c->cutoff = in->ifc & 0x7F; } }
     if (!(porta && (!(s->flags & 32) || !c->row_inst))) c->flags &= ~F_KEYOFF;
     if (!porta) {
@@ -478,6 +478,7 @@ static void process_effects(ITPlayer *p, int ft){
         c->ncmd = 0;
         int instr = c->row_inst, vc = c->row_vc, vp = c->row_vp, cmd = c->row_cmd, param = c->row_par;
         int porta = (cmd == 7 || cmd == 12 || vc == V_TPORTA);
+        if (porta && c->cut && c->row_note != NONE && c->row_note >= 1 && c->row_note <= 120) porta = 0;     /* after a note cut a note with a tone portamento is an ordinary note start (libopenmpt, measured) */
         int start_note = ft;
         c->flags &= ~F_FAST;
         if (instr && start_note) c->new_inst = instr;
