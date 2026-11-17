@@ -15,3 +15,4 @@ extern uint32_t ngp_it_fine_up[16], ngp_it_fine_dn[16];     /* 2^(+-i/768) */
 int  ngp_tporta_normal(int cur, int target, int speed);  /* liefert neues cur */
 int  ngp_tporta_linear(int cur, int target, int speed);  /* speed = Index 0..256 */
 int  ngp_vibrato_delta(int pos /*int8*/, int waveform, int depth); /* signiert, addiert auf Periode */
+int  ngp_vibrato_delta_mod(int pos, int waveform, int depth);       /* MOD: ganze Amiga-Perioden (x4) */
