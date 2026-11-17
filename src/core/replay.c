@@ -19,6 +19,13 @@ static int qper(int per){ int qc = g_qc;
 /* S3M: Rate = (c2spd * ST[halbton]) >> (16 - Oktave), ST = floor(2^(s/12) * 65536) -- gemessen an 58/60 Noten (ngp_calib_notes) */
 static const uint32_t ST16[12] = {65536, 69432, 73561, 77935, 82570, 87480, 92681, 98193, 104031, 110217, 116771, 123715};
 static int period_fine(const XSong *s, int note, uint32_t c2spd){
+    if (s->fmt == 1 && s->pt_tuning == 2 && getenv("XMODHZ") == NULL && getenv("XMODNTSC") == NULL && c2spd && note >= 0x18 && note < 0x18 + 84) {
+        /* real MOD: the tuned ProTracker period of the note, as libopenmpt plays it (finetune table, quarter period steps) */
+        int ft = 0; for (int i = 0; i < 16; i++) if (c2spd == ngp_finetune_c2spd_mod[i]) { ft = i; break; }
+        int k = note - 0x18 - 12, oct = k >= 0 ? k / 12 : -1 - (-k - 1) / 12, n = k - oct * 12;      /* k = 0: C-1 (856) */
+        double per = oct < 0 ? ngp_pt_tuned4[ft][n] * (double)(1 << -oct) / 4.0 : oct < 3 ? ngp_pt_tuned4[ft][oct * 12 + n] / 4.0 : ngp_pt_tuned4[ft][24 + n] / 4.0 / (double)(1 << (oct - 2));
+        return (int)(g_clk * PK / (g_clk / 4.0 / per));
+    }
     if (s->fmt == 1 && s->pt_tuning && getenv("XMODHZ") == NULL && getenv("XMODNTSC") == NULL && c2spd && note >= 0x18 && note < 0x18 + 84) {
         /* MOD (PAL): the real ProTracker period of the note (table, not the 12 tone equal temperament) at the tuning of the sample: hz = c2spd * 428 / period */
         double hz = (double)c2spd * 428.0 / ngp_pt_periods[note - 0x18];
