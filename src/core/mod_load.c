@@ -56,7 +56,7 @@ int xmod_load(XSong *s, const uint8_t *b, size_t len){
         m->len = l; m->ls = ls; m->le = ls + ll*2u;
         if (ll > 1) m->loop = 1;
         if (m->le > m->len) m->le = m->len;
-        m->c2spd = ngp_finetune_c2spd[ft];
+        m->c2spd = ngp_finetune_c2spd_mod[ft];
     }
     s->nord = p[0]; if (s->nord < 1 || s->nord > 128) s->nord = 128;
     memcpy(s->orders, p + 2, 128);
