@@ -59,7 +59,8 @@ typedef struct {
     int restart;
     int *prows;                /* XM: Zeilen je Pattern (sonst 64) */
     int amiga;                 /* MOD: echtes Amiga-Format (M.K., M!K!, FLT4, 15 Samples) -> Paula-Tiefpass */
-    int pt_tuning;             /* fmt 1: 0 = 12 tone equal temperament (FAR, AMF, PSM, MED ...), 1 = ProTracker period table (MTM), 2 = real MOD (fmt 2, S3M: 1 = integer ST3 period table, 0 = exact; saved by Impulse Tracker): period table + PAL tuning + exact slides */
+    int linpan;                /* 1 = linear pan law (DSM, like libopenmpt) instead of the S3M law */
+    int pt_tuning;             /* fmt 1: 0 = 12 tone equal temperament (FAR, AMF, PSM, MED ...), 1 = ProTracker period table (MTM), 3 = DSM (integer ST3 period like S3M), 2 = real MOD (fmt 2, S3M: 1 = integer ST3 period table, 0 = exact; saved by Impulse Tracker): period table + PAL tuning + exact slides */
 } XSong;
 
 int  xmod_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok */
@@ -77,6 +78,8 @@ int  dbm_probe(const uint8_t *buf, size_t len);              /* 1 = DigiBooster 
 int  xdbm_load(XSong *s, const uint8_t *buf, size_t len);      /* 0 = ok (-> XM replay) */
 int  amf_probe(const uint8_t *buf, size_t len);              /* 1 = DSMI AMF ("AMF" + version 8..14) */
 int  xamf_load(XSong *s, const uint8_t *buf, size_t len);      /* 0 = ok (-> MOD replay) */
+int  dsm_probe(const uint8_t *buf, size_t len);              /* 1 = DSIK / Digisound DSM ("DSMF" RIFF) */
+int  xdsm_load(XSong *s, const uint8_t *buf, size_t len);      /* 0 = ok (DSM -> MOD replay) */
 int  asylum_probe(const uint8_t *buf, size_t len);          /* 1 = Asylum Music Format (Crusader) */
 int  xasylum_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (-> MOD replay) */
 int  mtm_probe(const uint8_t *buf, size_t len);             /* 1 = MultiTracker file */
