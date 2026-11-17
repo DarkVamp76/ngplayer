@@ -32,8 +32,6 @@
 #endif
 
 #include "gfx.inc"
-#include "card_data.h"
-static GLuint card_tex[2];
 
 /* ================================================================== Palette */
 static const col BG0 = { 0.035f, 0.043f, 0.078f, 1 };
@@ -1352,11 +1350,12 @@ static int chip_kind(void) {
     if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || (!strcmp(f, "MOD") && n <= 4)) return 0;
     return n >= 15 ? 2 : 1;
 }
+#include "card3d.inc"
 static float chips_width(float h) {                       /* Breite des Chipbereichs (0 = keiner) */
     if (!g_song) return 0;
     int k = chip_kind();
     if (k == 0) return 5.0f * h * 0.5f;                            /* Paula: flacher Streifen (5:1), in halber Hoehe */
-    return k == 1 ? h * ((float)CARD_GUS_W / CARD_GUS_H) : h * ((float)CARD_IW_W / CARD_IW_H);   /* photo of the sound card */
+    return 1.12f * h * c3_box_aspect(k - 1);                       /* the rotating 3D sound card */
 }
 static void draw_chips(float x, float y, float h) {
     if (!g_song) return;
@@ -1372,7 +1371,7 @@ static void draw_chips(float x, float y, float h) {
     float hh = h * sc;                                    /* leicht wachsen, um die Mitte */
     float xx = x - (cw * sc - cw) / 2, yy = y - (hh - h) / 2;
     if (k == 0) chip_dip(xx, yy + hh * 0.08f, hh * 0.5f, beat);
-    else { float b = 1.0f + 0.30f * beat, f = 0.88f; tex_quad(card_tex[k - 1], xx + cw * sc * (1 - f) / 2, yy + hh * 0.15f, cw * sc * f, hh * f, C(b, b, b, 1)); }   /* a bit smaller and lower: clear of the top edge */
+    else { float b = 1.0f + 0.30f * beat; tex_quad(c3_texture(k - 1), xx, yy + hh * 0.57f - hh * 0.56f, cw * sc, hh * 1.12f, C(b, b, b, 1)); }
 }
 /* XTC-style water ripples behind the logo: one source per channel, amplitude follows the channel level */
 static void logo_waves(float x, float y, float w, float h) {
@@ -2989,6 +2988,7 @@ static void iter(void) {
         /* Songende -> naechster Titel */
         if (!shot) song_end_advance();
 
+        if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
         glViewport(0, 0, dw, dh);
         glClearColor(BG0.r, BG0.g, BG0.b, 1);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -3115,16 +3115,6 @@ int main(int argc, char **argv) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glGenTextures(2, card_tex);
-    for (int i = 0; i < 2; i++) {
-        glBindTexture(GL_TEXTURE_2D, card_tex[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, i ? CARD_IW_W : CARD_GUS_W, i ? CARD_IW_H : CARD_GUS_H, 0, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, i ? (const void *)card_iw : (const void *)card_gus);
-        glGenerateMipmap(GL_TEXTURE_2D);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    }
     glBindTexture(GL_TEXTURE_2D, fonttex);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
