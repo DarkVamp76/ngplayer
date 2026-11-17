@@ -949,39 +949,62 @@ static void draw_voxel(float x, float y, float w, float h) {
     text(x + 18, y + 10, 12, DIM, "VOXEL");
     float ax = x + 12, ay = y + 34, aw = w - 24, ah = h - 46;
     if (aw < 60 || ah < 60) { view_switch(x, y, w); return; }
-    const int NSEG = g_mobile ? 5 : 8;                 /* a short field: it starts a little away from the front edge and does not run so deep */
-    const float Z0 = 18.0f, DZ = g_mobile ? 5.0f : 3.2f, CAMY = 17.0f, HMAX = 15.0f, CW = 1.0f;
+    /* Real voxels: cubes of one unit edge (width, depth and height), stacked per band as high as the band's level. Only the exposed faces
+     * are drawn: the top of each stack, the side facing the centre where the next column is lower, and the front of the nearest row. */
+    const int NSEG = g_mobile ? 8 : 14;                 /* depth rows (one cube deep each): a short field that starts away from the front edge */
+    const float Z0 = 18.0f, CAMY = 17.0f, CW = 1.0f, CUBE = 0.84f, SEAM = 0.05f;
+    const int HMAXN = 15;
     float hor = ay + ah * 0.20f, cx = ax + aw * 0.5f, fx = aw * 0.178f * Z0 / 12.0f, fy = ah * 0.72f;
     col fogc = mix(BG1, VC[1], 0.20f);
     rect_grad(ax, ay, aw, ah, mix(BG0, VC[0], 0.03f), mix(BG1, VC[1], 0.14f));       /* backdrop */
     {   /* floor lines towards the vanishing point */
-        float zf = Z0 + NSEG * DZ;
+        float zf = Z0 + NSEG * CW;
         for (int b = 0; b <= NBANDS; b += 8) {
             float wx = (b - NBANDS / 2) * CW;
             float xy[4] = { cx + wx / Z0 * fx, hor + CAMY / Z0 * fy, cx + wx / zf * fx, hor + CAMY / zf * fy };
             polyline(xy, 2, 0.5f, 3.0f, alpha(FAINT, 0.18f));
         }
     }
+    int ncube[NBANDS];
+    for (int b = 0; b < NBANDS; b++) { int n = (int)(vx_lv[b] * HMAXN + 0.5f); ncube[b] = n < 0 ? 0 : (n > HMAXN ? HMAXN : n); }
+#define VPX(wx, z) (cx + (wx) / (z) * fx)
+#define VPY(wy, z) (hor + (CAMY - (wy)) / (z) * fy)
     for (int sg = NSEG - 1; sg >= 0; sg--) {
-        float zn = Z0 + sg * DZ, zf = zn + DZ * 0.88f;
+        float zn = Z0 + sg * CW, zf = zn + CUBE;
         float fgt = (float)sg / NSEG; fgt = fgt * fgt;
-        float sn = 1.0f / zn, sf = 1.0f / zf;
-        for (int m = 0; m < NBANDS; m++) {
-            int b = m < NBANDS / 2 ? m : NBANDS - 1 - (m - NBANDS / 2);               /* from the left edge inwards, then from the right edge inwards */
-            float hh = (vx_lv[b] < 0.02f ? 0.02f : vx_lv[b]) * HMAX, wx0 = (b - NBANDS / 2) * CW + 0.08f, wx1 = wx0 + CW * 0.84f;
-            float xn0 = cx + wx0 * sn * fx, xn1 = cx + wx1 * sn * fx, xf0 = cx + wx0 * sf * fx, xf1 = cx + wx1 * sf * fx;
-            float ybn = hor + CAMY * sn * fy, ytn = hor + (CAMY - hh) * sn * fy;
-            float ybf = hor + CAMY * sf * fy, ytf = hor + (CAMY - hh) * sf * fy;
+        float fg = fgt * 0.85f;
+        for (int mi = 0; mi < NBANDS; mi++) {
+            int b = mi < NBANDS / 2 ? mi : NBANDS - 1 - (mi - NBANDS / 2);               /* from the left edge inwards, then from the right edge inwards */
+            int n = ncube[b];
+            if (n < 1) continue;
+            float wx0 = (b - NBANDS / 2) * CW + 0.08f, wx1 = wx0 + CUBE;
             float u = (float)b / (NBANDS - 1);
             col lo = u < 0.5f ? mix(VC[0], VC[1], u * 2) : mix(VC[1], VC[2], (u - 0.5f) * 2);
-            float fg = fgt * 0.85f;
             col topc = mix(mix(lo, C(1, 1, 1, 1), 0.35f), fogc, fg), frontc = mix(lo, fogc, fg), sidec = mix(mix(lo, BG0, 0.45f), fogc, fg);
-            if (b >= NBANDS / 2) { tri(xn0, ybn, xn0, ytn, xf0, ytf, sidec); tri(xn0, ybn, xf0, ytf, xf0, ybf, sidec); }
-            else                 { tri(xn1, ybn, xn1, ytn, xf1, ytf, sidec); tri(xn1, ybn, xf1, ytf, xf1, ybf, sidec); }
-            if (sg == 0) rect_grad(xn0, ytn, xn1 - xn0, ybn - ytn, mix(frontc, C(1, 1, 1, 1), 0.10f), alpha(frontc, 0.55f));   /* front face of the nearest block only */
-            tri(xn0, ytn, xn1, ytn, xf0, ytf, topc); tri(xn1, ytn, xf1, ytf, xf0, ytf, topc);
+            /* the side towards the centre: the cubes above the next column towards the centre */
+            int inner = b >= NBANDS / 2 ? b - 1 : b + 1, ni = (inner >= 0 && inner < NBANDS) ? ncube[inner] : 0;
+            float sx = b >= NBANDS / 2 ? wx0 : wx1;
+            for (int k = ni; k < n; k++) {
+                float y0 = k + SEAM, y1 = k + 1 - SEAM;
+                float xa = VPX(sx, zn), xb = VPX(sx, zf);
+                float ya0 = VPY(y0, zn), ya1 = VPY(y1, zn), yb0 = VPY(y0, zf), yb1 = VPY(y1, zf);
+                tri(xa, ya0, xa, ya1, xb, yb1, sidec); tri(xa, ya0, xb, yb1, xb, yb0, sidec);
+            }
+            if (sg == 0) {                                                               /* fronts of the nearest row, cube by cube */
+                float xl = VPX(wx0, zn), xr = VPX(wx1, zn);
+                for (int k = 0; k < n; k++) {
+                    float yt = VPY(k + 1 - SEAM, zn), yb = VPY(k + SEAM, zn);
+                    rect_grad(xl, yt, xr - xl, yb - yt, mix(frontc, C(1, 1, 1, 1), 0.10f), alpha(frontc, 0.75f));
+                }
+            }
+            {                                                                            /* top of the stack */
+                float x0n = VPX(wx0, zn), x1n = VPX(wx1, zn), x0f = VPX(wx0, zf), x1f = VPX(wx1, zf), ytn = VPY(n - SEAM, zn), ytf = VPY(n - SEAM, zf);
+                tri(x0n, ytn, x1n, ytn, x0f, ytf, topc); tri(x1n, ytn, x1f, ytf, x0f, ytf, topc);
+            }
         }
     }
+#undef VPX
+#undef VPY
     view_switch(x, y, w);
 }
 
