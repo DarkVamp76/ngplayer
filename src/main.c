@@ -2685,6 +2685,10 @@ EM_JS(void, web_media_position, (double dur, double pos, double rate), {
     var a = Module.ngMediaEl;
     if (!a) return;
     Module.ngPosBase = pos; Module.ngPosT = performance.now(); Module.ngPosRate = rate;
+    if (dur === 0) {                                   /* length of the new song is still being measured: no source swap now (each swap of the element can make iOS drop a moment of the Web Audio output) */
+        if (Module.ngTl && Math.abs(a.currentTime - pos) > 1.0) a.currentTime = pos;
+        return;
+    }
     if (dur > 0 && dur < 900) {
         if (!Module.ngTl || Math.abs(Module.ngTl - dur) > 0.5) {
             var secs = Math.ceil(dur) + 3, n = 8000 * secs;
@@ -2716,7 +2720,7 @@ static double g_len_s;                      /* > 0: length in seconds, 0: still 
 static double ps_pos, ps_rate = -1, ps_len = -2; static Uint32 ps_t;
 static void media_push_position(void) {
     double pos = (double)g_frames / g_rate, rate = (g_song && !g_paused && !g_ended) ? 1.0 : 0.0;
-    web_media_position(g_len_s > 0 ? g_len_s : -1, pos, rate);
+    web_media_position(g_len_s > 0 ? g_len_s : (g_len_s == 0 ? 0 : -1), pos, rate);   /* 0: the length is being measured - keep the silent track, only unknown (-1) goes back to the 1 s loop */
     ps_pos = pos; ps_rate = rate; ps_len = g_len_s; ps_t = SDL_GetTicks();
 }
 static void probe_tick(void *arg) {
