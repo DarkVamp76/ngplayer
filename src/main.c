@@ -865,6 +865,7 @@ static void ob_init(void) {
         }
 }
 
+#include "orb3d.inc"
 static void draw_orb(float x, float y, float w, float h) {
     static int init;
     static float t, spin;
@@ -881,52 +882,9 @@ static void draw_orb(float x, float y, float w, float h) {
         orb_bs[b] += (v - orb_bs[b]) * (v > orb_bs[b] ? 0.7f : 0.25f);
     }
     float cx = x + w / 2, cy = y + h / 2 + 6, R = 0.34f * (w < h ? w : h);
-    float ca = cosf(spin), sa = sinf(spin), ct = cosf(0.42f), st = sinf(0.42f), fz = 8.0f * R;
-    static float sx[OB_V], sy[OB_V], dn[OB_V], ev[OB_V];
-    for (int i = 0; i < ob_nv; i++) {
-        float ux = ob_u[i][0], uy = ob_u[i][1], uz = ob_u[i][2];
-        float lat = fabsf(uy), bf = lat * (NBANDS - 1);      /* Aequator = Bass, Pole = Hoehen */
-        int b0 = (int)bf;
-        if (b0 > NBANDS - 2) b0 = NBANDS - 2;
-        float fr = bf - b0, lon = atan2f(uz, ux);
-        float e = (orb_bs[b0] * (1 - fr) + orb_bs[b0 + 1] * fr) * (0.65f + 0.35f * sinf(lon * 3.0f + t * 1.3f + lat * 5.0f));
-        if (e > 1) e = 1;
-        ev[i] = e;
-        float rad = R * (1.0f + 0.06f * beat + 0.36f * e);
-        float px = ux * rad, py = uy * rad, pz = uz * rad;
-        float rx = px * ca + pz * sa, rz = -px * sa + pz * ca;
-        float ry = py * ct - rz * st, rz2 = py * st + rz * ct;
-        float sc = fz / (fz + rz2);
-        sx[i] = cx + rx * sc; sy[i] = cy + ry * sc;
-        float d = 0.5f - 0.5f * rz2 / (1.5f * R);             /* 1 = vorne, 0 = hinten */
-        dn[i] = d < 0 ? 0 : (d > 1 ? 1 : d);
-    }
     set_additive(1);
     blob(cx, cy, R * (0.60f + 0.12f * beat), alpha(VC[0], 0.05f + 0.08f * beat));
-    for (int f = 0; f < ob_nf; f++) {                        /* halbtransparente Flaechen, je nach Energie der drei Knoten */
-        int a = ob_f[f][0], b = ob_f[f][1], c = ob_f[f][2];
-        float e = (ev[a] + ev[b] + ev[c]) * (1.0f / 3.0f), d = (dn[a] + dn[b] + dn[c]) * (1.0f / 3.0f);
-        float al = (0.012f + 0.30f * e * e) * (0.25f + 0.75f * d);
-        if (al < 0.01f) continue;
-        col col0 = e < 0.5f ? mix(VC[0], VC[1], e * 2.0f) : mix(VC[1], VC[2], (e - 0.5f) * 2.0f);
-        tri(sx[a], sy[a], sx[b], sy[b], sx[c], sy[c], alpha(mix(col0, C(1, 1, 1, 1), 0.25f), al));
-    }
-    for (int k = 0; k < ob_ne; k++) {                        /* Kanten */
-        int a = ob_e[k][0], b = ob_e[k][1];
-        float e = 0.5f * (ev[a] + ev[b]), d = 0.5f * (dn[a] + dn[b]);
-        col c = e < 0.5f ? mix(VC[0], VC[1], e * 2.0f) : mix(VC[1], VC[2], (e - 0.5f) * 2.0f);
-        c = mix(c, C(1, 1, 1, 1), 0.45f);
-        float xy[4] = { sx[a], sy[a], sx[b], sy[b] };
-        polyline(xy, 2, 0.55f + 0.5f * d, 3.0f, alpha(c, (0.10f + 0.50f * d) * (0.55f + 0.9f * e)));
-    }
-    for (int i = 0; i < ob_nv; i++) {                        /* Knoten: heller Kern plus Leuchten */
-        float e = ev[i], d = dn[i];
-        col c = e < 0.5f ? mix(VC[0], VC[1], e * 2.0f) : mix(VC[1], VC[2], (e - 0.5f) * 2.0f);
-        c = mix(c, C(1, 1, 1, 1), 0.55f);
-        float rr = 0.9f + 1.5f * d + 1.6f * e;
-        rrect(sx[i] - rr, sy[i] - rr, rr * 2, rr * 2, rr, alpha(c, 0.25f + 0.70f * d));
-        if (e > 0.12f) blob(sx[i], sy[i], 3.0f + 5.0f * e, alpha(c, 0.30f * e * (0.3f + 0.7f * d)));
-    }
+    ob_gpu_draw(cx, cy, R, spin, t, beat, orb_bs);                       /* the mesh is moved, projected and shaded on the GPU */
     set_additive(0);
     view_switch(x, y, w);
 }
@@ -3091,6 +3049,7 @@ int main(int argc, char **argv) {
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
     if (getenv("NGPLAYER_TEST_PLOPEN")) g_plopen = 1;        /* test hook: playlist overlay open (phone layout) */
+    if (getenv("NGPLAYER_TEST_ORB")) g_vmode = 1;                  /* test hook: orb view */
     if (getenv("NGPLAYER_TEST_SCOPES")) g_vmode = 3;               /* test hook: scopes view */
     if (getenv("NGPLAYER_TEST_VOXEL")) g_vmode = 2;               /* test hook: voxel flight view */
     if (getenv("NGPLAYER_TEST_DICE")) { dice_start(); if (getenv("NGPLAYER_TEST_DICE")[0] == '2') dice_stop_req = 1; }        /* test hook: the big dancing dice, as while a random module is fetched */

@@ -61,6 +61,8 @@ typedef long GLintptr;
 #define GL_FRAMEBUFFER_COMPLETE 0x8CD5
 #define GL_TEXTURE0 0x84C0
 #define GL_CULL_FACE 0x0B44
+#define GL_PROGRAM_POINT_SIZE 0x8642
+#define GL_POINTS 0
 
 #define GLFUNCS(X) \
     X(void, glClearColor, (GLfloat, GLfloat, GLfloat, GLfloat)) \
