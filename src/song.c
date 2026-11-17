@@ -419,6 +419,7 @@ static void fmt_s3m_fx(const XCell *x, SongCell *o) {
             cl = (sub == 8) ? 3 : (sub == 0xC || sub == 0xD) ? 5 : (sub == 0xB || sub == 0xE) ? 4 : 2;
         }
         break;
+    case 0x30: case 0x31: case 0x32: case 0x33: case 0x34: L = (char)('0' + (e - 0x30)); cl = 2; break;     /* 669: slide up, slide down, slide to note, frequency adjust, vibrato */
     default: L = fxc(e); cl = 5; break;
     }
     fx3(o->fx, L, par & 0xFF); o->fxclass = (uint8_t)cl;
@@ -612,6 +613,9 @@ const char *song_fx_name(const Song *s, const SongCell *c, int *is_vol) {
                 return E[par >> 4];
             }
             }
+        } else if (s->fmt && !strcmp(s->fmt, "669") && L >= '0' && L <= '4') {      /* Composer 669 effects */
+            static const char *N669[5] = { "Slide Up", "Slide Down", "Slide to Note", "Freq Adjust", "Vibrato" };
+            return N669[L - '0'];
         } else {
             switch (L) {
             case 'A': return "Set Speed";      case 'B': return "Pos Jump";      case 'C': return "Pattern Break";
