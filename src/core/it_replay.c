@@ -755,7 +755,7 @@ static void update_channels(ITPlayer *p){
             fpan = clampi(fpan, 0, 256);
             double pan = (double)(fpan - 128) * s->sep / 128.0 + 128.0; pan = pan < 0 ? 0 : pan > 256 ? 256 : pan;
             double real = (double)fv * master / 128.0;
-            if (c->flags & F_SURR) { c->gl = real * 0.5; c->gr = real * 0.5; }
+            if (c->flags & F_SURR) { c->gl = real * 0.5; c->gr = -real * 0.5; }      /* surround: the right channel is inverted, like libopenmpt (it cancels in a mono mix) */
             else { c->gl = real * (256.0 - pan) / 256.0; c->gr = real * pan / 256.0; }
             c->gl *= p->K; c->gr *= p->K;
             c->active = 1;
