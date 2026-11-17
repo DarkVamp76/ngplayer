@@ -34,12 +34,13 @@ static int period_fine(const XSong *s, int note, uint32_t c2spd){
     if ((s->fmt == 2 || (s->fmt == 1 && getenv("XMODHZ") == NULL)) && c2spd && note >= 0) {
         int d = note / 12 - 4;
         uint64_t hz;
-        if (s->fmt == 2 && s->pt_tuning) {   /* S3M: integer ST3 period table like libopenmpt: period = (T[n] << 5) >> octave, hz = c2spd * 1712 * 32 / period */
+        if (s->fmt == 2 && s->pt_tuning) {   /* S3M: integer ST3 period table like libopenmpt */
             static const uint32_t T3[12] = {1712,1616,1524,1440,1356,1280,1208,1140,1076,1016,960,907};
-            uint64_t per = d >= 0 ? ((uint64_t)T3[note % 12] << 5) >> d : ((uint64_t)T3[note % 12] << 5) << -d;
-            if (per < 1) per = 1;
-            uint64_t pp = per * 8363 / c2spd; if (pp < 1) pp = 1;   /* period scaled to the sample rate (integer), then the frequency from it */
-            hz = (uint64_t)8363 * 1712 * 32 / pp;
+            /* libopenmpt: period = 8363 * T / (c2spd << octave) as an integer (ST3 units), frequency = 8363 * 1712 / period */
+            uint64_t num = (uint64_t)8363 * T3[note % 12];
+            uint64_t pp = d >= 0 ? num / ((uint64_t)c2spd << d) : (num << -d) / c2spd;
+            if (pp < 1) pp = 1;
+            return (int)(14318184.0 * PK * (double)pp / (8363.0 * 1712.0));
         } else {
         uint64_t m = (uint64_t)c2spd * ST16[note % 12];
         hz = (16 - d >= 0) ? (m >> (16 - d)) : (m << (d - 16));
@@ -408,7 +409,7 @@ static void voice_update(XPlayer *p, int chn){
       else if (fv == 3) { v->vol = (int)ex; v->volf = v->vol; }
       else { v->vol = old; v->volf = old; } }
     v->pan = clampi(c->pan5c, 0, 255);
-    v->step = c->p74 > 0 ? hzq(g_clk * PK / c->p74) / p->rate : 0.0;
+    v->step = c->p74 > 0 ? (p->s->fmt == 2 && p->s->pt_tuning ? g_clk * PK / c->p74 : hzq(g_clk * PK / c->p74)) / p->rate : 0.0;   /* S3M (ST3 table): exact rate like libopenmpt */
     if (c->sy && c->vib_d && c->vib_s) v->step *= pow(2.0, sin(c->vib_ph * 6.283185307179586 / 256.0) * c->vib_d / 384.0);   /* MED synth vibrato (depth scale estimated) */
 }
 
