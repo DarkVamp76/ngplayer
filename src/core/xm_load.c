@@ -102,6 +102,15 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
                 if (m->le > m->len) m->le = m->len;
                 if (!ll || ls >= m->len) m->loop = 0;
                 size_t bytes = (size_t)len * (m->is16 ? 2 : 1);
+                int adpcm = h[17] == 0xAD && !m->is16;          /* ModPlug 4 bit ADPCM: 16 byte delta table, then two samples per byte (low nibble first) */
+                if (adpcm && len && dat + 16 <= n) {
+                    size_t pk = 16 + ((size_t)len + 1) / 2;
+                    if (dat + pk > n) { len = (uint32_t)((n - dat - 16) * 2); if (len > m->len) len = m->len; }
+                    m->len = len; if (m->le > m->len) m->le = m->len;
+                    m->data = calloc((size_t)len + 4, 1);
+                    { int dl = 0; for (uint32_t j = 0; j < len; j++) { uint8_t by = b[dat + 16 + j / 2]; dl = (int8_t)(dl + (int8_t)b[dat + (by >> ((j & 1) * 4) & 15)]); m->data[j] = (int8_t)dl; } }
+                    dat += pk; continue;
+                }
                 if (len && dat < n) {
                     if (dat + bytes > n) { bytes = n - dat; m->len = len = bytes / (m->is16 ? 2 : 1); if (m->le > m->len) m->le = m->len; }
                     m->data = calloc((size_t)len * (m->is16 ? 2 : 1) + 4, 1);
