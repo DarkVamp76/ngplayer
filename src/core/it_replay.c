@@ -640,10 +640,11 @@ static void setup_filter(ITPlayer *p, V *c, int reset, int mod){
     if (res > 255) res = 255;
     if (res == 0 && cutoff >= 254) { if (c->flags & F_NEWNOTE) c->flags &= ~F_FILT; return; }
     c->flags |= F_FILT;
-    double freq = 110.0 * pow(2.0, cutoff * (128.0 / (24.0 * 256.0)) + 0.25);
+    int mpl = p->s->cwt == 0x217 && p->s->cmwt == 0x200 && !p->s->rsv;   /* ModPlug-saved: libopenmpt's older filter, fitted to its measured response: cutoff x 1.12, damping x 2.5 */
+    double freq = 110.0 * pow(2.0, cutoff * (128.0 / (24.0 * 256.0)) + 0.25) * (mpl ? 1.12 : 1.0);
     if (freq > p->rate / 2.0) freq = p->rate / 2.0;
-    double r = p->rate / (2.0 * M_PI * freq);
-    double d = reso_tab(res) * r + reso_tab(res) - 1.0, e = r * r;
+    double r = p->rate / (2.0 * M_PI * freq), dmp = reso_tab(res) * (mpl ? 2.5 : 1.0);
+    double d = dmp * r + dmp - 1.0, e = r * r;
     c->fa0 = 1.0 / (1.0 + d + e); c->fb0 = (d + e + e) / (1.0 + d + e); c->fb1 = -e / (1.0 + d + e);
     if (reset) c->fy[0][0] = c->fy[0][1] = c->fy[1][0] = c->fy[1][1] = 0;
 }
@@ -744,7 +745,18 @@ static void update_channels(ITPlayer *p){
                 f = freq_slide(p, f, d, 0);
                 if (!p->firsttick || !(s->flags & 16)) c->vibpos = (c->vibpos + 4 * c->vibspeed) & 255;
             }
-            if (c->smp->vid && c->smp->vis) {
+            if (c->smp->vid && c->smp->vis && s->cwt == 0x217 && s->cmwt == 0x200 && !s->rsv) {
+                /* ModPlug-saved files: sample auto-vibrato like libopenmpt's legacy code - the depth grows by 2 * sweep per tick (sweep 0 = full depth at once), the position
+                 * advances before it is used, the offset is (wave * depth) >> 8 in 1/49152 octave steps, truncated towards zero, sign inverted (measured with a looped sine;
+                 * ub-flying, rama_gardens, madventures_in_harmony, amazonas_dynomite, seven_seas better; OpenMPT / Impulse Tracker files get worse with it) */
+                int sweep = c->smp->vir & 0xFF, maxd = c->smp->vid << 8;
+                c->avdepth = sweep ? c->avdepth + 2 * sweep : maxd; if (c->avdepth > maxd) c->avdepth = maxd;
+                c->avpos += c->smp->vis;
+                int ap = c->avpos & 255, vt = c->smp->vit & 3;
+                int vd = vt == 1 ? ((0x40 - (ap >> 1)) & 0x7F) - 0x40 : vt == 2 ? ((ap & 128) ? 64 : -64) : vt == 3 ? wave(3, ap) : (int)lround(64.0 * sin(ap * 2 * M_PI / 256.0));
+                int n = (vd * c->avdepth) / 256; if (vt == 1 || vt == 2) n = -n;
+                f = f * pow(2.0, -n / 49152.0);
+            } else if (c->smp->vid && c->smp->vis) {
                 int vp = c->avpos & 255, ad = 1;
                 ad = c->avdepth; ad += c->smp->vir & 0xFF; if (ad > (c->smp->vid << 8)) ad = c->smp->vid << 8; c->avdepth = ad; ad >>= 8;
                 c->avpos += c->smp->vis;
