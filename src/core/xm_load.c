@@ -20,9 +20,6 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
     s->fmt = 4; s->maxvol = 0x40; s->gvol = 255;
     if (n < 80 || memcmp(b, "Extended Module: ", 17)) return -1;
     memcpy(s->title, b + 17, 20); s->title[20] = 0;
-    /* ModPlug Tracker writes "FastTracker v 2.00" (a space after the v, FastTracker 2 itself writes "FastTracker v2.00"). libopenmpt plays such
-     * files 3.6x quieter than FT2 files (gain measured on one file, waveform identical: factor 0.275 relative to our FT2 mix level). */
-    if (!memcmp(b + 38, "FastTracker v 2.00", 18)) s->mixgain = 0.275;
     unsigned ver = rd16(b + 58), hs = rd32(b + 60);
     unsigned nord = rd16(b + 64), rst = rd16(b + 66), nch = rd16(b + 68), npat = rd16(b + 70), nins = rd16(b + 72);
     unsigned flags = rd16(b + 74), speed = rd16(b + 76), tempo = rd16(b + 78);
@@ -65,8 +62,6 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
     /* Instrumente */
     s->inst = calloc(nins + 1, sizeof(XInst));
     s->xsmp = calloc(nins * 16 + 1, sizeof(XSmp));
-    int any_res = 0;                           /* some sample header has a non-zero 'reserved' byte (0xAD = ADPCM aside) */
-    int nm0 = 0, nm32 = 0;                     /* sample names padded with 0 (ModPlug) or with spaces (FastTracker 2) */
     for (unsigned i = 1; i <= nins; i++) {
         if (o + 29 > n) break;
         unsigned ihs = rd32(b + o), ns = rd16(b + o + 27);
@@ -92,9 +87,7 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
                 if (sh + (size_t)(k + 1) * shs > n) break;
                 uint32_t len = rd32(h), ls = rd32(h + 4), ll = rd32(h + 8);
                 int type = h[14];
-                if (h[39] == 0) nm0++; else if (h[39] == ' ') nm32++;
                 m->vol = h[12]; m->finetune = (int8_t)h[13]; m->pan = h[15]; m->relnote = (int8_t)h[16];
-                if (h[17] && h[17] != 0xAD) any_res = 1;
                 m->is16 = (type & 16) != 0;
                 m->loop = (type & 3) != 0; m->pingpong = (type & 3) == 2;
                 if (m->is16) { len >>= 1; ls >>= 1; ll >>= 1; }
@@ -125,17 +118,8 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
         } else o += ihs;
     }
     s->xm_ft2 = !memcmp(b + 38, "FastTracker v2.00   ", 20) || !memcmp(b + 38, "FastTracker v 2.00  ", 20);     /* the tracker name (ModPlug files and its alpha use these names too) */
-    /* ModPlug Tracker 1.0 - 1.16 writes "FastTracker v2.00" like FT2 itself, but pads the sample names with 0 instead of spaces (libopenmpt tells them apart
-     * this way and mixes them with its older, quieter levels). Gain relative to our FT2 mix level, measured on 3 files (4, 6 and 20 channels: 0.485, 0.415, 0.275):
-     * 0.485 * (4 / channels) ^ 0.353. The "v 2.00" variant (ModPlug alpha) follows the same law. */
-    if (!s->mixgain && !memcmp(b + 38, "FastTracker v2.00   ", 20) && nm0 > 0 && nm32 == 0) s->mixgain = 0.485 * pow(4.0 / (nch ? nch : 1), 0.353);
-    else if (s->mixgain > 0) s->mixgain = 0.485 * pow(4.0 / (nch ? nch : 1), 0.353);
-    /* Pan law: libopenmpt pans files whose sample names are padded with 0 (more of them than with spaces) linearly, the others with the square root law
-     * (barbiegirl 0.984 -> 0.998). A heuristic found on the test set, not a documented rule. */
-    s->linpan = nm0 > nm32;
-    /* libopenmpt floors the finetune of every sample to a multiple of 8 (FT2's own ft >> 3 table lookup) - except for the ModPlug files above, which are written with
-     * zero padded sample names and keep the exact value (measured: heartland 0.837 -> 0.998, the_rain 0.890 -> 0.981, intros 0.972 -> 0.991, zebras_of_the_frozen_land
-     * 0.947 -> 0.995; amnesia, lwh and voda, all ModPlug, get worse when floored). Trackers other than FT2 floor as well (synthetic files over the whole range). */
-    if (!(s->mixgain > 0 && s->xm_ft2 && !any_res)) for (int k = 0; k < s->nxsmp; k++) s->xsmp[k].finetune = (int8_t)(s->xsmp[k].finetune & ~7);
+    /* Every sample's finetune is floored to a multiple of 8 (FT2's own ft >> 3 table lookup), ModPlug files included. Measured against FT2 recordings: voda 0.966 -> 0.994.
+     * (libopenmpt keeps the exact value for ModPlug files and mixes them about 2.4 times quieter than FT2 does; ng follows FT2 in both.) */
+    for (int k = 0; k < s->nxsmp; k++) s->xsmp[k].finetune = (int8_t)(s->xsmp[k].finetune & ~7);
     return 0;
 }
