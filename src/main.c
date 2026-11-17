@@ -1260,11 +1260,11 @@ static void chip_dip(float x, float y, float h, float beat) {            /* Paul
     z = chip_tsz(17, k); text(cx - text_width("8364R7", z) / 2, y + 57 * k - z * 0.8f, z, ink, "8364R7");
     z = chip_tsz(14, k); text(cx - text_width("1589  27", z) / 2, y + 77 * k - z * 0.8f, z, ink, "1589  27");
 }
-/* Which chip: 0 = Paula (TFMX, MOD up to 4 channels), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices) */
+/* Which chip: 0 = Paula (TFMX, AHX, SoundFX, MOD and MED up to 4 channels), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices) */
 static int chip_kind(void) {
     const char *f = song_format(g_song);
     int n = song_channels(g_song);
-    if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || (!strcmp(f, "MOD") && n <= 4)) return 0;
+    if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || !strcmp(f, "SFX") || ((!strcmp(f, "MOD") || !strcmp(f, "MED")) && n <= 4)) return 0;     /* the Amiga formats that run on the four Paula voices */
     return n > 32 ? 3 : (n >= 15 ? 2 : 1);
 }
 #include "card3d.inc"
