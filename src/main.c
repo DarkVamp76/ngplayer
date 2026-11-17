@@ -936,8 +936,10 @@ static void draw_orb(float x, float y, float w, float h) {
  * is the current level of the band and the same along the whole depth. Same colours as the spectrum bars (VC[0] -> VC[1] -> VC[2]), light tops, fog in the
  * distance. Drawn back to front (depth blocks), outer columns first, with front, top and inner side faces. */
 static float vx_lv[NBANDS];
+#include "voxel3d.inc"
 static void draw_voxel(float x, float y, float w, float h) {
     float dt = (float)g_dt; if (dt > 0.1f) dt = 0.1f;
+    (void)dt;
     for (int b = 0; b < NBANDS; b++) {           /* mix neighbouring bands a little and smooth in time: calm columns */
         float l = band[b > 0 ? b - 1 : b], r = band[b < NBANDS - 1 ? b + 1 : b];
         float v = 0.6f * band[b] + 0.2f * (l + r);
@@ -947,11 +949,10 @@ static void draw_voxel(float x, float y, float w, float h) {
     text(x + 18, y + 10, 12, DIM, "VOXEL");
     float ax = x + 12, ay = y + 34, aw = w - 24, ah = h - 46;
     if (aw < 60 || ah < 60) { view_switch(x, y, w); return; }
-    /* Real voxels: cubes of one unit edge (width, depth and height), stacked per band as high as the band's level. Only the exposed faces
-     * are drawn: the top of each stack, the side facing the centre where the next column is lower, and the front of the nearest row. */
-    const int NSEG = g_mobile ? 8 : 14;                 /* depth rows (one cube deep each): a short field that starts away from the front edge */
+    /* Real voxels, drawn on the GPU: cubes of one unit edge stacked per band as high as its level (whole cubes, with seams). The field is
+     * a short one that starts away from the front edge. */
+    const int NSEG = g_mobile ? 8 : 14;
     const float Z0 = 18.0f, CAMY = 17.0f, CW = 1.0f, CUBE = 0.84f, SEAM = 0.05f;
-    const int HMAXN = 15;
     float hor = ay + ah * 0.20f, cx = ax + aw * 0.5f, fx = aw * 0.178f * Z0 / 12.0f, fy = ah * 0.72f;
     col fogc = mix(BG1, VC[1], 0.20f);
     rect_grad(ax, ay, aw, ah, mix(BG0, VC[0], 0.03f), mix(BG1, VC[1], 0.14f));       /* backdrop */
@@ -963,46 +964,8 @@ static void draw_voxel(float x, float y, float w, float h) {
             polyline(xy, 2, 0.5f, 3.0f, alpha(FAINT, 0.18f));
         }
     }
-    int ncube[NBANDS];
-    for (int b = 0; b < NBANDS; b++) { int n = (int)(vx_lv[b] * HMAXN + 0.5f); ncube[b] = n < 0 ? 0 : (n > HMAXN ? HMAXN : n); }
-#define VPX(wx, z) (cx + (wx) / (z) * fx)
-#define VPY(wy, z) (hor + (CAMY - (wy)) / (z) * fy)
-    for (int sg = NSEG - 1; sg >= 0; sg--) {
-        float zn = Z0 + sg * CW, zf = zn + CUBE;
-        float fgt = (float)sg / NSEG; fgt = fgt * fgt;
-        float fg = fgt * 0.85f;
-        for (int mi = 0; mi < NBANDS; mi++) {
-            int b = mi < NBANDS / 2 ? mi : NBANDS - 1 - (mi - NBANDS / 2);               /* from the left edge inwards, then from the right edge inwards */
-            int n = ncube[b];
-            if (n < 1) continue;
-            float wx0 = (b - NBANDS / 2) * CW + 0.08f, wx1 = wx0 + CUBE;
-            float u = (float)b / (NBANDS - 1);
-            col lo = u < 0.5f ? mix(VC[0], VC[1], u * 2) : mix(VC[1], VC[2], (u - 0.5f) * 2);
-            col topc = mix(mix(lo, C(1, 1, 1, 1), 0.35f), fogc, fg), frontc = mix(lo, fogc, fg), sidec = mix(mix(lo, BG0, 0.45f), fogc, fg);
-            /* the side towards the centre: the cubes above the next column towards the centre */
-            int inner = b >= NBANDS / 2 ? b - 1 : b + 1, ni = (inner >= 0 && inner < NBANDS) ? ncube[inner] : 0;
-            float sx = b >= NBANDS / 2 ? wx0 : wx1;
-            for (int k = ni; k < n; k++) {
-                float y0 = k + SEAM, y1 = k + 1 - SEAM;
-                float xa = VPX(sx, zn), xb = VPX(sx, zf);
-                float ya0 = VPY(y0, zn), ya1 = VPY(y1, zn), yb0 = VPY(y0, zf), yb1 = VPY(y1, zf);
-                tri(xa, ya0, xa, ya1, xb, yb1, sidec); tri(xa, ya0, xb, yb1, xb, yb0, sidec);
-            }
-            if (sg == 0) {                                                               /* fronts of the nearest row, cube by cube */
-                float xl = VPX(wx0, zn), xr = VPX(wx1, zn);
-                for (int k = 0; k < n; k++) {
-                    float yt = VPY(k + 1 - SEAM, zn), yb = VPY(k + SEAM, zn);
-                    rect_grad(xl, yt, xr - xl, yb - yt, mix(frontc, C(1, 1, 1, 1), 0.10f), alpha(frontc, 0.75f));
-                }
-            }
-            {                                                                            /* top of the stack */
-                float x0n = VPX(wx0, zn), x1n = VPX(wx1, zn), x0f = VPX(wx0, zf), x1f = VPX(wx1, zf), ytn = VPY(n - SEAM, zn), ytf = VPY(n - SEAM, zf);
-                tri(x0n, ytn, x1n, ytn, x0f, ytf, topc); tri(x1n, ytn, x1f, ytf, x0f, ytf, topc);
-            }
-        }
-    }
-#undef VPX
-#undef VPY
+    GLuint vt = vx_render(aw, ah, fx, fy, 2.0f * (hor - ay) / ah - 1.0f, CAMY, Z0, NSEG, CUBE, SEAM, vx_lv, VC[0], VC[1], VC[2], fogc, BG0);
+    tex_quad(vt, ax, ay, aw, ah, C(1, 1, 1, 1));
     view_switch(x, y, w);
 }
 
@@ -2989,6 +2952,7 @@ static void iter(void) {
         if (!shot) song_end_advance();
 
         if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
+        g_vpw = dw; g_vph = dh;
         glViewport(0, 0, dw, dh);
         glClearColor(BG0.r, BG0.g, BG0.b, 1);
         glClear(GL_COLOR_BUFFER_BIT);
