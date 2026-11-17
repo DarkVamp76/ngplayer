@@ -949,9 +949,9 @@ static void draw_voxel(float x, float y, float w, float h) {
     text(x + 18, y + 10, 12, DIM, "VOXEL");
     float ax = x + 12, ay = y + 34, aw = w - 24, ah = h - 46;
     if (aw < 60 || ah < 60) { view_switch(x, y, w); return; }
-    const int NSEG = g_mobile ? 10 : 16;
-    const float Z0 = 12.0f, DZ = g_mobile ? 5.0f : 3.2f, CAMY = 17.0f, HMAX = 15.0f, CW = 1.0f;
-    float hor = ay + ah * 0.20f, cx = ax + aw * 0.5f, fx = aw * 0.178f, fy = ah * 0.55f;
+    const int NSEG = g_mobile ? 5 : 8;                 /* a short field: it starts a little away from the front edge and does not run so deep */
+    const float Z0 = 18.0f, DZ = g_mobile ? 5.0f : 3.2f, CAMY = 17.0f, HMAX = 15.0f, CW = 1.0f;
+    float hor = ay + ah * 0.20f, cx = ax + aw * 0.5f, fx = aw * 0.178f * Z0 / 12.0f, fy = ah * 0.72f;
     col fogc = mix(BG1, VC[1], 0.20f);
     rect_grad(ax, ay, aw, ah, mix(BG0, VC[0], 0.03f), mix(BG1, VC[1], 0.14f));       /* backdrop */
     {   /* floor lines towards the vanishing point */
