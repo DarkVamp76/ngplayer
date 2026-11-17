@@ -18,6 +18,11 @@ static int qper(int per){ int qc = g_qc;
 /* S3M: Rate = (c2spd * ST[halbton]) >> (16 - Oktave), ST = floor(2^(s/12) * 65536) -- gemessen an 58/60 Noten (ngp_calib_notes) */
 static const uint32_t ST16[12] = {65536, 69432, 73561, 77935, 82570, 87480, 92681, 98193, 104031, 110217, 116771, 123715};
 static int period_fine(const XSong *s, int note, uint32_t c2spd){
+    if (s->fmt == 1 && getenv("XMODHZ") == NULL && getenv("XMODNTSC") == NULL && c2spd && note >= 0x18 && note < 0x18 + 84) {
+        /* MOD (PAL): the real ProTracker period of the note (table, not the 12 tone equal temperament) at the tuning of the sample: hz = c2spd * 428 / period */
+        double hz = (double)c2spd * 428.0 / ngp_pt_periods[note - 0x18];
+        return (int)(14318184.0 * PK / hz);
+    }
     if ((s->fmt == 2 || (s->fmt == 1 && getenv("XMODHZ") == NULL)) && c2spd && note >= 0) {
         int d = note / 12 - 4;
         uint64_t m = (uint64_t)c2spd * ST16[note % 12];
@@ -207,7 +212,7 @@ static void e_sub(XPlayer *p, int chn, Ch *c, int par, int tick){
     case 1: if (!tick) c->pD4 -= (x << 2) * PK; break;
     case 2: if (!tick) c->pD4 += (x << 2) * PK; break;
     case 4: c->mb0 = (c->mb0 & 0xf0) | x; break;
-    case 5: c->c2spd = ngp_finetune_c2spd[x];
+    case 5: c->c2spd = p->s->fmt == 1 ? ngp_finetune_c2spd_mod[x] : ngp_finetune_c2spd[x];
             c->pD4 = period_fine(p->s, c->lastnote + c->d0, c->c2spd); break;
     case 7: c->mb0 = (c->mb0 & 0x0f) | (x << 4); break;
     case 8: c->pan5c = ngp_pan_tab[x]; break;   /* gemessen: S8x setzt echten Pan */
