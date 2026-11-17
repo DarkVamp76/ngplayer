@@ -149,7 +149,7 @@ static void trigger(XXPlayer *p, XCh *c, int note, int inst, int hasinst, int tp
     const XSong *s = p->s;
     if (note == 97) {                       /* Key-Off */
         c->keyon = 0;
-        if (c->inst >= 1 && !s->inst[c->inst].venv.on) c->kopend = 1;
+        if (c->inst >= 1 && !s->inst[c->inst].venv.on) { start_xf(c); c->vol = 0; }
         return;
     }
     if (hasinst) {
@@ -220,7 +220,7 @@ static void do_row_cell(XXPlayer *p, int chn, XCh *c, const XCell *x, int second
     case 0x22: if (par) p->speed = par; break;  /* any speed 1..255 (MDL) */
     case 0x10: p->gvol = clampi(par, 0, 64); break;
     case 0x11: if (par) c->m_gvs = par; break;
-    case 0x14: if (par == 0) { c->keyon = 0; if (c->inst >= 1 && !s->inst[c->inst].venv.on) c->kopend = 1; } break;
+    case 0x14: if (par == 0) { c->keyon = 0; if (c->inst >= 1 && !s->inst[c->inst].venv.on) { start_xf(c); c->vol = 0; } } break;
     case 0x15: c->venvt = par; break;
     case 0x19: if (par) c->m_psl = par; break;
     case 0x35:       /* DBM E3x: play the sample backwards (from its end, ping-pong over the whole sample) */
@@ -278,7 +278,7 @@ static void do_tick_effects(XXPlayer *p, int chn, XCh *c, const XCell *x){
         else if (c->per > c->tper) { c->per -= sp; if (c->per < c->tper) c->per = c->tper; }
     }
     switch (eff) {
-    case 0x14: if (t == par) { c->keyon = 0; if (c->inst >= 1 && !p->s->inst[c->inst].venv.on) c->kopend = 1; } break;
+    case 0x14: if (t == par) { c->keyon = 0; if (c->inst >= 1 && !p->s->inst[c->inst].venv.on) { start_xf(c); c->vol = 0; } } break;
     case 1: if (c->m_porta < 0xF0) c->per -= 4 * c->m_porta; break;
     case 2: if (c->m_porta < 0xF0) c->per += 4 * c->m_porta; break;
     case 5: volslide(&c->vol, c->m_vsl); break;
@@ -339,7 +339,7 @@ static void do_tick(XXPlayer *p){
               int amp = I->vibdepth << 8;   /* depth in 1/256 steps: libopenmpt grows it by (depth * 256) / sweep per tick while the key is down */
               if (I->vibsweep) { if (c->keyon) c->avcnt++; amp = c->avcnt * ((I->vibdepth << 8) / I->vibsweep); if (amp > (I->vibdepth << 8)) amp = I->vibdepth << 8; }
               c->avpos += I->vibrate; int ap = c->avpos & 255;   /* libopenmpt: the position advances before it is used; 256 steps per cycle */
-              double wv = I->vibtype == 0 ? sin(ap * 2 * M_PI / 256.0) * 64 : I->vibtype == 1 ? (ap < 128 ? 64 : -64) : I->vibtype == 2 ? (double)(((64 - (ap >> 1)) & 127) - 64) : (double)(((64 + (ap >> 1)) & 127) - 64);
+              double wv = I->vibtype == 0 ? (double)lround(sin(ap * 2 * M_PI / 256.0) * 64) : I->vibtype == 1 ? (ap < 128 ? 64 : -64) : I->vibtype == 2 ? (double)(((64 - (ap >> 1)) & 127) - 64) : (double)(((64 + (ap >> 1)) & 127) - 64);
               per -= trunc(wv * amp / (64.0 * 256.0));   /* libopenmpt cuts the period offset towards zero (depth 1 must stay silent except at the peaks) */
           } }
         if (eff == 0x21 && 0) {}
