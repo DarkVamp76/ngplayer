@@ -11,7 +11,8 @@
 static double hzq(double x){ static int m=-1; if(m<0){const char*e=getenv("XHZ"); m=e?atoi(e):0;} return m==1?floor(x+0.5):m==2?ceil(x):floor(x); }
 static int qef(void){ static int m=-1; if(m<0){const char*e=getenv("XQ"); m=e?atoi(e):1;} return m; }
 static double g_clk = 14318184.0;      /* 4 x Amiga clock: the period unit of the replayer; MOD uses the PAL clock (set in xplay_new) so that slide steps are ProTracker period units */
-static int qmod(void){ return g_clk == 14318184.0 && getenv("XNOQM") == NULL; }   /* MOD (PAL clock): slides keep the exact period like ProTracker / libopenmpt; the hz quantisation of the old tuning only with XMODNTSC */
+static int g_exact = 0;   /* DSM: slides keep the exact period, the step uses the exact rate */
+static int qmod(void){ return g_clk == 14318184.0 && !g_exact && getenv("XNOQM") == NULL; }   /* MOD (PAL clock): slides keep the exact period like ProTracker / libopenmpt; the hz quantisation of the old tuning only with XMODNTSC */
 static int g_qc = 0;
 static int qper(int per){ int qc = g_qc;
     if (per <= 0) return per; double hz = hzq(g_clk * PK / per); if (hz <= 0) return per;
@@ -19,6 +20,12 @@ static int qper(int per){ int qc = g_qc;
 /* S3M: Rate = (c2spd * ST[halbton]) >> (16 - Oktave), ST = floor(2^(s/12) * 65536) -- gemessen an 58/60 Noten (ngp_calib_notes) */
 static const uint32_t ST16[12] = {65536, 69432, 73561, 77935, 82570, 87480, 92681, 98193, 104031, 110217, 116771, 123715};
 static int period_fine(const XSong *s, int note, uint32_t c2spd){
+    if (s->fmt == 1 && s->pt_tuning == 3 && c2spd && note >= 0) {   /* DSM: libopenmpt's integer ST3 period (as for S3M) */
+        static const uint32_t T3[12] = {1712,1616,1524,1440,1356,1280,1208,1140,1076,1016,960,907};
+        int d = note / 12 - 4; uint64_t num = (uint64_t)8363 * T3[note % 12];
+        uint64_t pp = d >= 0 ? num / ((uint64_t)c2spd << d) : (num << -d) / c2spd; if (pp < 1) pp = 1;
+        return (int)(14318184.0 * PK * (double)pp / (8363.0 * 1712.0));
+    }
     if (s->fmt == 1 && s->pt_tuning == 2 && getenv("XMODHZ") == NULL && getenv("XMODNTSC") == NULL && c2spd && note >= 0x18 && note < 0x18 + 84) {
         /* real MOD: the tuned ProTracker period of the note, as libopenmpt plays it (finetune table, quarter period steps) */
         int ft = 0; for (int i = 0; i < 16; i++) if (c2spd == ngp_finetune_c2spd_mod[i]) { ft = i; break; }
@@ -231,7 +238,8 @@ static void e_sub(XPlayer *p, int chn, Ch *c, int par, int tick){
     case 1: if (!tick) c->pD4 -= (x << 2) * PK; break;
     case 2: if (!tick) c->pD4 += (x << 2) * PK; break;
     case 4: c->mb0 = (c->mb0 & 0xf0) | x; break;
-    case 5: c->c2spd = (p->s->fmt == 1 && p->s->pt_tuning == 2) ? ngp_finetune_c2spd_mod[x] : ngp_finetune_c2spd[x];
+    case 5: if (p->s->fmt == 1 && p->s->pt_tuning == 3) break;   /* DSM: no finetune command in libopenmpt */
+        c->c2spd = (p->s->fmt == 1 && p->s->pt_tuning == 2) ? ngp_finetune_c2spd_mod[x] : ngp_finetune_c2spd[x];
             c->pD4 = period_fine(p->s, c->lastnote + c->d0, c->c2spd); break;
     case 7: c->mb0 = (c->mb0 & 0x0f) | (x << 4); break;
     case 8: c->pan5c = ngp_pan_tab[x]; break;   /* gemessen: S8x setzt echten Pan */
@@ -309,6 +317,7 @@ static void do_effect(XPlayer *p, int chn, Ch *c, int tick){
     switch (e) {
     case 0x0A: if (par) c->m84 = par; else par = c->m84;
                volslide(p, c, par, tick); c->vE8 = c->vD8; par = c->par; break;
+    case 0x08: if (!tick && p->s->fmt == 1 && p->s->pt_tuning == 3) c->pan5c = par; break;   /* DSM: set panning (the loader scales 0..0x80 to 0..255) */
     case 0x0C: { int v = par > mx ? mx : par; c->vD8 = c->vE8 = v; } break;
     case 0x0E: e_sub(p, chn, c, par, tick); break;
     case 0x0F: if (!tick && !p->in_delay && par) { if (par <= 0x20) p->speed = par; else { p->tempo = par; p->tempof = 0; } } break;
@@ -409,7 +418,7 @@ static void voice_update(XPlayer *p, int chn){
       else if (fv == 3) { v->vol = (int)ex; v->volf = v->vol; }
       else { v->vol = old; v->volf = old; } }
     v->pan = clampi(c->pan5c, 0, 255);
-    v->step = c->p74 > 0 ? (p->s->fmt == 2 && p->s->pt_tuning ? g_clk * PK / c->p74 : hzq(g_clk * PK / c->p74)) / p->rate : 0.0;   /* S3M (ST3 table): exact rate like libopenmpt */
+    v->step = c->p74 > 0 ? ((p->s->fmt == 2 && p->s->pt_tuning) || (p->s->fmt == 1 && p->s->pt_tuning == 3) ? g_clk * PK / c->p74 : hzq(g_clk * PK / c->p74)) / p->rate : 0.0;   /* S3M (ST3 table): exact rate like libopenmpt */
     if (c->sy && c->vib_d && c->vib_s) v->step *= pow(2.0, sin(c->vib_ph * 6.283185307179586 / 256.0) * c->vib_d / 384.0);   /* MED synth vibrato (depth scale estimated) */
 }
 
@@ -417,6 +426,7 @@ XPlayer *xplay_new(const XSong *s, int rate){
     if (s->fmt == 4) return (XPlayer *)xxm_new(s, rate);
     XPlayer *p = calloc(1, sizeof *p);
     { const char*e=getenv("XQC"); g_qc = e ? atoi(e) : (s->fmt == 1 ? 2 : 0); }
+    g_exact = (s->fmt == 1 && s->pt_tuning == 3);
     g_clk = (s->fmt == 1 && s->pt_tuning == 2 && !getenv("XMODNTSC") && !getenv("XMODHZ")) ? 14187579.6 : 14318184.0;     /* MOD: PAL clock (4 x 3546894.9) */
     p->s = s; p->rate = rate; p->speed = s->speed; p->tempo = s->tempo; p->tempof = s->tempo_exact; p->gvol = s->gvol ? s->gvol : 255;
     for (int i = 0; i < NCH; i++) p->ch[i].pan5c = (s->fmt == 1 && s->chpan[i] < 0) ? ((i % 4 == 0 || i % 4 == 3) ? 60 : 195) : (s->chpan[i] >= 0 ? s->chpan[i] : 128);
@@ -596,7 +606,7 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
                     sm = acc * (v->volf / 255.0);
                 }
                 cs[i] = sm;
-                { double pr = (1.0 + 30.0 * v->pan / 255.0) / 32.0;   /* S3M gemessen: R = (2n+1)/32, n=pan>>4; MOD vorlaeufig */
+                { double pr = s->linpan ? (v->pan >= 255 ? 1.0 : v->pan / 256.0) : (1.0 + 30.0 * v->pan / 255.0) / 32.0;   /* S3M gemessen: R = (2n+1)/32, n=pan>>4; MOD vorlaeufig */
                   pr = pr < 0 ? 0 : pr > 1 ? 1 : pr;
                   l += sm * (1.0 - pr); r += sm * pr; }
                 v->pos += v->step;

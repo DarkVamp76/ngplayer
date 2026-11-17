@@ -34,6 +34,7 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | SFX (SoundFX 1.3 / 2.0, Linel, Amiga: *Future Wars*, *Twinworld*, ...) | supported (4 channels, 15 or 31 samples, played through the MOD engine; the LED filter and the semitone-add/subtract effects are not implemented) |
 | AMF (DSMI, Otto Chrons; signature `AMF` + version 0x08-0x0E) | supported (up to 32 channels, event-based tracks converted to MOD cells, played through the MOD engine; slides and portamento stay active until the next effect, as in the format; checked against one file only, some effects are approximated) |
 | AMF (Asylum Music Format, *Crusader: No Remorse / No Regret*; signature `ASYLUM Music Format V1.0`; a different format than DSMI AMF) | supported (8 channels, played through the MOD engine) |
+| DSM (DSIK / Digisound Interface Kit, `RIFF`/`DSMF`) | supported (up to 16 channels, 8-bit samples signed, unsigned or delta coded, ProTracker effects with panning `8xx`, played through the MOD engine; pitch within 0.01 cents and level of libopenmpt, correlation 0.975-0.999 on 28 files; not implemented: `ED` note delay without a note on the line) |
 | XM (FastTracker 2) | supported |
 | IT (Impulse Tracker) | supported, still being completed |
 | DMF (X-Tracker, v8) | supported, some rare effects still missing |
