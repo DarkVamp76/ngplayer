@@ -141,8 +141,8 @@ static const ITSmp *translate(const ITSong *s, const ITInst *in, int note, int *
 }
 
 static void set_inst_pan(V *c, const ITInst *in, const ITSmp *sm){
-    if (in && !(in->dfp & 0x80)) { c->pan = (in->dfp & 0x7F) * 4; if (c->pan > 256) c->pan = 256; c->flags &= ~F_SURR; }
-    else if (sm && (sm->dfp & 0x80)) { c->pan = (sm->dfp & 0x7F) * 4; if (c->pan > 256) c->pan = 256; c->flags &= ~F_SURR; }
+    if (in && !(in->dfp & 0x80)) { c->pan = (in->dfp & 0x7F) * 4; if (c->pan > 256) c->pan = 256; }
+    else if (sm && (sm->dfp & 0x80)) { c->pan = (sm->dfp & 0x7F) * 4; if (c->pan > 256) c->pan = 256; }
 }
 
 static void instrument_change(ITPlayer *p, V *c, int instr, int porta, int inst_column){
