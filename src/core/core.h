@@ -59,7 +59,7 @@ typedef struct {
     int restart;
     int *prows;                /* XM: Zeilen je Pattern (sonst 64) */
     int amiga;                 /* MOD: echtes Amiga-Format (M.K., M!K!, FLT4, 15 Samples) -> Paula-Tiefpass */
-    int pt_tuning;             /* fmt 1: 0 = 12 tone equal temperament (FAR, AMF, PSM, MED ...), 1 = ProTracker period table (MTM), 2 = real MOD: period table + PAL tuning + exact slides */
+    int pt_tuning;             /* fmt 1: 0 = 12 tone equal temperament (FAR, AMF, PSM, MED ...), 1 = ProTracker period table (MTM), 2 = real MOD (fmt 2, S3M: 1 = integer ST3 period table, 0 = exact; saved by Impulse Tracker): period table + PAL tuning + exact slides */
 } XSong;
 
 int  xmod_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok */

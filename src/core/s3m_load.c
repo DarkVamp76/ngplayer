@@ -50,6 +50,7 @@ static double s3m_preamp_gain(const uint8_t *b, size_t n, unsigned ordnum, unsig
 int xs3m_load(XSong *s, const uint8_t *b, size_t n){
     memset(s, 0, sizeof *s);
     s->fmt = 2; s->maxvol = 0x40; s->gvol = 255;
+    s->pt_tuning = ((rd16(b + 0x28) >> 12) != 3);   /* S3M: 1 = integer ST3 period table (libopenmpt), 0 = saved by Impulse Tracker (exact) */
     if (n < 0x60 || memcmp(b + 0x2C, "SCRM", 4)) return -1;
     memcpy(s->title, b, 20); s->title[20] = 0;
     unsigned ordnum = rd16(b + 0x20), insnum = rd16(b + 0x22), patnum = rd16(b + 0x24);
