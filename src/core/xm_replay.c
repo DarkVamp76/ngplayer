@@ -171,7 +171,7 @@ static void trigger(XXPlayer *p, XCh *c, int note, int inst, int hasinst, int tp
             c->m_vpos = (c->vwave & 4) ? c->m_vpos : 0; c->m_tpos = (c->twave & 4) ? c->m_tpos : 0;
             if (hasinst) { c->vol = m->vol; c->pan = m->pan; }
         }
-        if (!tp || hasinst) { c->keyon = 1; c->fade = 32768; c->venvt = c->penvt = 0; }
+        if (!tp || hasinst) { c->keyon = 1; c->fade = 32768; c->venvt = c->penvt = 0; c->avpos = 0; c->avcnt = 0; }   /* an instrument number restarts the auto-vibrato as well, also with a tone portamento */
     } else if (hasinst && ni >= 1 && c->smpi >= 0) {   /* nur Instrument: Lautstaerke/Pan aus dem NEUEN Instrument (Sample der letzten Note) */
         int si2; rd_inst_smp(s, ni, c->note, &si2); if (si2 < 0) si2 = c->smpi;
         XSmp *m = &s->xsmp[si2];
@@ -336,11 +336,11 @@ static void do_tick(XXPlayer *p){
         }
         { const XInst *I = &s->inst[c->inst];
           if (I->vibdepth) {
-              int amp = I->vibdepth;
-              if (I->vibsweep) { amp = I->vibdepth * (c->avcnt < I->vibsweep ? c->avcnt : I->vibsweep) / I->vibsweep; if (c->keyon) c->avcnt++; } 
+              int amp = I->vibdepth << 8;   /* depth in 1/256 steps: libopenmpt grows it by (depth * 256) / sweep per tick while the key is down */
+              if (I->vibsweep) { if (c->keyon) c->avcnt++; amp = c->avcnt * ((I->vibdepth << 8) / I->vibsweep); if (amp > (I->vibdepth << 8)) amp = I->vibdepth << 8; }
               c->avpos += I->vibrate; int ap = c->avpos & 255;   /* libopenmpt: the position advances before it is used; 256 steps per cycle */
               double wv = I->vibtype == 0 ? sin(ap * 2 * M_PI / 256.0) * 64 : I->vibtype == 1 ? (ap < 128 ? 64 : -64) : I->vibtype == 2 ? (double)(((64 - (ap >> 1)) & 127) - 64) : (double)(((64 + (ap >> 1)) & 127) - 64);
-              per -= trunc(wv * amp / 64.0);   /* libopenmpt cuts the period offset towards zero (depth 1 must stay silent except at the peaks) */
+              per -= trunc(wv * amp / (64.0 * 256.0));   /* libopenmpt cuts the period offset towards zero (depth 1 must stay silent except at the peaks) */
           } }
         if (eff == 0x21 && 0) {}
         /* Huellkurven */
