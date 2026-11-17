@@ -560,11 +560,13 @@ static int resolve_row(const SongPos *sp, int vr, int *pat, int *row, int *other
     *pat = p; *row = r; *other = 1; return 1;
 }
 
-/* Scope einer Stimme: aufsteigender Nulldurchgang als Trigger; Zeichenflaeche bx..bx+bw, Mittellinie mid, Hoehe sh */
-static void chan_scope(int c, float bx2, float mid2, float bw2, float sh2, float lw) {
+#include "scope3d.inc"
+/* Scope of one voice: rising zero crossing as trigger; drawing area bx..bx+bw, centre line mid, height sh. The curve values go to the GPU pass. */
+static void chan_scope(int c, float bx2, float mid2, float bw2, float sh2, float lw, int vis) {
+    (void)lw;
     unsigned wp = song_scope_pos(g_song);
     const float *sb = g_scope + (size_t)c * SCOPE_LEN;
-    enum { SPAN = 360, NP = 96 };
+    enum { SPAN = 360 };
     int start = SPAN;
     float peak = 0;
     for (int k = 1; k <= SPAN + 700; k++) { float v = sb[(wp - (unsigned)k) & (SCOPE_LEN - 1)]; if (fabsf(v) > peak) peak = fabsf(v); }
@@ -579,22 +581,14 @@ static void chan_scope(int c, float bx2, float mid2, float bw2, float sh2, float
     if (sgain[c] < 1) sgain[c] = 1;
     sgain[c] += (want - sgain[c]) * (want < sgain[c] ? 0.5f : 0.08f);
     float amp = sh2 * 0.46f;
-    int np = bw2 < 40 ? 32 : NP;
-    static float pts[NP * 2];
+    int np = bw2 < 40 ? 32 : SC_NP;
+    float vals[SC_NP];
     for (int j = 0; j < np; j++) {
         float v = sb[(wp - (unsigned)start + (unsigned)((long)j * SPAN / np)) & (SCOPE_LEN - 1)] * sgain[c];
-        if (v > 1) v = 1;
-        if (v < -1) v = -1;
-        pts[2 * j] = bx2 + bw2 * j / (np - 1.0f);
-        pts[2 * j + 1] = mid2 - v * amp;
+        vals[j] = v > 1 ? 1 : (v < -1 ? -1 : v);
     }
-    col lc = VC[c % 3];
-    float lvl = peak > 0.004f ? 1.0f : 0.35f;
     rect(bx2, mid2, bw2, 1, alpha(FAINT, 0.25f));
-    set_additive(1);
-    polyline(pts, np, 3.4f * lw, 3.5f, alpha(lc, 0.20f * lvl));
-    set_additive(0);
-    polyline(pts, np, 1.0f * lw, 3.0f, alpha(mix(lc, C(1, 1, 1, 1), 0.3f), 0.35f + 0.65f * lvl));
+    sc_add(vals, np, bx2, mid2, bw2, amp, peak > 0.004f ? 1.0f : 0.35f, c % 3, vis);
 }
 
 /* One voice tile: scope, live panning, number, mute (click = mute, Ctrl+click = solo) */
@@ -602,7 +596,7 @@ static void chan_tile(int c, float bx0, float by0, float bwd, float bht) {
     unsigned long long mm = song_get_mute(), all = song_channels(g_song) >= 64 ? ~0ULL : ((1ULL << song_channels(g_song)) - 1);
     rrect(bx0, by0, bwd, bht, 7, C(0.02f, 0.03f, 0.055f, 1));
     float sh2 = bht - 24, mid2 = by0 + 5 + sh2 / 2;
-    chan_scope(c, bx0 + 6, mid2, bwd - 12, sh2, 1.0f);
+    chan_scope(c, bx0 + 6, mid2, bwd - 12, sh2, 1.0f, !((mm >> c) & 1));
     /* Panning in Echtzeit, links -> rechts */
     {
         static float pan_disp[64];
@@ -652,7 +646,9 @@ static void draw_scopes(float x, float y, float w, float h) {
     }
     int cols = bestc, rows = (nch + cols - 1) / cols;
     float gap = 6, tw = (aw - gap * (cols - 1)) / cols, th = (ah - gap * (rows - 1)) / rows;
+    sc_begin();
     for (int c = 0; c < nch; c++) chan_tile(c, ax + (c % cols) * (tw + gap), ay + (c / cols) * (th + gap), tw, th);
+    sc_draw(1.0f);                                                       /* all scope lines in one instanced GPU pass */
 }
 
 

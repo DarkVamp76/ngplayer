@@ -62,6 +62,11 @@ typedef long GLintptr;
 #define GL_TEXTURE0 0x84C0
 #define GL_CULL_FACE 0x0B44
 #define GL_PROGRAM_POINT_SIZE 0x8642
+#define GL_R32F 0x822E
+#define GL_RGBA32F 0x8814
+#define GL_NEAREST 0x2600
+#define GL_TEXTURE1 0x84C1
+#define GL_TEXTURE2 0x84C2
 #define GL_POINTS 0
 
 #define GLFUNCS(X) \
@@ -104,6 +109,7 @@ typedef long GLintptr;
     X(void, glVertexAttribPointer, (GLuint, GLint, GLenum, unsigned char, GLsizei, const void *)) \
     X(void, glGenerateMipmap, (GLenum)) \
     X(void, glDisable, (GLenum)) \
+    X(void, glTexSubImage2D, (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void *)) \
     X(void, glDepthFunc, (GLenum)) \
     X(void, glActiveTexture, (GLenum)) \
     X(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *)) \
