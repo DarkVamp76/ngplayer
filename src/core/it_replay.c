@@ -22,7 +22,7 @@ typedef struct {
     double freq, ptarget; uint32_t c5;
     int note, new_note, new_inst, last_inst;
     int row_note, row_inst, row_vc, row_vp, row_cmd, row_par;
-    int vol, chvol, instvol, pan, chpan; int fadeout; int vpos, ppos, tpos; int master; int cutoff, resonance; double fa0, fb0, fb1, fy[2][2];
+    int kofp; int vol, chvol, instvol, pan, chpan; int fadeout; int vpos, ppos, tpos; int master; int cutoff, resonance; double fa0, fb0, fb1, fy[2][2];
     int vibpos, vibdepth, vibspeed, vibtype, tremdepth, tremspeed, trempos, tremtype, tremdelta;
     int pbdepth, pbspeed, pbpos, pbtype, pbdelta;
     int avdepth, avpos;
@@ -206,7 +206,7 @@ static void note_change(ITPlayer *p, V *c, int ch, int note, int porta, int retr
     if (in && in->pps && !porta) {
         int d = (c->note - in->ppc - 1) * in->pps / 2; c->pan = clampi(c->pan + d, 0, 256);
     }
-    if (!porta) { c->fadeout = 65536; c->flags &= ~F_FADE; c->vpos = c->ppos = c->tpos = 0; c->flags |= F_NEWNOTE;
+    if (!porta) { c->fadeout = 65536; c->flags &= ~F_FADE; c->vpos = c->ppos = c->tpos = 0; c->kofp = 0; c->flags |= F_NEWNOTE;
         if (in) { if (in->ifr & 0x80) c->resonance = in->ifr & 0x7F; if (in->ifc & 0x80) c->cutoff = in->ifc & 0x7F; } }
     if (!(porta && (!(s->flags & 32) || !c->row_inst))) c->flags &= ~F_KEYOFF;
     if (!porta) {
@@ -702,9 +702,11 @@ static void update_channels(ITPlayer *p){
             vol <<= 6;
             if ((s->flags & 4) && c->ins) {
                 const ITInst *ii = c->ins; int ok;
-                env_step(&ii->venv, &c->vpos, !!(c->flags & F_KEYOFF), 1, c, 1);
-                env_step(&ii->penv, &c->ppos, !!(c->flags & F_KEYOFF), 0, c, 0);
-                env_step(&ii->pitchenv, &c->tpos, !!(c->flags & F_KEYOFF), 0, c, 0);
+                /* libopenmpt steps the envelopes with the key state of the previous tick: the tick of a key off still plays the old value */
+                int kof = (c->flags & F_KEYOFF) ? 1 : 0, kst = c->kofp; c->kofp = kof;
+                env_step(&ii->venv, &c->vpos, kst, 1, c, 1);
+                env_step(&ii->penv, &c->ppos, kst, 0, c, 0);
+                env_step(&ii->pitchenv, &c->tpos, kst, 0, c, 0);
                 int ev = env_eval(&ii->venv, c->vpos, 0, 4, &ok);
                 if (ok) { ev = clampi(ev, 0, 256); vol = (vol * ev) >> 8; }
                 int ep = env_eval(&ii->penv, c->ppos, 32, 1, &ok);
