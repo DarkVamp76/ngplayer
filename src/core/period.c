@@ -61,3 +61,15 @@ int ngp_vibrato_delta(int pos, int wf, int depth){
     int d = (wf & 3) == 0 ? (MS[idx] * depth) >> 4 : (v * depth) >> 5;
     return pos < 0 ? -d : d;
 }
+
+/* ProTracker / libopenmpt MOD vibrato: the offset is whole Amiga periods, (table * depth) >> 7 with the 255 scale table, truncated towards zero; the engine counts in ST3 periods (4 per Amiga period) */
+int ngp_vibrato_delta_mod(int pos, int wf, int depth){
+    int idx = (pos >> 2) & 0x1f, v;
+    switch (wf & 3){
+      case 0: v = VSIN[idx]; break;
+      case 1: v = idx << 3; if (pos >= 0) v = 255 - v; break;
+      default: v = 255; break;
+    }
+    int d = ((v * depth) >> 7) * 4;
+    return pos < 0 ? -d : d;
+}

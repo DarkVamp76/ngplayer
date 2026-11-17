@@ -80,7 +80,7 @@ typedef struct {
     int sw_pos, sw_cnt, sw_spd, sw_wait, sw_halt, sw_wave, vib_d, vib_s, vib_ph;  /* MED synth waveform table + vibrato */
 } Ch;
 
-typedef struct { int on; int is16; double pos, step; const int8_t *data; uint32_t len, ls, le; int loop; int vol, pan; double volf; int hold; } Voice;
+typedef struct { int on; int is16; double pos, step; const int8_t *data; uint32_t len, ls, le; int loop; int vol, pan; double volf; int hold; const XSmp *pend; } Voice;   /* pend: MOD sample number without a note - latched, taken over when the current loop / sample ends */
 
 int xplay_solo = -1;
 unsigned long long xplay_mute = 0;   /* Bit n = Kanal n stumm (alle Formate) */
@@ -173,7 +173,7 @@ static void trigger_note(XPlayer *p, int chn, Ch *c, const XCell *x){
     int inst_ok = x->inst && x->inst <= s->nsmp;
     c->rt = inst_ok;
     { static int xl=-1; if(xl<0) xl=getenv("XLIVE")!=NULL; c->swap = xl && s->fmt == 1 && inst_ok && x->note && (x->eff == 3 || x->eff == 5); }
-    int keepold = getenv("XRT2") && s->fmt == 1 && (x->eff == 3 || x->eff == 5) && inst_ok && c->inst;
+    int keepold = (getenv("XRT2") || s->pt_tuning == 2) && s->fmt == 1 && (x->eff == 3 || x->eff == 5) && inst_ok && c->inst;   /* MOD: a new sample with a tone portamento is only latched */
     if (inst_ok) { note = x->note ? x->note : c->lastnote; if (!keepold) c->inst = x->inst; }
     else note = x->note;
     if (!c->inst || !note || note >= 0x7f) return;
@@ -181,7 +181,13 @@ static void trigger_note(XPlayer *p, int chn, Ch *c, const XCell *x){
       if (ni && s->fmt == 1 && inst_ok && !x->note && c->smp) {
           const XSmp *m0 = &s->smp[c->inst];
           if (m0->vol <= s->maxvol) c->vD8 = c->v44 = m0->vol;
-          c->vE8 = c->v44; return; } }
+          c->vE8 = c->v44; if (s->fmt == 1 && s->pt_tuning == 2 && m0 != &s->smp[c->smp]) {
+              Voice *vv = &p->v[chn]; vv->pend = m0;
+              if (!vv->on && m0->loop && m0->len) {   /* the old sample has ended: the latched one's repeat part starts at once */
+                  const XSmp *q = m0; vv->pend = NULL; vv->is16 = q->is16; vv->data = q->data; vv->len = q->len; vv->ls = q->ls; vv->le = q->le > q->len ? q->len : q->le; vv->loop = q->loop; vv->pos = 0; vv->on = 1;   /* measured: the new sample starts from its beginning here, at a loop end from its loop start */
+              }
+          } else p->v[chn].pend = NULL;
+          return; } }
     const XSmp *m = &s->smp[c->inst];
     c->smp = c->inst;
     if (m->syn) { if (!(x->eff == 3 || x->eff == 5) || !c->sy) synth_init(c, m->syn); } else c->sy = NULL;
@@ -194,11 +200,11 @@ static void trigger_note(XPlayer *p, int chn, Ch *c, const XCell *x){
     c->d0 = 0;                                    /* Periodenmaßstab des Originals: 4x Amiga */
     c->lastnote = note;
     c->vE8 = c->v44;
-    int per = period_fine(p->s, note + c->d0, c->c2spd);
+    int per = period_fine(p->s, note + c->d0, keepold && s->pt_tuning == 2 ? s->smp[x->inst].c2spd : c->c2spd);   /* the target period follows the finetune of the latched sample */
     { static int tn=-1; if(tn<0) tn=getenv("XNOTPN")==NULL;
       if (tn && s->fmt == 1 && (x->eff == 3 || x->eff == 5) && c->pD4 && p->v[chn].on) { c->p80 = per; c->p74 = c->pD4; }
       else c->p80 = c->pD4 = per; }
-    c->trig = 1; c->start38 = 0;
+    c->trig = 1; c->start38 = 0; p->v[chn].pend = (keepold && x->inst != c->smp && s->pt_tuning == 2) ? &s->smp[x->inst] : NULL;
     if (!(c->mb0 & 0x80)) c->tpos = 0;
     { static int xv=-1; if(xv<0){const char*e=getenv("XV"); xv=e?atoi(e):0;} static int nv=-1; if(nv<0) nv=getenv("XNOVR")==NULL;
       int keep = nv && s->fmt == 1 && (x->eff == 3 || x->eff == 5);
@@ -213,8 +219,8 @@ static void volslide(XPlayer *p, Ch *c, int par, int tick){
     c->vD8 = clampi(c->vD8, 0, p->s->maxvol);
 }
 /* 0x38a79 */
-static void vib_step(Ch *c, int tick){
-    int d = ngp_vibrato_delta((int8_t)c->vpos, c->mb0 & 3, c->vdep);
+static void vib_step(Ch *c, int tick, int p_is_mod){
+    int d = (p_is_mod ? ngp_vibrato_delta_mod : ngp_vibrato_delta)((int8_t)c->vpos, c->mb0 & 3, c->vdep);
     { static int nv=-1; if(nv<0) nv=getenv("XNOVIB")!=NULL; if(nv) d=0; }
     c->p74 = c->pD4 + d * PK;
     if (tick) c->vpos = (int8_t)(c->vpos + c->vspd);
@@ -344,12 +350,12 @@ static void do_effect(XPlayer *p, int chn, Ch *c, int tick){
             if (tick || (p->s->fmt == 1 && getenv("XTP0"))) { c->p74 = c->pD4 = ngp_tporta_normal((p->s->fmt == 2 || (qmod() && p->s->fmt == 1)) ? qper(c->p74) : c->p74, c->p80, c->m7c * PK); }
             c->dcf = 1; break;
     case 4: if (par & 15) c->vdep = par & 15; if (par & 0xf0) c->vspd = (par & 0xf0) >> 2;
-            vib_step(c, tick); c->dcf = 1; break;
+            vib_step(c, tick, p->s->fmt == 1 && p->s->pt_tuning == 2); c->dcf = 1; break;
     case 5: if (!(p->s->fmt == 1 && getenv("XRT") && c->rt && !p->v[chn].on)) c->trig = 0;
             if (!tick && p->s->fmt == 1 && getenv("XTPR")) c->p74 = c->pD4;
             if (tick || (p->s->fmt == 1 && getenv("XTP0"))) { c->p74 = c->pD4 = ngp_tporta_normal((p->s->fmt == 2 || (qmod() && p->s->fmt == 1)) ? qper(c->p74) : c->p74, c->p80, c->m7c * PK); }
             volslide(p, c, par, tick); c->dcf = 1; c->vE8 = c->vD8; break;
-    case 6: vib_step(c, tick); volslide(p, c, par, tick); c->dcf = 1; c->vE8 = c->vD8; break;
+    case 6: vib_step(c, tick, p->s->fmt == 1 && p->s->pt_tuning == 2); volslide(p, c, par, tick); c->dcf = 1; c->vE8 = c->vD8; break;
     case 7: if (par & 15) c->tdep = par & 15; if (par & 0xf0) c->tspd = (par & 0xf0) >> 2;
             trem_step(p, c, tick); c->e0f = 1; break;
     case 0x12: if (par) c->m78 = par; else par = c->m78;
@@ -364,7 +370,7 @@ static void do_effect(XPlayer *p, int chn, Ch *c, int tick){
                  else if (tick) c->pD4 -= (par << 2) * PK; } break;
     case 0x14: tremor(c, par); c->e0f = 1; break;
     case 0x15: retrig_q(p, c, par, tick); break;
-    case 0x17: vib_step(c, tick); c->dcf = 1; break;
+    case 0x17: vib_step(c, tick, p->s->fmt == 1 && p->s->pt_tuning == 2); c->dcf = 1; break;
     case 0x18: c->trig = 0;
                if (tick || (p->s->fmt == 1 && getenv("XTP0"))) { c->p74 = c->pD4 = ngp_tporta_normal((p->s->fmt == 2 || (qmod() && p->s->fmt == 1)) ? qper(c->p74) : c->p74, c->p80, c->m7c * PK); }
                c->dcf = 1; break;
@@ -610,6 +616,11 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
                   pr = pr < 0 ? 0 : pr > 1 ? 1 : pr;
                   l += sm * (1.0 - pr); r += sm * pr; }
                 v->pos += v->step;
+                if (v->pend && ((v->loop && v->pos >= v->le) || (!v->loop && v->pos >= v->len))) {   /* latched sample takes over at the loop end: plays its repeat part */
+                    const XSmp *q = v->pend; v->pend = NULL;
+                    v->is16 = q->is16; v->data = q->data; v->len = q->len; v->ls = q->ls; v->le = q->le > q->len ? q->len : q->le; v->loop = q->loop;
+                    v->pos = q->loop ? q->ls : 0; if (!q->loop) v->on = 0;
+                }
                 if (v->loop) { while (v->pos >= v->le) v->pos -= (v->le - v->ls); }
                 else if (v->pos >= v->len) { v->on = 0; if (xlive_on()) { v->hold = 1; v->pos = v->len; } }
             }
