@@ -65,7 +65,7 @@ static int rd_inst_smp(const XSong *s, int inst, int note, int *smpi){
 }
 static double note_period(const XSong *s, int note, int relnote, int ft){
     int n = note + relnote;           /* 1-basiert */
-    if (s->linear) return 7680.0 - (n - 1) * 64 - ft / 2.0;
+    if (s->linear) return 7680.0 - (n - 1) * 64 - (double)(ft / 2);      /* FT2 / libopenmpt: integer division of the finetune (truncates towards zero), 0.78 cents for odd values */
     return 27392.0 * pow(2.0, -((n - 1) + ft / 128.0) / 12.0);
 }
 static double period_hz(const XSong *s, double per){

@@ -93,6 +93,9 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
                 int type = h[14];
                 if (h[39] == 0) nm0++; else if (h[39] == ' ') nm32++;
                 m->vol = h[12]; m->finetune = (int8_t)h[13]; m->pan = h[15]; m->relnote = (int8_t)h[16];
+                /* A non-zero 'reserved' byte of the sample header (0xAD = ADPCM aside): libopenmpt then floors the finetune to a multiple of 8 (measured with
+                 * synthetic XM files over the whole finetune range: -28 -> -32, 4 -> 0, 11 -> 8, -1 -> -8). */
+                if (h[17] && h[17] != 0xAD) m->finetune = (int8_t)(m->finetune & ~7);
                 m->is16 = (type & 16) != 0;
                 m->loop = (type & 3) != 0; m->pingpong = (type & 3) == 2;
                 if (m->is16) { len >>= 1; ls >>= 1; ll >>= 1; }
