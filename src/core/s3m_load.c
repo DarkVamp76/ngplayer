@@ -74,6 +74,7 @@ int xs3m_load(XSong *s, const uint8_t *b, size_t n){
     /* Kanal-Pan wie im Original (0xcd00-Tabelle: Index*17) */
     for (int i = 0; i < 32; i++) {
         s->chpan[i] = -1;
+        if (!stereo) { s->chpan[i] = 128; continue; }   /* mono module (master volume bit 7 clear): libopenmpt ignores the channel pans completely */
         if (pant && (pant[i] & 0x20)) { s->chpan[i] = ngp_pan_tab[pant[i] & 15]; continue; }
         if (stereo) {
             int c = chset[i] & 0x1f;
