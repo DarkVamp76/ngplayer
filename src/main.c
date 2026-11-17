@@ -2249,7 +2249,7 @@ static void draw_ui_portrait(float W, float H) {
             {   /* the sound card (the turning 3D model), lower right of the title card between the badges and the time column */
                 float chh = 54, chw = chips_width(chh), rightE = M + aw - 60, x0 = rightE - chw;     /* may cover part of the time while it turns */
                 if (x0 < cx + 6) x0 = cx + 6;
-                if (chw > 0 && x0 + chw <= M + aw - 6) draw_chips(x0, hy + 6, chh);
+                if (chw > 0 && x0 + chw <= M + aw - 6) draw_chips(x0, hy + 16, chh);
             }
         }
     }
