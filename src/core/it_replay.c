@@ -860,7 +860,12 @@ ITPlayer *itp_new(const ITSong *s, int rate){
     }
     /* IT files from OpenMPT 1.18 (cwtv 0x888 / cmwt 0x888): libopenmpt mixes them louder than the current OpenMPT levels (measured on one file, 10 channels,
      * mix volume 128: factor 1.62, RMS ratio 0.62 -> 1.00); the table periods are switched on above (correlation 0.77 -> 0.95). */
-    if (s->cwt == 0x888 && s->cmwt == 0x888) p->K *= 1.62;
+    /* The levels follow the mix levels stored in the file (OpenMPT extension chunk), measured against libopenmpt on four files: 3 (1.17 RC3): x1.62 (i_win_xd 1.09, soft_ice_planet
+     * 0.58 without), 0 (original): x0.73 (greenday: ng was 2.0 too loud), 2 (RC2): x0.33 (carl: 4.9 too loud). A file without the chunk keeps the old x1.62. */
+    if (s->cwt == 0x888 && s->cmwt == 0x888 && s->mpt_mixlevels < 0) p->K *= 1.62;
+    else if (s->cmwt == 0x888 && s->mpt_mixlevels == 3) p->K *= 1.62;
+    else if (s->cmwt == 0x888 && s->mpt_mixlevels == 0) p->K *= 0.73;
+    else if (s->cmwt == 0x888 && s->mpt_mixlevels == 2) p->K *= 0.33;
     { const char *e = getenv("ITGAIN"); if (e) p->K *= atof(e); }
     for (int i = 0; i < 64; i++) {
         V *c = &p->ch[i];
@@ -887,8 +892,8 @@ int itp_render(ITPlayer *p, int16_t *out, int n){
             if (p->firsttick && getenv("ITPOS")) fprintf(stderr, "POS %.2f %d %d sp%d tp%d\n", (double)p->nsamp / p->rate, p->cur_order, p->row, p->speed, p->tempo);
             update_channels(p);
             /* tick length: rate * 2.5 / tempo. IT files use the truncated whole number of samples (checked bit-exact against libopenmpt
-             * at 44.1 kHz on 20 files). OpenMPT's own MPTM format (cmwt 0x888) uses the exact fractional length instead: carry the remainder. */
-            if (p->s->cmwt == 0x888) { double tl = (double)p->rate * 2.5 / p->tempo + p->tk_frac; p->tk_len = p->tk_left = (int)tl; p->tk_frac = tl - p->tk_len; }
+             * at 44.1 kHz on 20 files). OpenMPT files in its alternative or modern tempo mode (extension chunk "..MT") use the exact fractional length instead: carry the remainder. */
+            if (p->s->mpt_tempo_mode >= 1) { double tl = (double)p->rate * 2.5 / p->tempo + p->tk_frac; p->tk_len = p->tk_left = (int)tl; p->tk_frac = tl - p->tk_len; }
             else p->tk_len = p->tk_left = (int)(p->rate * 5 / (p->tempo * 2));
             if (p->tk_left < 1) p->tk_left = p->tk_len = 1;
             if (p->tkcap < p->tk_len * 2) { p->tkcap = p->tk_len * 2; p->tkbuf = realloc(p->tkbuf, sizeof(double) * p->tkcap); p->tkout = realloc(p->tkout, sizeof(int16_t) * p->tkcap); }

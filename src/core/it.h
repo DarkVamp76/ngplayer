@@ -36,6 +36,8 @@ typedef struct {
     int flags;                 /* 1 Stereo, 4 Instrumente, 8 linear, 16 alte Effekte, 32 Gxx-Link */
     int cwt, cmwt;
     int gv, mv, speed, tempo, sep, pwd;
+    int mpt_tempo_mode;   /* OpenMPT extension chunk "..MT": 0 classic (truncated tick length), 1 alternative, 2 modern (exact fractional tick length); 0 when the file has none */
+    int mpt_mixlevels;    /* OpenMPT extension chunk ".MMP": the mix levels of the file (0 original, 1..3 the 1.17 release candidates, 4 compatible, 5 FT2), -1 when the file has none */
     unsigned rsv;      /* header bytes 0x3C..0x3F: 0 in ModPlug files, a value in Impulse Tracker 2.14p4/p5 files (same cwtv/cmwt) */
     int dtm;           /* 1 = built from a Digital Tracker module (ProTracker-like periods, libopenmpt kPeriodsAreHertz reset) */
     int schism_days;   /* Schism Tracker: Tage seit 2009-10-31 (aus cwt bzw. Header-Feld), sonst -1 */
