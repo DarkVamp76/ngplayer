@@ -2049,7 +2049,6 @@ static void draw_ui(double t) {
             }
             if (clicked(x + 8, yy, w - 16, rh)) { play_index(i); click = 0; }
         }
-        { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
         draw_dice(x + w - 44, y + h - 33, 12.5f);
         draw_rand_chip(x + w - 104, y + h - 44, 38);
         draw_rpt_chip(x + w - 148, y + h - 44, 38);
@@ -2087,6 +2086,7 @@ static void draw_ui(double t) {
     draw_logo(ax + haw + M + 18, hy + 19, 56);
     text(ax + haw + M + 88, hy + 22, 28, TXT, "ngPlayer");
     text(ax + haw + M + 89, hy + 56, 12, DIM, TAGLINE);
+    text_right(ax + haw + M + bw - 12, hy + hh - 20, 10, alpha(FAINT, 0.9f), NGPLAYER_VERSION);      /* the internal version, small at the bottom right of the logo box */
     draw_seal(ax + haw + M + bw - 12, hy + 14, 24, SEAL_TEXT);
     {
         char title[160], sub[200];
