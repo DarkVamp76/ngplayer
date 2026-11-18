@@ -1295,11 +1295,17 @@ static void chip_dip(float x, float y, float h, float beat) {            /* Paul
     z = chip_tsz(17, k); text(cx - text_width("8364R7", z) / 2, y + 57 * k - z * 0.8f, z, ink, "8364R7");
     z = chip_tsz(14, k); text(cx - text_width("1589  27", z) / 2, y + 77 * k - z * 0.8f, z, ink, "1589  27");
 }
-/* Which chip: 0 = Paula (TFMX, AHX, SoundFX, MOD and MED up to 4 channels), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices),
+/* Which chip: 0 = Paula (TFMX, AHX, SoundFX, MOD and MED up to 4 channels; web player), 5 = the Amiga 500 in its place (desktop player), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices),
  * 4 = the AdLib Gold card (the FM formats, Yamaha OPL3) */
 static int chip_kind_of(const char *f, int n) {
     if (!strcmp(f, "AMD") || !strcmp(f, "MAD") || !strcmp(f, "A2M") || !strcmp(f, "HERAD") || !strcmp(f, "RAD") || !strcmp(f, "LDS")) return 4;
-    if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || !strcmp(f, "SFX") || ((!strcmp(f, "MOD") || !strcmp(f, "MED")) && n <= 4)) return 0;     /* the Amiga formats that run on the four Paula voices */
+    if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || !strcmp(f, "SFX") || ((!strcmp(f, "MOD") || !strcmp(f, "MED")) && n <= 4)) {     /* the Amiga formats that run on the four Paula voices */
+#ifndef __EMSCRIPTEN__
+        return 5;                                                      /* the desktop player shows the Amiga 500 */
+#else
+        return 0;                                                      /* the web player keeps the drawn Paula chip */
+#endif
+    }
     return n > 32 ? 3 : (n >= 15 ? 2 : 1);
 }
 static int chip_kind(void) { return chip_kind_of(song_format(g_song), song_channels(g_song)); }
@@ -2152,7 +2158,7 @@ static void draw_ui(double t) {
             if (bend > tl) tl = bend;
             float x0 = 0.5f * (tl + tr) - chw / 2;
             if (x0 < tl + 8) x0 = tl + 8;
-            { static const float lift[5] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
+            { static const float lift[6] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
         }
     }
 
@@ -2391,7 +2397,7 @@ static void draw_ui_portrait(float W, float H) {
                 if (cx > tl) tl = cx;
                 if (tr - tl >= 40) { x0 = 0.5f * (tl + tr) - chw / 2; if (x0 < tl + 4) x0 = tl + 4; }   /* centred between the title and the time; on a phone it may reach into the time, not into the title */
                 else if (x0 < cx + 6) x0 = cx + 6;                                          /* a very long title: lower right, may cover part of the time */
-                if (chw > 0 && x0 + chw <= M + aw - 6) { static const float lift[5] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f };               /* the same lift per model as in the landscape header */
+                if (chw > 0 && x0 + chw <= M + aw - 6) { static const float lift[6] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f };               /* the same lift per model as in the landscape header */
                     draw_chips(x0, chip_kind() == 0 ? hy + hh / 2 - chh / 2 : hy + (hh - chh) / 2 - lift[chip_kind()] * chh, chh); }   /* centred in the title card at every width */
             }
         }
