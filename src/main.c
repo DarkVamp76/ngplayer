@@ -2019,10 +2019,11 @@ static void draw_ui(double t) {
             float tx = x + 20;
             tx += draw_fmt_badge(tx, yy + 6, &pl[i], isc);      /* file format in its own colour */
             float tgw = tg[0] ? text_width(tg, 14) : 0;
-            float mob = g_mobile ? MOB_BTN_W - 18 : 28, bx = x + w - 8 - MOB_BTN_W;       /* touch devices: the menu button of the phone list instead of the hover x */
-            fit_text(lab, w - 74 - mob - (tx - (x + 20)) - tgw, 14);
+            float mob = g_mobile ? MOB_BTN_W - 18 : 0, bx = x + w - 8 - MOB_BTN_W;       /* touch devices: the menu button of the phone list instead of the hover x */
+            /* the title gets all the room: the #ID is flush right, and while the pointer is over a desktop row the I and x take the place of the ID */
+            fit_text(lab, (g_mobile ? w - 74 - mob : w - 36 - (tg[0] ? 10 : 0)) - (tx - (x + 20)) - tgw, 14);
             text(tx, yy + 5, 14, isc ? TXT : DIM, lab);
-            if (tg[0]) text_right(x + w - 44 - mob, yy + 5, 14, VC[1], tg);      /* #ID, left of the remove / menu button */
+            if (tg[0] && (g_mobile || !hv)) text_right(g_mobile ? x + w - 44 - mob : x + w - 16, yy + 5, 14, VC[1], tg);      /* #ID */
             int xhv = hit(x + w - 38, yy + 2, 26, rh - 6);
             if (g_mobile) {
                 rrect(bx, yy + 2, MOB_BTN_W, rh - 8, 8, alpha(EDGE, 0.40f));
@@ -2035,7 +2036,8 @@ static void draw_ui(double t) {
                     if (ctx_y + CTX_H(i) > view_h - 4) ctx_y = view_h - 4 - CTX_H(i);
                 }
             } else {
-                if (hv) {               /* red x: remove from list */
+                if (hv) {               /* the buttons sit on their own background (the title may reach under them) */
+                    rrect(x + w - 72, yy + 1, 62, rh - 4, 8, CARD); rrect(x + w - 72, yy + 1, 62, rh - 4, 8, isc ? alpha(VC[0], 0.16f) : alpha(EDGE, 0.25f));
                     if (xhv) rrect(x + w - 38, yy + 3, 26, rh - 8, 6, alpha(WARN, 0.22f));
                     text(x + w - 31, yy + 5, 15, xhv ? WARN : alpha(WARN, 0.55f), "\xd7");
                 }
@@ -3078,6 +3080,7 @@ static void ipc_poll(void) {
 }
 #endif
 static void iter(void) {
+    { static int once; if (!once) { once = 1; if (getenv("NGPLAYER_TEST_MATAB")) g_pltab = 1; } }      /* test hook: the Mod Archive tab of the list */
 #ifndef __EMSCRIPTEN__
     ipc_poll();
 #endif
