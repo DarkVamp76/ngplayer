@@ -61,6 +61,7 @@ typedef struct {
     int *prows;                /* XM: Zeilen je Pattern (sonst 64) */
     int amiga;                 /* MOD: echtes Amiga-Format (M.K., M!K!, FLT4, 15 Samples) -> Paula-Tiefpass */
     int linpan;                /* 1 = linear pan law (DSM, like libopenmpt) instead of the S3M law */
+    int s3m_ni;                /* Scream Tracker 3 module: an instrument number without a note resets the volume but does not retrigger the sample */
     int pt_tuning;             /* fmt 1: 0 = 12 tone equal temperament (FAR, AMF, PSM, MED ...), 1 = ProTracker period table (MTM), 3 = DSM (integer ST3 period like S3M), 2 = real MOD (fmt 2, S3M: 1 = integer ST3 period table, 0 = exact; saved by Impulse Tracker): period table + PAL tuning + exact slides */
 } XSong;
 
