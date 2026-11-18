@@ -1969,6 +1969,17 @@ static void draw_ma_dialog(double t) {
     else text(x + 24, y + 120, 12, FAINT, "Enter downloads  \xb7  Ctrl+V paste  \xb7  Ctrl+R random  \xb7  Esc close");
 }
 
+/* the second line of the title card: the tracker the module was made with (the same text as in the Specs window), or its format when that is not known */
+static void header_sub(char *out, size_t n) {
+    static const Song *cache_song; static int cache_cur = -2, cache_ch = -1; static char cache[sizeof ((SongInfo *)0)->tracker], cache_title[48];
+    if (!g_song) { out[0] = 0; return; }
+    if (cache_song != g_song || cache_cur != cur || cache_ch != song_channels(g_song) || strncmp(cache_title, song_title(g_song), sizeof cache_title - 1)) {     /* a new song may reuse the address of the old one */
+        SongInfo si; song_info(g_song, &si);
+        snprintf(cache, sizeof cache, "%s", si.tracker[0] ? si.tracker : si.format);
+        cache_song = g_song; cache_cur = cur; cache_ch = song_channels(g_song); snprintf(cache_title, sizeof cache_title, "%s", song_title(g_song));
+    }
+    snprintf(out, n, "%s", cache);
+}
 static void draw_ui_portrait(float W, float H);
 static void draw_specs_chip(float x, float y);
 static void specs_open_entry(int idx);
@@ -2104,15 +2115,15 @@ static void draw_ui(double t) {
         if (g_song) {
             const char *tt = song_title(g_song);
             snprintf(title, sizeof title, "%s", tt[0] ? tt : (cur >= 0 ? pl[cur].label : ""));
-            snprintf(sub, sizeof sub, "%s", cur >= 0 ? pl[cur].label : "");
+            header_sub(sub, sizeof sub);
         } else {
             snprintf(title, sizeof title, "ngPlayer");
             snprintf(sub, sizeof sub, TAGLINE);
         }
         float chh = hh - 14, chw = chips_width(chh);      /* Soundchip-Grafik zwischen Titel und Zeit */
         float tmax = haw - 200 - (chw > 0 ? chw + 20 : 0) - (g_song ? 30 : 0);
-        float tsize = 26;
-        while (tsize > 18 && text_width(title, tsize) > tmax) tsize -= 2;
+        float tsize = 22;
+        while (tsize > 15 && text_width(title, tsize) > tmax) tsize -= 1;
         fit_text(title, tmax, tsize);
         text(ax + 22, hy + 10, tsize, TXT, title);
         float ichip = ax + 22 + text_width(title, tsize) + 12;                  /* the Specs button right of the title */
@@ -2354,14 +2365,14 @@ static void draw_ui_portrait(float W, float H) {
         if (g_song) {
             const char *tt = song_title(g_song);
             snprintf(title, sizeof title, "%s", tt[0] ? tt : (cur >= 0 ? pl[cur].label : ""));
-            snprintf(sub, sizeof sub, "%s", cur >= 0 ? pl[cur].label : "");
+            header_sub(sub, sizeof sub);
         } else {
             snprintf(title, sizeof title, "ngPlayer");
             snprintf(sub, sizeof sub, TAGLINE);
         }
         float tmax = aw - 32 - 96 - (g_song ? 30 : 0);
-        float tsize = 22;
-        while (tsize > 15 && text_width(title, tsize) > tmax) tsize -= 1;
+        float tsize = 19;
+        while (tsize > 14 && text_width(title, tsize) > tmax) tsize -= 1;
         fit_text(title, tmax, tsize);
         text(M + 16, hy + 10, tsize, TXT, title);
         float ichip = M + 16 + text_width(title, tsize) + 10;                   /* the Specs button right of the title */
