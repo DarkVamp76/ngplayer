@@ -33,6 +33,13 @@ install: build/ngplayer
 	install -Dm755 build/ngplayer $(DESTDIR)$(PREFIX)/bin/ngplayer
 	install -Dm644 packaging/ngplayer.desktop $(DESTDIR)$(PREFIX)/share/applications/ngplayer.desktop
 	install -Dm644 assets/ngplayer.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/ngplayer.svg
+	install -Dm644 packaging/ngplayer-mime.xml $(DESTDIR)$(PREFIX)/share/mime/packages/ngplayer.xml
+	for f in assets/mime/*.svg; do install -Dm644 $$f $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/mimetypes/$$(basename $$f); done
+	@if [ -z "$(DESTDIR)" ]; then \
+		update-mime-database $(PREFIX)/share/mime >/dev/null 2>&1 || true; \
+		update-desktop-database $(PREFIX)/share/applications >/dev/null 2>&1 || true; \
+		gtk-update-icon-cache -q -t -f $(PREFIX)/share/icons/hicolor >/dev/null 2>&1 || true; \
+	fi
 
 clean:
 	rm -rf build

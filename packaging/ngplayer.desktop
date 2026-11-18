@@ -6,4 +6,4 @@ Exec=ngplayer %F
 Icon=ngplayer
 Terminal=false
 Categories=AudioVideo;Audio;Player;
-MimeType=audio/x-mod;audio/x-s3m;audio/x-xm;audio/x-it;
+MimeType=audio/x-mod;audio/x-s3m;audio/x-xm;audio/x-it;audio/x-ngplayer-mod;audio/x-ngplayer-s3m;audio/x-ngplayer-xm;audio/x-ngplayer-it;audio/x-ngplayer-stm;audio/x-ngplayer-ptm;audio/x-ngplayer-ult;audio/x-ngplayer-669;audio/x-ngplayer-mtm;audio/x-ngplayer-med;audio/x-ngplayer-psm;audio/x-ngplayer-far;audio/x-ngplayer-mdl;audio/x-ngplayer-dmf;audio/x-ngplayer-tfmx;audio/x-ngplayer-amf;audio/x-ngplayer-sfx;audio/x-ngplayer-ahx;audio/x-ngplayer-dbm;audio/x-ngplayer-dsm;audio/x-ngplayer-dtm;audio/x-ngplayer-amd;audio/x-ngplayer-mad;audio/x-ngplayer-a2m;audio/x-ngplayer-herad;audio/x-ngplayer-rad;audio/x-ngplayer-lds;
