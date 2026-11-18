@@ -26,6 +26,13 @@
 #include <strings.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#ifndef __EMSCRIPTEN__
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <poll.h>
+#include <limits.h>
+#include <fcntl.h>
+#endif
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -2996,7 +3003,84 @@ static void draw_ctx_menu(void) {
         text(x + 16, y + 8, 14, OKC, toast_txt);
     }
 }
+
+#ifndef __EMSCRIPTEN__
+/* ---- One player instance: a second start (a double click in the file manager, "open with") hands its files to the running player and exits.
+ * The two talk over a Unix socket in the user's runtime directory: lines "OPEN <absolute path>" (add and play) and "RAISE" (bring the window forward). ---- */
+static int ipc_fd = -1; static char ipc_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
+static void ipc_log(const char *what, const char *arg) {
+    const char *lp = getenv("NGPLAYER_IPC_LOG"); if (!lp) return;           /* test hook: a log of what the socket received */
+    FILE *f = fopen(lp, "a"); if (f) { fprintf(f, "%s %s\n", what, arg ? arg : ""); fclose(f); }
+}
+static void ipc_sockpath(void) {
+    const char *r = getenv("XDG_RUNTIME_DIR"), *o = getenv("NGPLAYER_SOCKET");     /* NGPLAYER_SOCKET: another socket path (tests, several players) */
+    if (o && *o) snprintf(ipc_path, sizeof ipc_path, "%s", o);
+    else if (r && *r) snprintf(ipc_path, sizeof ipc_path, "%s/ngplayer.sock", r); else snprintf(ipc_path, sizeof ipc_path, "/tmp/ngplayer-%u.sock", (unsigned)getuid());
+}
+static int ipc_connect(void) {
+    ipc_sockpath();
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0); if (fd < 0) return -1;
+    struct sockaddr_un a; memset(&a, 0, sizeof a); a.sun_family = AF_UNIX; snprintf(a.sun_path, sizeof a.sun_path, "%s", ipc_path);
+    if (connect(fd, (struct sockaddr *)&a, sizeof a)) { close(fd); return -1; }
+    return fd;
+}
+/* hand over: every argument that is a path (made absolute), or just RAISE; returns 1 when a running player took it */
+static int ipc_forward(int npaths, char **paths) {
+    int fd = ipc_connect(); if (fd < 0) return 0;
+    char msg[8192]; size_t n = 0;
+    for (int i = 0; i < npaths && n + PATH_MAX + 8 < sizeof msg; i++) {
+        char rp[PATH_MAX]; if (!realpath(paths[i], rp)) continue;
+        n += (size_t)snprintf(msg + n, sizeof msg - n, "OPEN %s\n", rp);
+    }
+    if (!n) n = (size_t)snprintf(msg, sizeof msg, "RAISE\n");
+    int ok = write(fd, msg, n) == (ssize_t)n; close(fd);
+    return ok;
+}
+static void ipc_listen(void) {
+    ipc_sockpath();
+    unlink(ipc_path);                                                       /* a stale socket of a player that did not exit cleanly */
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0); if (fd < 0) return;
+    struct sockaddr_un a; memset(&a, 0, sizeof a); a.sun_family = AF_UNIX; snprintf(a.sun_path, sizeof a.sun_path, "%s", ipc_path);
+    if (bind(fd, (struct sockaddr *)&a, sizeof a) || listen(fd, 8)) { close(fd); return; }
+    chmod(ipc_path, 0600);
+    int fl = fcntl(fd, F_GETFL); fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+    ipc_fd = fd;
+}
+static void ipc_close(void) { if (ipc_fd >= 0) { close(ipc_fd); ipc_fd = -1; unlink(ipc_path); } }
+/* a file or folder from outside: play it (an entry that is in the list already is just played) */
+static void open_external(const char *path, int play) {       /* play = 0: only add it to the list (the 2nd, 3rd ... file of one hand-over) */
+    char rp[PATH_MAX]; if (!realpath(path, rp)) return;
+    struct stat st; if (stat(rp, &st)) return;
+    if (S_ISREG(st.st_mode)) {
+        for (int i = 0; i < npl; i++) {
+            char ep[PATH_MAX];
+            if (!pl[i].ma_id && pl[i].path && realpath(pl[i].path, ep) && !strcmp(ep, rp)) { if (play) play_index(i); return; }
+        }
+    }
+    int was = npl;
+    add_path(rp, 0);
+    if (play && npl > was) play_index(was);
+}
+static void ipc_poll(void) {
+    if (ipc_fd < 0) return;
+    for (int k = 0; k < 4; k++) {
+        int c = accept(ipc_fd, NULL, NULL); if (c < 0) return;
+        char buf[8192]; size_t n = 0; struct pollfd p = { c, POLLIN, 0 };
+        while (n < sizeof buf - 1 && poll(&p, 1, 100) > 0) { ssize_t r = read(c, buf + n, sizeof buf - 1 - n); if (r <= 0) break; n += (size_t)r; }
+        close(c); buf[n] = 0;
+        int first = 1;
+        for (char *line = strtok(buf, "\n"); line; line = strtok(NULL, "\n")) {
+            if (!strncmp(line, "OPEN /", 6)) { ipc_log("OPEN", line + 5); open_external(line + 5, first); first = 0; if (cur >= 0 && cur < npl) ipc_log("PLAYING", pl[cur].label); }
+            else if (!strcmp(line, "RAISE")) ipc_log("RAISE", NULL);
+        }
+        if (win) { SDL_RestoreWindow(win); SDL_RaiseWindow(win); }
+    }
+}
+#endif
 static void iter(void) {
+#ifndef __EMSCRIPTEN__
+    ipc_poll();
+#endif
         SDL_Event e;
         click = 0; rclick = 0;
         while (SDL_PollEvent(&e)) {
@@ -3156,12 +3240,24 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--version")) { printf("ngPlayer %s\n", NGPLAYER_VERSION); return 0; }
     shot = NULL;
     shot_frames = 90;
+#ifndef __EMSCRIPTEN__
+    {   /* a running player takes the files and this start ends here (not with --screenshot / --new-instance) */
+        int newinst = 0, np = 0; char *paths[256];
+        for (int i = 1; i < argc; i++) {
+            if (!strcmp(argv[i], "--screenshot") || !strcmp(argv[i], "--frames") || !strcmp(argv[i], "--rate")) { if (!strcmp(argv[i], "--screenshot")) newinst = 1; i++; }
+            else if (!strcmp(argv[i], "--new-instance")) newinst = 1;
+            else if (argv[i][0] != '-' && np < 256) paths[np++] = argv[i];
+        }
+        if (!newinst && !getenv("NGPLAYER_NEW_INSTANCE") && ipc_forward(np, paths)) return 0;
+    }
+#endif
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) shot_frames = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--rate") && i + 1 < argc) g_rate = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--new-instance")) { }                        /* handled above: do not look for a running player */
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
-            printf("usage: %s [--rate N] [--screenshot out.bmp [--frames N]] [datei|ordner ...]\n", argv[0]);
+            printf("usage: %s [--new-instance] [--rate N] [--screenshot out.bmp [--frames N]] [datei|ordner ...]\n", argv[0]);
             return 0;
         } else add_path(argv[i], 0);
     }
@@ -3283,6 +3379,9 @@ int main(int argc, char **argv) {
     if (npl && !(pl[0].ma_id > 0 && access(pl[0].path, R_OK))) play_index(0);
 
     running = 1;
+#ifndef __EMSCRIPTEN__
+    if (!shot && !getenv("NGPLAYER_NEW_INSTANCE")) ipc_listen();
+#endif
     t0 = SDL_GetPerformanceCounter(); tlast = t0;
     freq = (double)SDL_GetPerformanceFrequency();
 #ifdef __EMSCRIPTEN__
@@ -3292,6 +3391,9 @@ int main(int argc, char **argv) {
 #endif
 #ifndef __EMSCRIPTEN__
     if (!shot) { settings_save(); ma_list_save(); }
+#endif
+#ifndef __EMSCRIPTEN__
+    ipc_close();
 #endif
     if (g_dev) SDL_CloseAudioDevice(g_dev);
     unload();
