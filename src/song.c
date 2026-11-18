@@ -8,6 +8,7 @@
 #include "opl_replay.h"
 #include "herad.h"
 #include "rad.h"
+#include "lds.h"
 #include "a2m_load.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +48,7 @@ struct Song {
     A2mSong *a2s;                 /* AdLib FM: Adlib Tracker 2 (the player is op, too) */
     HeradSong *hs;                /* AdLib FM: HERAD (the player is op, too) */
     RadSong *rd;                  /* AdLib FM: Reality ADlib Tracker (the player is op, too) */
+    LdsSong *ld;                  /* AdLib FM: LOUDNESS Sound System (the player is op, too) */
     int tstart;             /* TFMX: erste Trackstep-Zeile des Subsongs */
     int nsub, cursub;       /* TFMX: Anzahl echter Subsongs, aktueller (0-basiert) */
     char title[40];
@@ -160,7 +162,15 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
     Song *s = (Song *)calloc(1, sizeof *s);
     int r = 0;
     const char *dot = strrchr(path, '.');
-    if (dot && (!strcasecmp(dot, ".hsq") || !strcasecmp(dot, ".sqx") || !strcasecmp(dot, ".sdb") || !strcasecmp(dot, ".agd") || !strcasecmp(dot, ".ha2"))) {
+    if (dot && (!strcasecmp(dot, ".lds") || !strcasecmp(dot, ".ld0"))) {          /* LOUDNESS has no signature: the extension decides */
+        int e = 0;
+        s->ld = lds_load(b, (size_t)n, !strcasecmp(dot, ".ld0"), &e);
+        if (!s->ld) { snprintf(err, errcap, "LDS: damaged or unsupported file (%d)", e); free(b); song_close(s); return NULL; }
+        s->kind = K_OPL; s->fmt = "LDS"; s->title[0] = 0;
+        s->nch = 9; s->nord = (int)s->ld->nposi;
+        s->op = opl_new_lds(s->ld, rate);
+        if (!s->op) r = -1;
+    } else if (dot && (!strcasecmp(dot, ".hsq") || !strcasecmp(dot, ".sqx") || !strcasecmp(dot, ".sdb") || !strcasecmp(dot, ".agd") || !strcasecmp(dot, ".ha2"))) {
         int e = 0;
         s->hs = herad_load(b, (size_t)n, &e);
         if (!s->hs) { snprintf(err, errcap, "HERAD: damaged or unsupported file (%d)", e); free(b); song_close(s); return NULL; }
@@ -402,6 +412,7 @@ void song_close(Song *s) {
     if (s->a2s) a2m_free(s->a2s);
     if (s->hs) herad_free(s->hs);
     if (s->rd) rad_free(s->rd);
+    if (s->ld) lds_free(s->ld);
     if (s->tp) tfp_free(s->tp);
     if (s->tf) tfmx_free(s->tf);
     if (s->it) it_free(s->it);
@@ -442,6 +453,7 @@ static int pat_of(const Song *s, int order) {
     if (s->kind == K_TFMX || s->kind == K_AHX) return order;          /* TFMX: Trackstep-Zeile; AHX: die Position (4 Tracks) ist das Pattern */
     if (s->kind == K_OPL && s->hs) return order;                       /* HERAD: the measure */
     if (s->kind == K_OPL && s->rd) return rad_order_track(s->rd, order);   /* RAD: the track, -1 = jump marker */
+    if (s->kind == K_OPL && s->ld) return order < (int)s->ld->nposi ? order : -1;     /* LDS: the position */
     if (s->kind == K_OPL && s->a2s) { int p = s->a2s->songinfo.pattern_order[order & 127]; return p >= 0x80 || p >= s->a2s->eventsinfo.patterns ? -1 : p; }
     if (s->kind == K_OPL) { int p = s->os->order[order]; return p >= 0x80 || p >= s->os->nop ? -1 : p; }
     if (s->kind == K_DMF) { int p = s->dm->order[order]; return p < s->dm->npat ? p : -1; }
@@ -454,6 +466,7 @@ int song_order_pattern(const Song *s, int order) { return pat_of(s, order); }
 int song_pattern_rows(const Song *s, int pattern) {
     if (s->kind == K_OPL && s->hs) return HERAD_MEASURE_TICKS;           /* one row per tick */
     if (s->kind == K_OPL && s->rd) return RAD_LINES;
+    if (s->kind == K_OPL && s->ld) return s->ld->pattlen;
     if (s->kind == K_OPL && s->a2s) return s->a2s->songinfo.patt_len;
     if (s->kind == K_OPL) return s->os->nrows;
     if (s->kind == K_AHX) return ahx_tracklen(s->ap);
@@ -615,6 +628,19 @@ void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
         if (note) { put_note(t.note, note + 11); t.has_note = 1; }              /* AHX note 1 = C-1 */
         if (inst) { t.inst[0] = hexc(inst >> 4); t.inst[1] = hexc(inst); }
         if (fx || par) { fx3(t.fx, fxc(fx), par); t.fxclass = (fx == 1 || fx == 2 || fx == 3 || fx == 5) ? 2 : (fx == 0xA || fx == 0xC) ? 1 : (fx == 0xB || fx == 0xD || fx == 0xF) ? 4 : 5; }
+    } else if (s->kind == K_OPL && s->ld) {
+        LdsCell lc; if (!lds_cell(s->ld, pattern, row, ch, &lc)) return;
+        if (lc.kind == 1) {
+            put_note(t.note, lc.note - 12); t.has_note = 1;                              /* the tune value 12 is C-0 (OPL block 0, F-number 343) */
+            t.inst[0] = hexc(lc.inst >> 4); t.inst[1] = hexc(lc.inst);
+        } else if (lc.kind == 2) {
+            char L = lc.cmd == 0xff ? 'V' : lc.cmd == 0xfe ? 'T' : lc.cmd == 0xfd ? 'N' : lc.cmd == 0xfc ? 'E' : lc.cmd == 0xfb ? 'K' : lc.cmd == 0xfa ? 'B' : lc.cmd == 0xf9 ? 'J' :
+                     lc.cmd == 0xf8 ? 'R' : lc.cmd == 0xf7 ? 'W' : lc.cmd == 0xf6 ? 'G' : lc.cmd == 0xf5 ? 'F' : lc.cmd == 0xf4 ? 'M' : lc.cmd == 0xf3 ? 'D' : lc.cmd == 0xf2 ? 'S' :
+                     lc.cmd >= 0xf0 ? 'X' : 'P';
+            int par = L == 'P' ? lc.cmd & 0x1f : lc.param;
+            fx3(t.fx, L, par);
+            t.fxclass = (L == 'V' || L == 'N' || L == 'M' || L == 'D') ? 1 : (L == 'G' || L == 'F' || L == 'W' || L == 'P' || L == 'R') ? 2 : (L == 'T' || L == 'B' || L == 'J' || L == 'E') ? 4 : 5;
+        }
     } else if (s->kind == K_OPL && s->rd) {
         RadCell rc; if (!rad_cell(s->rd, pattern, row, ch, &rc)) return;
         if (rc.note == 15) strcpy(t.note, "===");
@@ -757,7 +783,14 @@ const char *song_fx_name(const Song *s, const SongCell *c, int *is_vol) {
     char L = c->fx[0];
     if (L != '.') {
         int par = (hexv(c->fx[1]) << 4) | hexv(c->fx[2]);
-        if (s->kind == K_OPL && s->rd) {
+        if (s->kind == K_OPL && s->ld) {
+            switch (L) {
+            case 'V': return "Scale Volume";   case 'T': return "Set Tempo";       case 'N': return "Next Note Volume"; case 'E': return "End of Song";
+            case 'K': return "Key Off";        case 'B': return "Break to Next";   case 'J': return "Jump to Position"; case 'R': return "Reset Glide";
+            case 'W': return "Vibrato";        case 'G': return "Glide To";        case 'F': return "Fine Tune";        case 'M': return "Main Volume";
+            case 'D': return "Fade";           case 'S': return "Tremolo Stay";    case 'P': return "Portamento";       case 'X': return "MIDI (ignored)";
+            }
+        } else if (s->kind == K_OPL && s->rd) {
             switch (L) {
             case '1': return "Portamento Up";    case '2': return "Portamento Down";   case '3': return "Tone Slide";
             case '5': return "Tone Slide+Vol Slide"; case 'A': return "Volume Slide";  case 'C': return "Set Volume";
@@ -867,7 +900,7 @@ static const struct { const char *f, *name, *tracker; } FMT_INFO[] = {
     { "AMF", "AMF module", "DSMI / Asylum Music Format" }, { "SFX", "SoundFX module", "SoundFX" }, { "AHX", "AHX module", "AHX (Abyss' Highest eXperience)" },
     { "DBM", "DigiBooster Pro module", "DigiBooster Pro" }, { "DSM", "DSIK module", "DSIK (Digital Sound Interface Kit)" }, { "DTM", "Digital Tracker module", "Digital Tracker (Atari Falcon030)" },
     { "AMD", "AMUSIC module", "AMUSIC Adlib Tracker" }, { "MAD", "Mlat Adlib Tracker module", "Mlat Adlib Tracker" }, { "A2M", "Adlib Tracker 2 module", "Adlib Tracker 2" },
-    { "HERAD", "Herbulot AdLib System tune", "HERAD System (Cryo)" }, { "RAD", "Reality ADlib Tracker tune", "Reality ADlib Tracker" }, { NULL, NULL, NULL } };
+    { "LDS", "LOUDNESS Sound System song", "LOUDNESS Sound System (Andras Molnar)" }, { "HERAD", "Herbulot AdLib System tune", "HERAD System (Cryo)" }, { "RAD", "Reality ADlib Tracker tune", "Reality ADlib Tracker" }, { NULL, NULL, NULL } };
 
 static void info_add(SongInfo *o, const char *fmt, ...) {
     if (o->nextra >= SONG_INFO_LINES) return;
@@ -898,6 +931,10 @@ void song_info(const Song *s, SongInfo *o) {
             else info_add(o, "Chip: OPL2 (YM3812), 9 voices");
             int n4 = 0; for (int i = 0; i < s->hs->ninst; i++) if (s->hs->agd && (int8_t)s->hs->inst[i][0] == 4) n4++;
             info_add(o, "%d instruments%s, %d tracks", s->hs->ninst, n4 ? " (some with 4 operators)" : "", s->hs->ntracks);
+        } else if (s->ld) {
+            info_add(o, "Chip: OPL2 (YM3812), 9 FM voices");
+            info_add(o, "%u instruments, %u positions, %d rows per pattern", s->ld->npatch, s->ld->nposi, s->ld->pattlen);
+            info_add(o, "Update rate %.1f Hz", lds_refresh(s->ld));
         } else if (s->rd) {
             if (s->rd->use_opl3) info_add(o, "Chip: OPL3 (YMF262), 9 channels, 4-operator instruments");
             else info_add(o, "Chip: OPL2 (YM3812), 9 channels");
