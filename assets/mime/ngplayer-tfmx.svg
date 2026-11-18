@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b2440"/><stop offset="1" stop-color="#0f1526"/></linearGradient></defs>
+  <path d="M26 6h54l26 26v84a8 8 0 0 1-8 8H26a8 8 0 0 1-8-8V14a8 8 0 0 1 8-8z" fill="url(#g)" stroke="#d9e0ff" stroke-opacity="0.55" stroke-width="2.5"/>
+  <path d="M80 6v18a8 8 0 0 0 8 8h18z" fill="#d9e0ff" fill-opacity="0.28"/>
+  <rect x="18" y="46" width="88" height="3" fill="#d9e0ff" fill-opacity="0.35"/>
+  <text x="62" y="68" text-anchor="middle" font-family="DejaVu Sans, Verdana, sans-serif" font-weight="bold" font-size="33" fill="#d9e0ff">TFMX</text>
+  <polyline points="30,96 40,96 46,84 54,108 62,86 70,106 77,92 84,96 98,96" fill="none" stroke="#d9e0ff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

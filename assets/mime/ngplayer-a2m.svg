@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b2440"/><stop offset="1" stop-color="#0f1526"/></linearGradient></defs>
+  <path d="M26 6h54l26 26v84a8 8 0 0 1-8 8H26a8 8 0 0 1-8-8V14a8 8 0 0 1 8-8z" fill="url(#g)" stroke="#8cbff2" stroke-opacity="0.55" stroke-width="2.5"/>
+  <path d="M80 6v18a8 8 0 0 0 8 8h18z" fill="#8cbff2" fill-opacity="0.28"/>
+  <rect x="18" y="46" width="88" height="3" fill="#8cbff2" fill-opacity="0.35"/>
+  <text x="62" y="68" text-anchor="middle" font-family="DejaVu Sans, Verdana, sans-serif" font-weight="bold" font-size="40" fill="#8cbff2">A2M</text>
+  <rect x="44" y="83" width="3" height="6" rx="1" fill="#8cbff2"/><rect x="44" y="105" width="3" height="6" rx="1" fill="#8cbff2"/><rect x="53" y="83" width="3" height="6" rx="1" fill="#8cbff2"/><rect x="53" y="105" width="3" height="6" rx="1" fill="#8cbff2"/><rect x="62" y="83" width="3" height="6" rx="1" fill="#8cbff2"/><rect x="62" y="105" width="3" height="6" rx="1" fill="#8cbff2"/><rect x="71" y="83" width="3" height="6" rx="1" fill="#8cbff2"/><rect x="71" y="105" width="3" height="6" rx="1" fill="#8cbff2"/><rect x="40" y="88" width="48" height="16" rx="3" fill="none" stroke="#8cbff2" stroke-width="3"/><circle cx="50" cy="96" r="2.5" fill="#8cbff2"/>
+</svg>
