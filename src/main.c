@@ -77,12 +77,19 @@ static unsigned g_cb_seq;                     /* zaehlt Callbacks */
 static unsigned long long g_cb_rendered;      /* g_rendered am Ende des letzten Callbacks */
 static Uint64 g_cb_time;                      /* Zeitstempel des letzten Callbacks */
 static int g_resync = 1;
+#ifdef __EMSCRIPTEN__
+/* Web: while a new song starts, the sound is held back until the silent media element of the lock screen has its track for the song (see probe_start).
+ * Each swap of that element makes iOS drop the Web Audio output for a moment; this way the drop-out happens before the first note, not in the middle of it. */
+static volatile int g_hold; static Uint32 g_hold_t;
+#else
+#define g_hold 0
+#endif
 
 static void audio_cb(void *ud, Uint8 *stream, int len) {
     (void)ud;
     int16_t *o = (int16_t *)stream;
     int n = len / 4;
-    if (!g_song || g_paused || g_ended) { memset(stream, 0, (size_t)len); g_resync = 1; return; }
+    if (!g_song || g_paused || g_ended || g_hold) { memset(stream, 0, (size_t)len); g_resync = 1; return; }
     int done = 0;
     while (done < n) {
         int k = n - done < 32 ? n - done : 32;
@@ -321,6 +328,9 @@ static void play_index_sub(int idx, int sub) {
     g_error[0] = 0;
     memset(g_scope, 0, sizeof g_scope);
     song_scope_enable(s, g_scope, SCOPE_LEN);
+#ifdef __EMSCRIPTEN__
+    g_hold = 1; g_hold_t = SDL_GetTicks();         /* released again in probe_start, at the latest after 700 ms (media_sync) */
+#endif
     if (g_dev) SDL_LockAudioDevice(g_dev);
     g_song = s;
     g_rendered = 0; g_lastord = g_lastrow = -1; g_resync = 1;
@@ -2824,7 +2834,7 @@ EM_JS(void, web_media_update, (const char *title, int playing), {
 /* Lock screen progress: iOS only knows the 1 s of the silent loop and lets the bar swing back and forth unless it is told the real length
  * and position. The length of a module is not known up front, so a second instance of the song is rendered silently up to its end in
  * small slices (timer driven, so it also runs while the screen is locked and the main loop stands still). */
-EM_JS(void, web_media_position, (double dur, double pos, double rate), {
+EM_JS(int, web_media_position, (double dur, double pos, double rate, int allow), {
     var ms = ('mediaSession' in navigator) ? navigator.mediaSession : null;
     if (ms && ms.setPositionState) {
         try {
@@ -2836,14 +2846,18 @@ EM_JS(void, web_media_position, (double dur, double pos, double rate), {
      * carries the real timeline: a silent track as long as the song (8 kHz, 8 bit), its currentTime kept at the song position. Songs of
      * unknown length (or over 15 min) keep the 1 s loop. */
     var a = Module.ngMediaEl;
-    if (!a) return;
+    if (!a) return 0;
     Module.ngPosBase = pos; Module.ngPosT = performance.now(); Module.ngPosRate = rate;
+    /* a swap of the element's source (a new track for this song, or back to the loop) only when allow is set: that is at the start of a song, while the app holds
+     * the sound back. Returns 1 when a swap was started; the app then waits for ng_web_hold_release, called when the element is playing again. */
+    var release = function () { try { Module._ng_web_hold_release(); } catch (e) {} };
     if (dur === 0) {                                   /* length of the new song is still being measured: no source swap now (each swap of the element can make iOS drop a moment of the Web Audio output) */
         if (Module.ngTl && Math.abs(a.currentTime - pos) > 1.0) a.currentTime = pos;
-        return;
+        return 0;
     }
     if (dur > 0 && dur < 900) {
         if (!Module.ngTl || Math.abs(Module.ngTl - dur) > 0.5) {
+            if (!allow) return 0;                   /* in the middle of a song: no swap (the position state still carries the real length) */
             var secs = Math.ceil(dur) + 3, n = 8000 * secs;
             var buf = new ArrayBuffer(44 + n), v = new DataView(buf), u = new Uint8Array(buf);
             var str = function (o, t) { for (var i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
@@ -2858,26 +2872,31 @@ EM_JS(void, web_media_position, (double dur, double pos, double rate), {
             var onmeta = function () {
                 a.removeEventListener('loadedmetadata', onmeta);
                 a.currentTime = Module.ngPosBase + (Module.ngPosRate > 0 ? (performance.now() - Module.ngPosT) / 1000 : 0);
-                if (Module.ngMediaWant) { var p = a.play(); if (p && p.catch) p.catch(function () {}); }
+                if (Module.ngMediaWant) { var p = a.play(); if (p && p.then) p.then(release, release); else release(); } else release();
             };
             a.addEventListener('loadedmetadata', onmeta);
             a.src = url;
+            return 1;
         } else if (Math.abs(a.currentTime - pos) > 1.0) a.currentTime = pos;
     } else if (Module.ngTl) {                       /* length unknown again (next song): back to the 1 s loop */
+        if (!allow) return 0;
         Module.ngTl = 0; a.loop = true; a.src = Module.ngLoopUrl;
-        if (Module.ngMediaWant) { var q = a.play(); if (q && q.catch) q.catch(function () {}); }
+        if (Module.ngMediaWant) { var q = a.play(); if (q && q.then) q.then(release, release); else release(); } else release();
+        return 1;
     }
+    return 0;
 });
 static Song *g_probe; static unsigned long long g_probe_frames; static int g_probe_gen;
 static double g_len_s;                      /* > 0: length in seconds, 0: still being measured, -1: not available (reported as endless) */
 static double ps_pos, ps_rate = -1, ps_len = -2; static Uint32 ps_t;
-static void media_push_position(void) {
+static int media_push_position(int allow) {
     double pos = (double)g_frames / g_rate, rate = (g_song && !g_paused && !g_ended) ? 1.0 : 0.0;
-    web_media_position(g_len_s > 0 ? g_len_s : (g_len_s == 0 ? 0 : -1), pos, rate);   /* 0: the length is being measured - keep the silent track, only unknown (-1) goes back to the 1 s loop */
+    int swap = web_media_position(g_len_s > 0 ? g_len_s : (g_len_s == 0 ? 0 : -1), pos, rate, allow);   /* 0: the length is being measured - keep the silent track, only unknown (-1) goes back to the 1 s loop */
     ps_pos = pos; ps_rate = rate; ps_len = g_len_s; ps_t = SDL_GetTicks();
+    return swap;
 }
-static void probe_tick(void *arg) {
-    if ((int)(intptr_t)arg != g_probe_gen || !g_probe) return;        /* another song started meanwhile */
+/* renders the probe instance for at most ms milliseconds; 1 = it reached the end (the length is set and the probe closed) */
+static int probe_run(double ms) {
     static int16_t buf[2048 * 2];
     Uint64 t0 = SDL_GetPerformanceCounter(), fq = SDL_GetPerformanceFrequency();
     for (;;) {
@@ -2886,31 +2905,51 @@ static void probe_tick(void *arg) {
         if (got <= 0 || g_probe_frames > (unsigned long long)g_rate * 3600) {
             g_len_s = got <= 0 ? (double)g_probe_frames / g_rate : -1;
             song_close(g_probe); g_probe = NULL;
-            media_push_position();
-            return;
+            return 1;
         }
-        if ((SDL_GetPerformanceCounter() - t0) * 1000 / fq >= 2) break;      /* 2 ms per slice: the audio callback shares this thread */
+        if ((SDL_GetPerformanceCounter() - t0) * 1000.0 / fq >= ms) return 0;
     }
+}
+static void probe_tick(void *arg) {
+    if ((int)(intptr_t)arg != g_probe_gen || !g_probe) return;        /* another song started meanwhile */
+    if (probe_run(2)) { media_push_position(0); return; }             /* 2 ms per slice: the audio callback shares this thread; no source swap in the middle of the song */
     emscripten_async_call(probe_tick, arg, 8);
 }
+EMSCRIPTEN_KEEPALIVE void ng_web_hold_release(void) { g_hold = 0; }   /* the lock screen element is playing again: the song may sound */
+/* A new song starts (the sound is held, see g_hold): measure its length for up to 150 ms right here. The lock screen element gets its track for the song, or goes
+ * back to the 1 s loop when the length is not known by then, now, before the first note; the rest of the measuring goes on in small slices and only tells the position
+ * state (a swap in the middle of the song would make iOS drop the sound). The sound is released when the element plays again, at the latest after 700 ms. */
 static void probe_start(int idx) {
     g_probe_gen++;
     if (g_probe) { song_close(g_probe); g_probe = NULL; }
     g_len_s = 0; g_probe_frames = 0;
-    if (idx < 0 || idx >= npl || !g_song) { g_len_s = -1; return; }
-    const char *f = song_format(g_song);
-    /* only the replayers that keep all state in their own instance; the others report an endless song */
-    if (!strcmp(f, "TFMX") || !strcmp(f, "DMF") || !strcmp(f, "AHX")) { g_len_s = -1; return; }
-    char err[64] = "";
-    g_probe = song_open_sub(pl[idx].path, g_rate, g_open_sub, err, sizeof err);
-    if (!g_probe) { g_len_s = -1; return; }
-    emscripten_async_call(probe_tick, (void *)(intptr_t)g_probe_gen, 30);
+    int measuring = 0;
+    if (idx < 0 || idx >= npl || !g_song) g_len_s = -1;
+    else {
+        const char *f = song_format(g_song);
+        /* only the replayers that keep all state in their own instance; the others report an endless song */
+        if (!strcmp(f, "TFMX") || !strcmp(f, "DMF") || !strcmp(f, "AHX")) g_len_s = -1;
+        else {
+            char err[64] = "";
+            g_probe = song_open_sub(pl[idx].path, g_rate, g_open_sub, err, sizeof err);
+            if (!g_probe) g_len_s = -1;
+            else if (!probe_run(150)) measuring = 1;
+        }
+    }
+    {   /* g_len_s: > 0 known, 0 still measuring (the element goes back to the loop for now), -1 unknown */
+        double keep = g_len_s; if (measuring) g_len_s = -1;
+        int swapping = media_push_position(1);
+        if (measuring) g_len_s = keep;
+        if (!swapping) g_hold = 0;                    /* nothing to wait for */
+    }
+    if (measuring) emscripten_async_call(probe_tick, (void *)(intptr_t)g_probe_gen, 30);
 }
 /* Pushes the title and the playing state to the Media Session when one of them changed. Also called right after a lock screen command:
  * with the screen locked the browser stops requestAnimationFrame (the main loop), only the audio keeps running, so the loop alone would
  * leave the old title on the lock screen. */
 static void media_sync(void) {
     static char mt[160]; static int mp = -1;
+    if (g_hold && SDL_GetTicks() - g_hold_t > 700) g_hold = 0;      /* the element never answered: do not keep the song silent */
     const char *t = (cur >= 0 && cur < npl) ? pl[cur].label : "ngPlayer";
     int now = g_song && !g_paused && !g_ended;
     int changed = now != mp || strcmp(t, mt);
@@ -2920,7 +2959,7 @@ static void media_sync(void) {
         Uint32 tn = SDL_GetTicks();
         double expect = ps_pos + (ps_rate > 0 ? (double)(tn - ps_t) / 1000.0 : 0.0);
         int jump = fabs(pos - expect) > 1.5;
-        if (changed || g_len_s != ps_len || rate != ps_rate || jump || tn - ps_t > 15000) media_push_position();
+        if (changed || g_len_s != ps_len || rate != ps_rate || jump || tn - ps_t > 15000) media_push_position(0);
     }
 }
 /* Commands from the lock screen: 0 play, 1 pause, 2 next, 3 previous; 4 = heartbeat from the silent audio element */
