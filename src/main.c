@@ -129,25 +129,25 @@ static int is_mod_name(const char *n) {
     if (tfmx_is_song_name(n)) return 1;          /* mdat.NAME / NAME.tfx; smpl.* und .sam sind nur Sampledaten */
     const char *d = strrchr(n, '.');
     if (!d) return 0;
-    static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".med", ".psm", ".far", ".mdl", ".mmd0", ".mmd1", ".mmd2", ".mmd3", ".xm", ".it", ".dmf", ".amf", ".dsm", ".sfx", ".ahx", ".dbm", NULL };
+    static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".med", ".psm", ".far", ".mdl", ".mmd0", ".mmd1", ".mmd2", ".mmd3", ".xm", ".it", ".dmf", ".amf", ".dsm", ".sfx", ".ahx", ".dbm", ".dtm", NULL };
     for (int i = 0; ext[i]; i++) if (!strcasecmp(d, ext[i])) return 1;
     return 0;
 }
 
 /* ---- File format badge in front of each list entry (colour per format) ---- */
-enum { FMT_NONE, FMT_MOD, FMT_S3M, FMT_XM, FMT_IT, FMT_STM, FMT_PTM, FMT_ULT, FMT_669, FMT_MTM, FMT_MED, FMT_PSM, FMT_FAR, FMT_MDL, FMT_DMF, FMT_TFMX, FMT_AMF, FMT_SFX, FMT_AHX, FMT_DBM, FMT_DSM, FMT_COUNT };
-static const char *const FMT_NAME[FMT_COUNT] = { "", "MOD", "S3M", "XM", "IT", "STM", "PTM", "ULT", "669", "MTM", "MED", "PSM", "FAR", "MDL", "DMF", "TFMX", "AMF", "SFX", "AHX", "DBM", "DSM" };
+enum { FMT_NONE, FMT_MOD, FMT_S3M, FMT_XM, FMT_IT, FMT_STM, FMT_PTM, FMT_ULT, FMT_669, FMT_MTM, FMT_MED, FMT_PSM, FMT_FAR, FMT_MDL, FMT_DMF, FMT_TFMX, FMT_AMF, FMT_SFX, FMT_AHX, FMT_DBM, FMT_DSM, FMT_DTM, FMT_COUNT };
+static const char *const FMT_NAME[FMT_COUNT] = { "", "MOD", "S3M", "XM", "IT", "STM", "PTM", "ULT", "669", "MTM", "MED", "PSM", "FAR", "MDL", "DMF", "TFMX", "AMF", "SFX", "AHX", "DBM", "DSM", "DTM" };
 static const col FMT_COL[FMT_COUNT] = {
     { 0.5f, 0.5f, 0.5f, 1 }, { 1.00f, 0.76f, 0.28f, 1 }, { 0.35f, 0.95f, 0.55f, 1 }, { 0.24f, 0.88f, 1.00f, 1 }, { 1.00f, 0.36f, 0.80f, 1 },
     { 0.30f, 0.85f, 0.75f, 1 }, { 0.65f, 0.50f, 1.00f, 1 }, { 1.00f, 0.55f, 0.25f, 1 }, { 1.00f, 0.42f, 0.38f, 1 }, { 0.75f, 0.95f, 0.30f, 1 },
-    { 0.40f, 0.60f, 1.00f, 1 }, { 0.90f, 0.45f, 1.00f, 1 }, { 0.85f, 0.75f, 0.55f, 1 }, { 0.55f, 1.00f, 0.85f, 1 }, { 1.00f, 0.60f, 0.65f, 1 }, { 0.85f, 0.88f, 1.00f, 1 }, { 0.95f, 0.62f, 0.50f, 1 }, { 0.80f, 0.78f, 0.45f, 1 }, { 0.55f, 0.90f, 0.30f, 1 }, { 0.40f, 0.78f, 0.95f, 1 }, { 0.95f, 0.85f, 0.35f, 1 } };
+    { 0.40f, 0.60f, 1.00f, 1 }, { 0.90f, 0.45f, 1.00f, 1 }, { 0.85f, 0.75f, 0.55f, 1 }, { 0.55f, 1.00f, 0.85f, 1 }, { 1.00f, 0.60f, 0.65f, 1 }, { 0.85f, 0.88f, 1.00f, 1 }, { 0.95f, 0.62f, 0.50f, 1 }, { 0.80f, 0.78f, 0.45f, 1 }, { 0.55f, 0.90f, 0.30f, 1 }, { 0.40f, 0.78f, 0.95f, 1 }, { 0.95f, 0.85f, 0.35f, 1 }, { 0.62f, 0.80f, 0.95f, 1 } };
 static int fmt_from_name(const char *fn) {
     if (tfmx_is_song_name(fn)) return FMT_TFMX;
     const char *d = strrchr(fn, '.');
     if (!d) return FMT_NONE;
     static const struct { const char *ext; int f; } map[] = { {".mod", FMT_MOD}, {".s3m", FMT_S3M}, {".xm", FMT_XM}, {".it", FMT_IT}, {".stm", FMT_STM}, {".ptm", FMT_PTM},
         {".ult", FMT_ULT}, {".669", FMT_669}, {".mtm", FMT_MTM}, {".med", FMT_MED}, {".mmd0", FMT_MED}, {".mmd1", FMT_MED}, {".mmd2", FMT_MED}, {".mmd3", FMT_MED},
-        {".psm", FMT_PSM}, {".far", FMT_FAR}, {".mdl", FMT_MDL}, {".dmf", FMT_DMF}, {".amf", FMT_AMF}, {".sfx", FMT_SFX}, {".ahx", FMT_AHX}, {".dbm", FMT_DBM}, {".dsm", FMT_DSM}, { NULL, 0 } };
+        {".psm", FMT_PSM}, {".far", FMT_FAR}, {".mdl", FMT_MDL}, {".dmf", FMT_DMF}, {".amf", FMT_AMF}, {".sfx", FMT_SFX}, {".ahx", FMT_AHX}, {".dbm", FMT_DBM}, {".dsm", FMT_DSM}, {".dtm", FMT_DTM}, { NULL, 0 } };
     for (int i = 0; map[i].ext; i++) if (!strcasecmp(d, map[i].ext)) return map[i].f;
     return FMT_NONE;
 }
@@ -161,6 +161,7 @@ static int fmt_sniff(const char *path) {
     if (n >= 16 && !memcmp(b, "RIFF", 4) && !memcmp(b + 8, "DSMF", 4)) return FMT_DSM;   /* DSIK DSM */
     if (n >= 14 && !memcmp(b, "THX", 3) && b[3] <= 1) return FMT_AHX;   /* AHX */
     if (!memcmp(b, "IMPM", 4)) return FMT_IT;
+    if (n >= 22 && !memcmp(b, "D.T.", 4)) return FMT_DTM;
     if (n >= 17 && !memcmp(b, "Extended Module: ", 17)) return FMT_XM;
     if (n > 0x30 && !memcmp(b + 0x2C, "SCRM", 4)) return FMT_S3M;
     if (n > 0x30 && !memcmp(b + 0x2C, "PTMF", 4)) return FMT_PTM;

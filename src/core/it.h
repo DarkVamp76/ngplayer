@@ -25,6 +25,7 @@ typedef struct {
     int is16, loop, sloop, pingpong, spingpong;
     int gvl, vol, dfp, cvt;
     int vis, vid, vir, vit;    /* Auto-Vibrato: Speed, Depth, Rate (Sweep), Typ */
+    int ptft;                  /* DTM: 1 + ProTracker finetune nibble (0..15): note pitch from the ProTracker tuned period table; 0 = none */
     void *data;                /* int8_t bzw. int16_t, vorzeichenbehaftet, len Samples (links bzw. mono) */
     void *data2;               /* Stereo-Samples (IT-Flag 4, OpenMPT-Erweiterung): rechter Kanal, sonst NULL */
 } ITSmp;
@@ -36,6 +37,7 @@ typedef struct {
     int cwt, cmwt;
     int gv, mv, speed, tempo, sep, pwd;
     unsigned rsv;      /* header bytes 0x3C..0x3F: 0 in ModPlug files, a value in Impulse Tracker 2.14p4/p5 files (same cwtv/cmwt) */
+    int dtm;           /* 1 = built from a Digital Tracker module (ProTracker-like periods, libopenmpt kPeriodsAreHertz reset) */
     int schism_days;   /* Schism Tracker: Tage seit 2009-10-31 (aus cwt bzw. Header-Feld), sonst -1 */
     uint8_t chpan[64], chvol[64];
     uint8_t orders[256];
@@ -48,6 +50,8 @@ typedef struct {
 
 ITSong *it_load(const uint8_t *buf, size_t len, int *err);   /* NULL bei Fehler, err < 0 */
 void it_free(ITSong *s);
+int  dtm_probe(const uint8_t *buf, size_t len);              /* 1 = Digital Tracker module ("D.T.") */
+ITSong *dtm_load(const uint8_t *buf, size_t len, int *err);   /* DTM -> ITSong, played by the IT engine */
 
 typedef struct ITPlayer ITPlayer;
 ITPlayer *itp_new(const ITSong *s, int rate);
