@@ -25,6 +25,7 @@ void opl_free(OplSong *s);
 
 typedef struct OplPlayer OplPlayer;
 OplPlayer *opl_new(const OplSong *s, int rate);
+struct A2mSong; OplPlayer *opl_new_a2m(const struct A2mSong *s, int rate);   /* Adlib Tracker 2: OPL3, 18 channels */
 void opl_pfree(OplPlayer *p);
 int opl_render(OplPlayer *p, int16_t *out, int nframes);      /* 0 at the end of the song */
 int opl_position(const OplPlayer *p, int *order, int *row, int *speed);
