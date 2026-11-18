@@ -2049,9 +2049,9 @@ static void draw_ui(double t) {
             }
             if (clicked(x + 8, yy, w - 16, rh)) { play_index(i); click = 0; }
         }
-        draw_dice(x + w - 44, y + h - 33, 12.5f);
-        draw_rand_chip(x + w - 104, y + h - 44, 38);
-        draw_rpt_chip(x + w - 148, y + h - 44, 38);
+        draw_rpt_chip(x + 18, y + h - 44, 38);                       /* RPT and RND flush left, the bigger dice on the right */
+        draw_rand_chip(x + 18 + 38 + 6, y + h - 44, 38);
+        draw_dice(x + w - 50, y + h - 38, 18.0f);
         if (npl && !nvis) text(x + 18, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
         if (!npl) {
             text(x + 18, y + 60, 14, DIM, "No files.");
