@@ -519,7 +519,7 @@ static void advance(XPlayer *p){
                    if (c->loop_cnt > 0) loopto = c->loop_row; }
         }
     }
-    if (loopto >= 0 && jo < 0) {
+    if (loopto >= 0 && (jo < 0 || s->fmt == 2)) {      /* S3M: a pattern loop that jumps wins over a break or jump on the same row (libopenmpt: edge_-_abraham.s3m, SB3 and C16 on row 63) */
         /* E6x pattern loop: the rows of the loop are meant to be played again, so forget that they were visited
          * (otherwise the song-end detection takes the repeat for a loop of the whole song and stops after the first pass) */
         for (int r = loopto; r <= p->row && r < 64; r++) p->vis[p->order][r] = 0;
