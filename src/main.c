@@ -1245,11 +1245,11 @@ static void draw_seal(float cx, float cy, float r, const char *label) {
    Gezeichnet mit den vorhandenen Primitiven (Koordinaten im 320x200-Raster, Chip um 160,100). */
 #define BEATC C(0.133f, 0.827f, 0.933f, 1)      /* Akzentfarbe des Beat-Pulses (Cyan wie das Logo) */
 static float chip_tsz(float fs, float k) { float z = fs * k; return z < 7.0f ? 7.0f : z; }
-static void chip_dip_gen(float x, float y, float h, float beat, int pins, const char *l1, const char *l2, const char *l3) {   /* a DIP chip; h = height, width = 5 * h; pins = pins per side */
+static void chip_dip(float x, float y, float h, float beat) {            /* Paula, DIP-48 (MOS 8364R7); h = Hoehe, Breite = 5 * h */
     float k = h / 100.0f;
     col pin = mix(C(0.62f, 0.65f, 0.70f, 1), BEATC, 0.55f * beat), body = C(0.23f, 0.24f, 0.255f, 1), ink = mix(C(0.79f, 0.80f, 0.83f, 1), C(1, 1, 1, 1), 0.5f * beat), dimple = C(0.09f, 0.095f, 0.10f, 1);
-    float x0 = 10, x1 = 490, pw = (x1 - x0) / (float)pins;
-    for (int i = 0; i < pins; i++) {
+    float x0 = 10, x1 = 490, pw = (x1 - x0) / 24.0f;
+    for (int i = 0; i < 24; i++) {
         float px = x0 + i * pw + pw * 0.22f;
         rect(x + px * k, y, pw * 0.56f * k, 12 * k, pin);
         rect(x + px * k, y + 88 * k, pw * 0.56f * k, 12 * k, pin);
@@ -1259,14 +1259,12 @@ static void chip_dip_gen(float x, float y, float h, float beat, int pins, const 
     rrect(x + (95 - 12) * k, y + (50 - 12) * k, 24 * k, 24 * k, 12 * k, dimple);
     rrect(x + (415 - 12) * k, y + (50 - 12) * k, 24 * k, 24 * k, 12 * k, dimple);
     float cx = x + 250 * k, z;
-    z = chip_tsz(15, k); text(cx - text_width(l1, z) / 2, y + 36 * k - z * 0.8f, z, ink, l1);
-    z = chip_tsz(17, k); text(cx - text_width(l2, z) / 2, y + 57 * k - z * 0.8f, z, ink, l2);
-    z = chip_tsz(14, k); text(cx - text_width(l3, z) / 2, y + 77 * k - z * 0.8f, z, ink, l3);
+    z = chip_tsz(15, k); text(cx - text_width("MOS", z) / 2, y + 36 * k - z * 0.8f, z, ink, "MOS");
+    z = chip_tsz(17, k); text(cx - text_width("8364R7", z) / 2, y + 57 * k - z * 0.8f, z, ink, "8364R7");
+    z = chip_tsz(14, k); text(cx - text_width("1589  27", z) / 2, y + 77 * k - z * 0.8f, z, ink, "1589  27");
 }
-static void chip_dip(float x, float y, float h, float beat) { chip_dip_gen(x, y, h, beat, 24, "MOS", "8364R7", "1589  27"); }       /* Paula, DIP-48 */
-static void chip_dip_opl(float x, float y, float h, float beat) { chip_dip_gen(x, y, h, beat, 12, "YAMAHA", "YM3812", "OPL2  8735"); }   /* the AdLib FM chip, DIP-24 */
 /* Which chip: 0 = Paula (TFMX, AHX, SoundFX, MOD and MED up to 4 channels), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices),
- * 4 = the Yamaha OPL2 of the AdLib card (the FM formats) */
+ * 4 = the AdLib Gold card (the FM formats, Yamaha OPL3) */
 static int chip_kind(void) {
     const char *f = song_format(g_song);
     int n = song_channels(g_song);
@@ -1278,7 +1276,7 @@ static int chip_kind(void) {
 static float chips_width(float h) {                       /* Breite des Chipbereichs (0 = keiner) */
     if (!g_song) return 0;
     int k = chip_kind();
-    if (k == 0 || k == 4) return 5.0f * h * 0.5f;                  /* Paula and the OPL2: a flat strip (5:1), at half height */
+    if (k == 0) return 5.0f * h * 0.5f;                            /* Paula: a flat strip (5:1), at half height */
     return 1.12f * h * c3_box_aspect(k - 1);                       /* the rotating 3D sound card */
 }
 static void draw_chips(float x, float y, float h) {
@@ -1289,13 +1287,12 @@ static void draw_chips(float x, float y, float h) {
     float gx = x + cw / 2, gy = y + h / 2;
     if (beat > 0.01f) {                                   /* Glow hinter dem Chip */
         set_additive(1);
-        blob(gx, gy, (k == 0 || k == 4 ? cw * 0.30f : h * 0.55f) * (1.0f + 0.4f * beat), alpha(BEATC, 0.55f * beat));
+        blob(gx, gy, (k == 0 ? cw * 0.30f : h * 0.55f) * (1.0f + 0.4f * beat), alpha(BEATC, 0.55f * beat));
         set_additive(0);
     }
     float hh = h * sc;                                    /* leicht wachsen, um die Mitte */
     float xx = x - (cw * sc - cw) / 2, yy = y - (hh - h) / 2;
     if (k == 0) chip_dip(xx, yy + hh * 0.25f, hh * 0.5f, beat);            /* the chip is half as high as the slot: centred in it */
-    else if (k == 4) chip_dip_opl(xx, yy + hh * 0.25f, hh * 0.5f, beat);
     else { float b = 1.0f + 0.30f * beat; tex_quad(c3_texture(k - 1), xx, yy + hh * 0.57f - hh * 0.56f, cw * sc, hh * 1.12f, C(b, b, b, 1)); }
 }
 /* XTC-style water ripples behind the logo: one source per channel, amplitude follows the channel level */
@@ -2080,7 +2077,7 @@ static void draw_ui(double t) {
             if (bend > tl) tl = bend;
             float x0 = 0.5f * (tl + tr) - chw / 2;
             if (x0 < tl + 8) x0 = tl + 8;
-            { static const float lift[5] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.0f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
+            { static const float lift[5] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
         }
     }
 
@@ -2316,7 +2313,7 @@ static void draw_ui_portrait(float W, float H) {
                 if (cx > tl) tl = cx;
                 if (tr - tl >= 40) { x0 = 0.5f * (tl + tr) - chw / 2; if (x0 < tl + 4) x0 = tl + 4; }   /* centred between the title and the time; on a phone it may reach into the time, not into the title */
                 else if (x0 < cx + 6) x0 = cx + 6;                                          /* a very long title: lower right, may cover part of the time */
-                if (chw > 0 && x0 + chw <= M + aw - 6) draw_chips(x0, chip_kind() == 0 || chip_kind() == 4 ? hy + hh / 2 - chh / 2 : hy + 16 + (54 * k - chh) / 2, chh);   /* the Paula chip in the middle of the card, the cards as before */
+                if (chw > 0 && x0 + chw <= M + aw - 6) draw_chips(x0, chip_kind() == 0 ? hy + hh / 2 - chh / 2 : hy + 16 + (54 * k - chh) / 2, chh);   /* the Paula chip in the middle of the card, the cards as before */
             }
         }
     }
@@ -2981,7 +2978,7 @@ static void iter(void) {
         /* Songende -> naechster Titel */
         if (!shot) song_end_advance();
 
-        if (g_song && chip_kind() > 0 && chip_kind() < 4) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
+        if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
         g_vpw = dw; g_vph = dh;
         glViewport(0, 0, dw, dh);
         glClearColor(BG0.r, BG0.g, BG0.b, 1);

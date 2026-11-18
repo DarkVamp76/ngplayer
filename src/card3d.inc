@@ -1,4 +1,4 @@
-/* Rotating 3D sound card (Gravis Ultrasound GF1 / Ultrasound PnP with AMD InterWave) in the header, rendered on the GPU (OpenGL 3.3 / WebGL2):
+/* Rotating 3D sound card (Gravis Ultrasound GF1 / Ultrasound PnP with AMD InterWave, Terratec EWS64, AdLib Gold) in the header, rendered on the GPU (OpenGL 3.3 / WebGL2):
  * the baked model (card3d_data.h, made from the real 3D models by tools/bake_card3d.py) lives in vertex/index buffers, is drawn with a small
  * shader (flat shading from screen space derivatives, the photo of the board as texture) and a depth buffer into an off-screen texture, which
  * the 2D renderer then shows like any picture. GPL-3.0-or-later */
@@ -6,10 +6,11 @@
 #include "card3d_data.h"
 
 typedef struct { const int16_t *v; const uint8_t *vc, *pal; const uint16_t *idx; int nv, nt; const int16_t *tv; const uint16_t *tuv, *tidx; int ntt, ntv; const uint16_t *tex; int tw, th; float aspect; const int16_t *bv; const uint16_t *buv, *bidx; int nbv, nbt; const uint8_t *bpal, *bpix; int bw, bh; } C3Model;
-static const C3Model C3M[3] = {
+static const C3Model C3M[4] = {
     { c3_GF1_v, c3_GF1_vc, c3_GF1_pal, c3_GF1_i, C3_GF1_NV, C3_GF1_NT, c3_GF1_tv, c3_GF1_tuv, c3_GF1_ti, C3_GF1_NTT, C3_GF1_NTV, c3_GF1_tex, C3_GF1_TW, C3_GF1_TH, C3_GF1_ASPECT, c3_GF1_bv, c3_GF1_buv, c3_GF1_bi, C3_GF1_NBV, C3_GF1_NBT, c3_GF1_bpal, c3_GF1_bpix, C3_GF1_BW, C3_GF1_BH },
     { c3_IW_v, c3_IW_vc, c3_IW_pal, c3_IW_i, C3_IW_NV, C3_IW_NT, c3_IW_tv, c3_IW_tuv, c3_IW_ti, C3_IW_NTT, C3_IW_NTV, c3_IW_tex, C3_IW_TW, C3_IW_TH, C3_IW_ASPECT, c3_IW_bv, c3_IW_buv, c3_IW_bi, C3_IW_NBV, C3_IW_NBT, c3_IW_bpal, c3_IW_bpix, C3_IW_BW, C3_IW_BH },
     { c3_EWS_v, c3_EWS_vc, c3_EWS_pal, c3_EWS_i, C3_EWS_NV, C3_EWS_NT, c3_EWS_tv, c3_EWS_tuv, c3_EWS_ti, C3_EWS_NTT, C3_EWS_NTV, c3_EWS_tex, C3_EWS_TW, C3_EWS_TH, C3_EWS_ASPECT, c3_EWS_bv, c3_EWS_buv, c3_EWS_bi, C3_EWS_NBV, C3_EWS_NBT, c3_EWS_bpal, c3_EWS_bpix, C3_EWS_BW, C3_EWS_BH },
+    { c3_GOLD_v, c3_GOLD_vc, c3_GOLD_pal, c3_GOLD_i, C3_GOLD_NV, C3_GOLD_NT, c3_GOLD_tv, c3_GOLD_tuv, c3_GOLD_ti, C3_GOLD_NTT, C3_GOLD_NTV, c3_GOLD_tex, C3_GOLD_TW, C3_GOLD_TH, C3_GOLD_ASPECT, c3_GOLD_bv, c3_GOLD_buv, c3_GOLD_bi, C3_GOLD_NBV, C3_GOLD_NBT, c3_GOLD_bpal, c3_GOLD_bpix, C3_GOLD_BW, C3_GOLD_BH },
 };
 #define C3_BOX 0.80f                                        /* box aspect = model aspect * this: head room for the edge-on view */
 static float c3_box_aspect(int mi) { return C3M[mi].aspect * C3_BOX; }
@@ -30,7 +31,7 @@ static const char *C3_FS =
     " o=vec4(base*sh,1.0); }\n";
 
 typedef struct { GLuint vao[3], vbo[3], ebo[3], tex, btex, fbo, color, depth; int ready, w, h; } C3Gl;
-static C3Gl c3gl[3];
+static C3Gl c3gl[4];
 static GLuint c3_prog;
 static GLint c3_mvp, c3_mv, c3_umode, c3_utex;
 static float c3_ang;
