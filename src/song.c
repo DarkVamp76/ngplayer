@@ -99,7 +99,7 @@ static void detect_tracker(Song *s, const uint8_t *b, long n) {
         else snprintf(t, 64, "Soundtracker compatible");
     } else if (!strcmp(f, "MOD")) snprintf(t, 64, "Soundtracker (15 samples)");
     else if (!strcmp(f, "RAD") && n > 16) snprintf(t, 64, "Reality ADlib Tracker %d.%d", b[16] >> 4, b[16] & 15);
-    else if (!strcmp(f, "A2M") && s->a2s) snprintf(t, 64, "Adlib Tracker 2 (file version %d)", s->a2s->ffver);
+    else if (!strcmp(f, "A2M") && s->a2s) snprintf(t, 64, "Adlib Tracker 2 (%sfile version %d)", s->a2s->is_tiny ? "tiny module, " : "", s->a2s->ffver);
     else if (!strcmp(f, "HERAD") && s->hs) snprintf(t, 64, "HERAD System (Cryo)");
     else if (!strcmp(f, "AMD")) snprintf(t, 64, "AMUSIC Adlib Tracker");
     else if (!strcmp(f, "MAD")) snprintf(t, 64, "Mlat Adlib Tracker (Mad Tracker 2)");
@@ -211,7 +211,7 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
     } else if (a2m_probe(b, (size_t)n)) {
         int e = 0;
         s->a2s = a2m_load(b, (size_t)n, &e);
-        if (!s->a2s) { snprintf(err, errcap, e == -3 ? "Adlib Tracker 2: this module version is not supported yet" : "Adlib Tracker 2: damaged or unsupported module (%d)", e); free(b); song_close(s); return NULL; }
+        if (!s->a2s) { snprintf(err, errcap, "Adlib Tracker 2: damaged or unsupported module (%d)", e); free(b); song_close(s); return NULL; }
         s->kind = K_OPL; s->fmt = "A2M";
         snprintf(s->title, sizeof s->title, "%s", s->a2s->songinfo.songname);
         s->nch = s->a2s->songinfo.nm_tracks;
