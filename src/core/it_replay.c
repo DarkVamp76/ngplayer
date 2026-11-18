@@ -861,10 +861,10 @@ ITPlayer *itp_new(const ITSong *s, int rate){
     /* IT files from OpenMPT 1.18 (cwtv 0x888 / cmwt 0x888): libopenmpt mixes them louder than the current OpenMPT levels (measured on one file, 10 channels,
      * mix volume 128: factor 1.62, RMS ratio 0.62 -> 1.00); the table periods are switched on above (correlation 0.77 -> 0.95). */
     /* The levels follow the mix levels stored in the file (OpenMPT extension chunk), measured against libopenmpt on four files: 3 (1.17 RC3): x1.62 (i_win_xd 1.09, soft_ice_planet
-     * 0.58 without), 0 (original): x0.73 (greenday: ng was 2.0 too loud), 2 (RC2): x0.33 (carl: 4.9 too loud). A file without the chunk keeps the old x1.62. */
+     * 0.58 without), 0 (original, also in OpenMPT 1.2x/1.3x files): x8.25 / used channels (greenday 11 ch: 2.0 too loud, sandcastle 23 ch: 2.7), 2 (RC2): x0.33 (carl: 4.9 too loud). A file without the chunk keeps the old x1.62. */
     if (s->cwt == 0x888 && s->cmwt == 0x888 && s->mpt_mixlevels < 0) p->K *= 1.62;
     else if (s->cmwt == 0x888 && s->mpt_mixlevels == 3) p->K *= 1.62;
-    else if (s->cmwt == 0x888 && s->mpt_mixlevels == 0) p->K *= 0.73;
+    else if (s->mpt_mixlevels == 0) p->K *= 8.25 / (s->nch > 0 ? s->nch : 1);   /* original levels: x0.73 with 11 used channels (greenday), x0.37 with 23 (sandcastle) */
     else if (s->cmwt == 0x888 && s->mpt_mixlevels == 2) p->K *= 0.33;
     { const char *e = getenv("ITGAIN"); if (e) p->K *= atof(e); }
     for (int i = 0; i < 64; i++) {
