@@ -363,7 +363,12 @@ int opl_position(const OplPlayer *p, int *order, int *row, int *speed) {
     return 0;
 }
 
+static void herad_apply_mute(OplPlayer *p) {                                           /* the tracks move between OPL3 channels, so the chip mask follows them */
+    unsigned m = 0; for (int c = 0; c < p->a2n; c++) if ((p->mute >> c) & 1) m |= herad_channel_mask(p->hp, c);
+    OPL3_SetMute(&p->chip, m);
+}
 void opl_set_mute(OplPlayer *p, unsigned mask) {
+    if (p->hp) { p->mute = mask; herad_apply_mute(p); return; }
     if (!p->a2 && !p->hp) { p->mute = mask & 0x1FF; OPL3_SetMute(&p->chip, p->mute); return; }
     unsigned m = 0; for (int c = 0; c < p->a2n; c++) if (((mask >> c) & 1) && p->a2map[c] >= 0) m |= 1u << p->a2map[c];     /* AT2 channel -> OPL3 channel */
     p->mute = mask; OPL3_SetMute(&p->chip, m);
@@ -376,6 +381,7 @@ int opl_render(OplPlayer *p, int16_t *out, int n) {
     while (done < n && !p->ended) {
         if (p->rem <= 0) {                                             /* a new timer tick: the whole samples of its length, the fraction is carried over */
             if (!update(p)) p->ended = 1;
+            if (p->hp) herad_apply_mute(p);
             p->acc += (double)((float)p->rate / (float)refresh(p)); p->rem = (int)p->acc; p->acc -= p->rem;    /* single precision like the reference player */
             if (p->rem <= 0) continue;
         }
@@ -385,7 +391,8 @@ int opl_render(OplPlayer *p, int16_t *out, int n) {
             if (p->gold) { float l, r; adgold_process(p->gold, f[0], f[1], &l, &r); l *= GOLD_TRIM; r *= GOLD_TRIM; f[0] = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l); f[1] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : r); } out[2 * (done + i)] = f[0]; out[2 * (done + i) + 1] = f[1];
             if (p->scope) {                                            /* the output of each FM channel, before the (mono) panning */
                 const int16_t *co = OPL3_ChannelOutput(&p->chip); unsigned w = p->scope_pos & (unsigned)(p->scope_len - 1);
-                if (p->a2 || p->hp) { for (int c = 0; c < p->a2n; c++) p->scope[(size_t)c * p->scope_len + w] = p->a2map[c] >= 0 ? (float)co[p->a2map[c]] * (1.0f / 16384.0f) : 0.0f; }
+                if (p->hp) { for (int c = 0; c < p->a2n; c++) { unsigned m = herad_channel_mask(p->hp, c); float v = 0; for (int k = 0; k < 18; k++) if ((m >> k) & 1) v += (float)co[k]; p->scope[(size_t)c * p->scope_len + w] = v * (1.0f / 16384.0f); } }
+                else if (p->a2) { for (int c = 0; c < p->a2n; c++) p->scope[(size_t)c * p->scope_len + w] = p->a2map[c] >= 0 ? (float)co[p->a2map[c]] * (1.0f / 16384.0f) : 0.0f; }
                 else for (int c = 0; c < 9; c++) p->scope[(size_t)c * p->scope_len + w] = (float)co[c] * (1.0f / 16384.0f);
                 p->scope_pos++;
             }
