@@ -435,6 +435,16 @@ static int ctx_idx = -1; static float ctx_x, ctx_y;        /* context menu ("Sha
 static float toast_t; static char toast_txt[48];
 #define CTX_W 120.0f
 #define CTX_ROW 30.0f
+/* The information sign: a yellow disc with a dark "i" (a dot over a bar), drawn from shapes so that it stays a clear sign at any size */
+static void draw_info_sign(float cx, float cy, float r, int hover) {
+    col yel = VC[2];
+    if (hover) rrect(cx - r - 2, cy - r - 2, 2 * r + 4, 2 * r + 4, r + 2, alpha(yel, 0.25f));
+    rrect(cx - r, cy - r, 2 * r, 2 * r, r, alpha(yel, hover ? 1.0f : 0.88f));
+    col ink = C(0.07f, 0.09f, 0.16f, 1);
+    float w = r * 0.24f > 1.8f ? r * 0.24f : 1.8f;
+    rrect(cx - w / 2 - 0.2f, cy - r * 0.58f, w + 0.4f, w + 0.4f, (w + 0.4f) / 2, ink);                      /* the dot */
+    rrect(cx - w / 2, cy - r * 0.18f, w, r * 0.80f, w / 2, ink);                                          /* the bar */
+}
 /* The list menu: Share and Info (the Mod Archive page) for Mod Archive entries, Specs in the web player, on touch screens and in the narrow layout (the
  * desktop player has an I button next to the x of each row instead), Remove for all. Items are numbered 0 Share, 1 Info, 2 Specs, 3 Remove. */
 static int ctx_acts(int idx, int *act) {
@@ -2024,12 +2034,9 @@ static void draw_ui(double t) {
                 }
                 if (hv && xhv && click && clickx >= x + w - 38 && clickx < x + w - 12 && clicky >= yy && clicky < yy + rh) { pl_remove(i); click = 0; break; }
 #ifndef __EMSCRIPTEN__
-                {                       /* I: the Specs of this entry, left of the x */
+                {                       /* the information sign: the Specs of this entry, left of the x */
                     int ihv = hit(x + w - 66, yy + 2, 26, rh - 6);
-                    if (hv) {
-                        if (ihv) rrect(x + w - 66, yy + 3, 26, rh - 8, 6, alpha(VC[0], 0.22f));
-                        text(x + w - 66 + (26 - text_width("I", 14)) / 2, yy + 6, 14, ihv ? TXT : alpha(TXT, 0.62f), "I");
-                    }
+                    if (hv) draw_info_sign(x + w - 53, yy + 2 + (rh - 6) * 0.5f, 8.0f, ihv);
                     if (hv && ihv && click && clickx >= x + w - 66 && clickx < x + w - 40 && clicky >= yy && clicky < yy + rh) { specs_open_entry(i); click = 0; }
                 }
 #endif
@@ -2938,8 +2945,7 @@ static void specs_geom(float *x, float *y, float *w, float *h) {
 static void draw_specs_chip(float x, float y) {
     const float d = 22;
     int hv = hit(x, y, d, d);
-    rrect(x, y, d, d, d / 2, alpha(specs_on || hv ? VC[0] : EDGE, specs_on ? 0.45f : 0.32f));
-    text(x + (d - text_width("i", 14)) / 2, y + 3.5f, 14, specs_on || hv ? TXT : DIM, "i");
+    draw_info_sign(x + d / 2, y + d / 2, 10.0f, hv || specs_on);
     if (clicked(x, y, d, d)) { if (specs_on) specs_on = 0; else if (g_song && cur >= 0) { specs_fill(g_song, pl[cur].label); specs_just = 1; } click = 0; }
 }
 static void draw_specs_window(void) {
