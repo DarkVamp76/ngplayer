@@ -3592,6 +3592,12 @@ void a2p_rewind(A2P *p)
 }
 
 int a2p_update(A2P *p) { newtimer(p); return !p->songend; }
+int a2p_opl_channel(const A2P *p, int chan)                    /* the OPL3 channel (0-17) an AT2 channel plays on, -1 if none */
+{
+    uint16_t n = regoffs_n((A2P *)p, chan);
+    if ((n & 0xFF) == 0xFF || (n & 0xFF) > 8) return -1;
+    return (n & 0xFF) + 9 * ((n >> 8) & 1);
+}
 float a2p_refresh(const A2P *p) { return (float)p->tempo * _macro_speedup((A2P *)p); }
 int a2p_position(const A2P *p, int *order, int *pattern, int *row, int *speed)
 {

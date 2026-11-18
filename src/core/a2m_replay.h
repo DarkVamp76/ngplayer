@@ -8,4 +8,5 @@ void a2p_free(A2P *p);
 void a2p_rewind(A2P *p);
 int a2p_update(A2P *p);                       /* one timer tick; 0 when the song has ended */
 float a2p_refresh(const A2P *p);              /* ticks per second at the moment */
+int a2p_opl_channel(const A2P *p, int chan);   /* the OPL3 channel (0-17) an AT2 channel plays on, -1 if none */
 int a2p_position(const A2P *p, int *order, int *pattern, int *row, int *speed);
