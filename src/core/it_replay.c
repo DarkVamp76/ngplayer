@@ -52,16 +52,28 @@ typedef struct ITPlayer {
 static int clampi(int v, int a, int b){ return v < a ? a : v > b ? b : v; }
 static int32_t muldivr(int64_t a, int64_t b, int64_t c){ return (int32_t)((a * b + c / 2) / c); }
 
+static int g_dtm;     /* DTM: note pitch = c5 speed times the S3M table ratio (measured against libopenmpt), not a rounded integer period */
 static int g_tabfreq;  /* Tonhoehen aus der S3M-Periodentabelle statt exakter Halbtoene (libopenmpt: kPeriodsAreHertz zurueckgesetzt) */
 static int g_it200;   /* cmwt == 0x200: libopenmpt rechnet mit der Semiton-Tabelle (aus Kalibrierung gemessen) */
 static int g_linear;
 static int g_swapcancel;   /* Gxx+Notiz+Samplewechsel ignoriert Portamento (gemessen: cmwt 0x200 mit cwtv 0x214/0x217, cwtv 0x888 und >= 0x1000) */
-static double freq_from_note(int note, uint32_t c5){
+/* ProTracker finetune tables (periods of the lowest octave, finetune 0..7 then -8..-1): the pitch of a note with a sample finetune follows these, not the equal-tempered ratio */
+static const uint16_t pt_tuned[16][12] = {
+    {856,808,762,720,678,640,604,570,538,508,480,453}, {850,802,757,715,674,637,601,567,535,505,477,450}, {844,796,752,709,670,632,597,563,532,502,474,447},
+    {838,791,746,704,665,628,592,559,528,498,470,444}, {832,785,741,699,660,623,588,555,524,495,467,441}, {826,779,736,694,655,619,584,551,520,491,463,437},
+    {820,774,730,689,651,614,580,547,516,487,460,434}, {814,768,725,684,646,610,575,543,513,484,457,431}, {907,856,808,762,720,678,640,604,570,538,508,480},
+    {900,850,802,757,715,675,636,601,567,535,505,477}, {894,844,796,752,709,670,632,597,563,532,502,474}, {887,838,791,746,704,665,628,592,559,528,498,470},
+    {881,832,785,741,699,660,623,588,555,524,495,467}, {875,826,779,736,694,655,619,584,551,520,491,463}, {868,820,774,730,689,651,614,580,547,516,487,460},
+    {862,814,768,725,684,646,610,575,543,513,484,457} };
+static double freq_from_note_ft(int note, uint32_t c5, int ptft);
+static double freq_from_note(int note, uint32_t c5){ return freq_from_note_ft(note, c5, 0); }
+static double freq_from_note_ft(int note, uint32_t c5, int ptft){
     if (note <= 0 || note > 0xF0) return 0;
+    if (ptft > 0) { double f = freq_from_note_ft(note, c5, 0); int n = (note - 1) % 12; return f * (double)pt_tuned[0][n] / (double)pt_tuned[ptft - 1][n]; }
     if (g_tabfreq && c5) {
         static const int tab[12] = {1712,1616,1524,1440,1356,1280,1208,1140,1076,1016,960,907};
         int n = note - 1;
-        if (g_linear) return c5 * (1712.0 / tab[n % 12]) * pow(2.0, n / 12 - 5);
+        if (g_linear || g_dtm) return c5 * (1712.0 / tab[n % 12]) * pow(2.0, n / 12 - 5);
         int64_t per = (((int64_t)tab[n % 12] << 5) >> (n / 12)) * 8363 / c5;
         if (per < 1) per = 1;
         return 1712.0 * 8363.0 / (double)per;
@@ -193,7 +205,7 @@ static void note_change(ITPlayer *p, V *c, int ch, int note, int porta, int retr
     if (!porta) c->c5 = sm->c5spd;
     if (porta && c->pos == 0 && !c->len) porta = 0;
     note = clampi(note, 1, 120); c->note = clampi(truenote, 1, 120); c->new_inst = 0;
-    double f = freq_from_note(note, c->c5);
+    double f = freq_from_note_ft(note, c->c5, c->smp ? c->smp->ptft : 0);
     c->pbdelta = 0;
     if (f) {
         if (porta && c->freq) c->ptarget = f;
@@ -833,7 +845,7 @@ ITPlayer *itp_new(const ITSong *s, int rate){
     g_it200 = (s->cmwt == 0x200 && (s->cwt == 0x888 || ((s->cwt == 0x214 || s->cwt == 0x217) && s->rsv == 0)));   /* rsv != 0: real Impulse Tracker 2.14p4/p5, plain IT behaviour */ g_linear = (s->flags & 8) != 0;
     /* OpenMPT up to 1.28 (cwtv 0x5000..0x5128): table based periods too (measured: 0x5122, 0x5123, 0x5128 correlate much better with the table, 0x5130 and 0x5131 with the exact formula; 0x5129 not measured) */
     /* Schism Tracker: libopenmpt setzt kPeriodsAreHertz zurueck bei Datum < 2015-01-29 (1916 Tage nach 2009-10-31), und bei Datum < 2021-05-02 (4201) ohne Linear-Slides */
-    g_tabfreq = g_it200 || (s->cmwt == 0x202 && s->cwt == 0x214) || (s->cwt == 0x888 && s->cmwt == 0x888) || (s->cwt >= 0x5000 && s->cwt < 0x5129) || (s->schism_days >= 0 && (s->schism_days < 1916 || (s->schism_days < 4201 && !g_linear))); g_swapcancel = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217)) || s->cwt == 0x888 || s->cwt >= 0x1000; p->speed = s->speed; p->tempo = s->tempo; p->gvol = s->gv;
+    g_dtm = s->dtm; g_tabfreq = s->dtm || g_it200 || (s->cmwt == 0x202 && s->cwt == 0x214) || (s->cwt == 0x888 && s->cmwt == 0x888) || (s->cwt >= 0x5000 && s->cwt < 0x5129) || (s->schism_days >= 0 && (s->schism_days < 1916 || (s->schism_days < 4201 && !g_linear))); g_swapcancel = (s->cmwt == 0x200 && (s->cwt == 0x214 || s->cwt == 0x217)) || s->cwt == 0x888 || s->cwt >= 0x1000; p->speed = s->speed; p->tempo = s->tempo; p->gvol = s->gv;
     p->tick_count = 1; p->row_count = 0; p->process_row = NEXT_ORDER; p->process_order = -1; p->break_row = 0;
     p->visited = calloc((size_t)(s->nord + 1) * 1024, 1);
     p->K = 1.0 / 65536.0;     /* gegen libopenmpt kalibriert (Faktor 4 gegenueber Schism-Skalierung) */

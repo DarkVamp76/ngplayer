@@ -38,6 +38,7 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | XM (FastTracker 2) | supported |
 | IT (Impulse Tracker) | supported, still being completed |
 | DMF (X-Tracker, v8) | supported, some rare effects still missing |
+| DTM (Digital Tracker, Atari Falcon030, `D.T.`) | supported (4-24 channels, 8/16-bit and stereo samples, pattern formats "2.04" and ProTracker cells; played through the IT engine like libopenmpt does; the tick-based "2.06" format of Digital Home Studio, instrument envelopes and the global panning/volume chunk are not implemented) |
 | TFMX (Chris Hülsbeck, `mdat.NAME` + `smpl.NAME` or `NAME.tfx` + `NAME.sam`) | supported (subsong 0, no pattern view yet) |
 
 Looking for DMF files to try? The [Radical Rhythms Archive](https://www.radicalrhythms.org/) collects tracks by a German tracker group from the mid-1990s, including DMF modules.

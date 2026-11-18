@@ -111,6 +111,16 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
             s->nch = s->it->nch; s->nord = s->it->nord;
             s->ip = itp_new(s->it, rate);
         }
+    } else if (dtm_probe(b, (size_t)n)) {
+        int e = 0;
+        s->it = dtm_load(b, (size_t)n, &e);
+        if (!s->it) { r = e ? e : -1; }
+        else {
+            s->kind = K_IT; s->fmt = "DTM";
+            snprintf(s->title, sizeof s->title, "%s", s->it->title);
+            s->nch = s->it->nch; s->nord = s->it->nord;
+            s->ip = itp_new(s->it, rate);
+        }
     } else if (n > 66 && !memcmp(b, "DDMF", 4)) {
         int e = 0;
         s->dm = dmf_load(b, (size_t)n, &e);
