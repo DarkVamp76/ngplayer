@@ -6,6 +6,7 @@
 #include "tfmx.h"
 #include "ahx.h"
 #include "opl_replay.h"
+#include "herad.h"
 #include "a2m_load.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +43,7 @@ struct Song {
     AhxPlayer *ap;          /* AHX */
     OplSong *os; OplPlayer *op;   /* AdLib FM: AMD, MAD */
     A2mSong *a2s;                 /* AdLib FM: Adlib Tracker 2 (the player is op, too) */
+    HeradSong *hs;                /* AdLib FM: HERAD (the player is op, too) */
     int tstart;             /* TFMX: erste Trackstep-Zeile des Subsongs */
     int nsub, cursub;       /* TFMX: Anzahl echter Subsongs, aktueller (0-basiert) */
     char title[40];
@@ -105,7 +107,18 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
 
     Song *s = (Song *)calloc(1, sizeof *s);
     int r = 0;
-    if (n > 4 && !memcmp(b, "IMPM", 4)) {
+    const char *dot = strrchr(path, '.');
+    if (dot && (!strcasecmp(dot, ".hsq") || !strcasecmp(dot, ".sqx") || !strcasecmp(dot, ".sdb") || !strcasecmp(dot, ".agd") || !strcasecmp(dot, ".ha2"))) {
+        int e = 0;
+        s->hs = herad_load(b, (size_t)n, &e);
+        if (!s->hs) { snprintf(err, errcap, "HERAD: damaged or unsupported file (%d)", e); free(b); song_close(s); return NULL; }
+        s->kind = K_OPL; s->fmt = "HERAD";
+        s->title[0] = 0;
+        s->nch = s->hs->ntracks > (s->hs->agd ? 18 : 9) ? (s->hs->agd ? 18 : 9) : s->hs->ntracks;
+        s->nord = (int)(s->hs->last_tick / HERAD_MEASURE_TICKS) + 1;
+        s->op = opl_new_herad(s->hs, rate);
+        if (!s->op) r = -1;
+    } else if (n > 4 && !memcmp(b, "IMPM", 4)) {
         int e = 0;
         s->it = it_load(b, (size_t)n, &e);
         if (!s->it) { r = e ? e : -1; }
@@ -326,6 +339,7 @@ void song_close(Song *s) {
     if (s->op) opl_pfree(s->op);
     if (s->os) opl_free(s->os);
     if (s->a2s) a2m_free(s->a2s);
+    if (s->hs) herad_free(s->hs);
     if (s->tp) tfp_free(s->tp);
     if (s->tf) tfmx_free(s->tf);
     if (s->it) it_free(s->it);
@@ -364,6 +378,7 @@ int song_order(const Song *s) {
 static int pat_of(const Song *s, int order) {
     if (order < 0 || order >= s->nord) return -1;
     if (s->kind == K_TFMX || s->kind == K_AHX) return order;          /* TFMX: Trackstep-Zeile; AHX: die Position (4 Tracks) ist das Pattern */
+    if (s->kind == K_OPL && s->hs) return order;                       /* HERAD: the measure */
     if (s->kind == K_OPL && s->a2s) { int p = s->a2s->songinfo.pattern_order[order & 127]; return p >= 0x80 || p >= s->a2s->eventsinfo.patterns ? -1 : p; }
     if (s->kind == K_OPL) { int p = s->os->order[order]; return p >= 0x80 || p >= s->os->nop ? -1 : p; }
     if (s->kind == K_DMF) { int p = s->dm->order[order]; return p < s->dm->npat ? p : -1; }
@@ -374,6 +389,7 @@ static int pat_of(const Song *s, int order) {
 int song_order_pattern(const Song *s, int order) { return pat_of(s, order); }
 
 int song_pattern_rows(const Song *s, int pattern) {
+    if (s->kind == K_OPL && s->hs) return HERAD_MEASURE_TICKS;           /* one row per tick */
     if (s->kind == K_OPL && s->a2s) return s->a2s->songinfo.patt_len;
     if (s->kind == K_OPL) return s->os->nrows;
     if (s->kind == K_AHX) return ahx_tracklen(s->ap);
@@ -535,6 +551,14 @@ void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
         if (note) { put_note(t.note, note + 11); t.has_note = 1; }              /* AHX note 1 = C-1 */
         if (inst) { t.inst[0] = hexc(inst >> 4); t.inst[1] = hexc(inst); }
         if (fx || par) { fx3(t.fx, fxc(fx), par); t.fxclass = (fx == 1 || fx == 2 || fx == 3 || fx == 5) ? 2 : (fx == 0xA || fx == 0xC) ? 1 : (fx == 0xB || fx == 0xD || fx == 0xF) ? 4 : 5; }
+    } else if (s->kind == K_OPL && s->hs) {
+        HeradCell hc; herad_cell(s->hs, ch, (uint32_t)pattern * HERAD_MEASURE_TICKS + (uint32_t)row, &hc);
+        if (hc.note_kind == 1) { put_note(t.note, hc.note - 12); t.has_note = 1; }          /* HERAD note 36 is C-2 on the display like the other FM formats */
+        else if (hc.note_kind == 2) strcpy(t.note, "===");
+        if (hc.prog >= 0) { t.inst[0] = hexc(hc.prog >> 4); t.inst[1] = hexc(hc.prog); }
+        if (hc.bend >= 0) { fx3(t.fx, 'E', (uint8_t)hc.bend); t.fxclass = 2; }
+        else if (hc.touch >= 0) { fx3(t.fx, 'D', (uint8_t)hc.touch); t.fxclass = 1; }
+        if (hc.note_kind == 1) { t.vol[0] = 'v'; t.vol[1] = hexc(hc.vel >> 4); t.vol[2] = hexc(hc.vel); t.vol[3] = 0; t.volclass = 1; }
     } else if (s->kind == K_OPL && s->a2s) {
         const tEVENTS_INFO *ei = &s->a2s->eventsinfo;
         if (pattern < 0 || pattern >= ei->patterns || row >= ei->rows || ch >= ei->channels) return;
@@ -659,7 +683,9 @@ const char *song_fx_name(const Song *s, const SongCell *c, int *is_vol) {
     char L = c->fx[0];
     if (L != '.') {
         int par = (hexv(c->fx[1]) << 4) | hexv(c->fx[2]);
-        if (s->kind == K_OPL && s->a2s) {
+        if (s->kind == K_OPL && s->hs) {
+            switch (L) { case 'E': return "Pitch Bend"; case 'D': return "Aftertouch"; }
+        } else if (s->kind == K_OPL && s->a2s) {
             static const char *N[48] = { 0, "Slide Up", "Slide Down", "Tone Porta", "Vibrato", "TPorta+VolSlide", "Vib+VolSlide", "Fine Slide Up", "Fine Slide Down", "Set Mod Volume",
                 "Vol Slide", "Pos Jump", "Set Ins Volume", "Pattern Break", "Set Tempo", "Set Speed", "TPorta+FineVolSlide", "Vib+FineVolSlide", "Set Car Volume", "Set Waveform",
                 "Fine Vol Slide", "Retrigger", "Tremolo", "Tremor", "Arp+VolSlide", "Arp+FineVolSlide", "Multi Retrig", "Slide Up+VolSlide", "Slide Down+VolSlide",

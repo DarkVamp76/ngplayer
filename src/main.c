@@ -129,25 +129,25 @@ static int is_mod_name(const char *n) {
     if (tfmx_is_song_name(n)) return 1;          /* mdat.NAME / NAME.tfx; smpl.* und .sam sind nur Sampledaten */
     const char *d = strrchr(n, '.');
     if (!d) return 0;
-    static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".med", ".psm", ".far", ".mdl", ".mmd0", ".mmd1", ".mmd2", ".mmd3", ".xm", ".it", ".dmf", ".amf", ".dsm", ".sfx", ".ahx", ".dbm", ".dtm", ".amd", ".mad", ".a2m", ".a2t", NULL };
+    static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".med", ".psm", ".far", ".mdl", ".mmd0", ".mmd1", ".mmd2", ".mmd3", ".xm", ".it", ".dmf", ".amf", ".dsm", ".sfx", ".ahx", ".dbm", ".dtm", ".amd", ".mad", ".a2m", ".a2t", ".hsq", ".sqx", ".sdb", ".agd", ".ha2", NULL };
     for (int i = 0; ext[i]; i++) if (!strcasecmp(d, ext[i])) return 1;
     return 0;
 }
 
 /* ---- File format badge in front of each list entry (colour per format) ---- */
-enum { FMT_NONE, FMT_MOD, FMT_S3M, FMT_XM, FMT_IT, FMT_STM, FMT_PTM, FMT_ULT, FMT_669, FMT_MTM, FMT_MED, FMT_PSM, FMT_FAR, FMT_MDL, FMT_DMF, FMT_TFMX, FMT_AMF, FMT_SFX, FMT_AHX, FMT_DBM, FMT_DSM, FMT_DTM, FMT_AMD, FMT_MAD, FMT_A2M, FMT_COUNT };
-static const char *const FMT_NAME[FMT_COUNT] = { "", "MOD", "S3M", "XM", "IT", "STM", "PTM", "ULT", "669", "MTM", "MED", "PSM", "FAR", "MDL", "DMF", "TFMX", "AMF", "SFX", "AHX", "DBM", "DSM", "DTM", "AMD", "MAD", "A2M" };
+enum { FMT_NONE, FMT_MOD, FMT_S3M, FMT_XM, FMT_IT, FMT_STM, FMT_PTM, FMT_ULT, FMT_669, FMT_MTM, FMT_MED, FMT_PSM, FMT_FAR, FMT_MDL, FMT_DMF, FMT_TFMX, FMT_AMF, FMT_SFX, FMT_AHX, FMT_DBM, FMT_DSM, FMT_DTM, FMT_AMD, FMT_MAD, FMT_A2M, FMT_HERAD, FMT_COUNT };
+static const char *const FMT_NAME[FMT_COUNT] = { "", "MOD", "S3M", "XM", "IT", "STM", "PTM", "ULT", "669", "MTM", "MED", "PSM", "FAR", "MDL", "DMF", "TFMX", "AMF", "SFX", "AHX", "DBM", "DSM", "DTM", "AMD", "MAD", "A2M", "HERAD" };
 static const col FMT_COL[FMT_COUNT] = {
     { 0.5f, 0.5f, 0.5f, 1 }, { 1.00f, 0.76f, 0.28f, 1 }, { 0.35f, 0.95f, 0.55f, 1 }, { 0.24f, 0.88f, 1.00f, 1 }, { 1.00f, 0.36f, 0.80f, 1 },
     { 0.30f, 0.85f, 0.75f, 1 }, { 0.65f, 0.50f, 1.00f, 1 }, { 1.00f, 0.55f, 0.25f, 1 }, { 1.00f, 0.42f, 0.38f, 1 }, { 0.75f, 0.95f, 0.30f, 1 },
-    { 0.40f, 0.60f, 1.00f, 1 }, { 0.90f, 0.45f, 1.00f, 1 }, { 0.85f, 0.75f, 0.55f, 1 }, { 0.55f, 1.00f, 0.85f, 1 }, { 1.00f, 0.60f, 0.65f, 1 }, { 0.85f, 0.88f, 1.00f, 1 }, { 0.95f, 0.62f, 0.50f, 1 }, { 0.80f, 0.78f, 0.45f, 1 }, { 0.55f, 0.90f, 0.30f, 1 }, { 0.40f, 0.78f, 0.95f, 1 }, { 0.95f, 0.85f, 0.35f, 1 }, { 0.62f, 0.80f, 0.95f, 1 }, { 0.95f, 0.55f, 0.35f, 1 }, { 0.85f, 0.45f, 0.55f, 1 }, { 0.55f, 0.75f, 0.95f, 1 } };
+    { 0.40f, 0.60f, 1.00f, 1 }, { 0.90f, 0.45f, 1.00f, 1 }, { 0.85f, 0.75f, 0.55f, 1 }, { 0.55f, 1.00f, 0.85f, 1 }, { 1.00f, 0.60f, 0.65f, 1 }, { 0.85f, 0.88f, 1.00f, 1 }, { 0.95f, 0.62f, 0.50f, 1 }, { 0.80f, 0.78f, 0.45f, 1 }, { 0.55f, 0.90f, 0.30f, 1 }, { 0.40f, 0.78f, 0.95f, 1 }, { 0.95f, 0.85f, 0.35f, 1 }, { 0.62f, 0.80f, 0.95f, 1 }, { 0.95f, 0.55f, 0.35f, 1 }, { 0.85f, 0.45f, 0.55f, 1 }, { 0.55f, 0.75f, 0.95f, 1 }, { 0.95f, 0.72f, 0.30f, 1 } };
 static int fmt_from_name(const char *fn) {
     if (tfmx_is_song_name(fn)) return FMT_TFMX;
     const char *d = strrchr(fn, '.');
     if (!d) return FMT_NONE;
     static const struct { const char *ext; int f; } map[] = { {".mod", FMT_MOD}, {".s3m", FMT_S3M}, {".xm", FMT_XM}, {".it", FMT_IT}, {".stm", FMT_STM}, {".ptm", FMT_PTM},
         {".ult", FMT_ULT}, {".669", FMT_669}, {".mtm", FMT_MTM}, {".med", FMT_MED}, {".mmd0", FMT_MED}, {".mmd1", FMT_MED}, {".mmd2", FMT_MED}, {".mmd3", FMT_MED},
-        {".psm", FMT_PSM}, {".far", FMT_FAR}, {".mdl", FMT_MDL}, {".dmf", FMT_DMF}, {".amf", FMT_AMF}, {".sfx", FMT_SFX}, {".ahx", FMT_AHX}, {".dbm", FMT_DBM}, {".dsm", FMT_DSM}, {".dtm", FMT_DTM}, {".amd", FMT_AMD}, {".mad", FMT_MAD}, {".a2m", FMT_A2M}, {".a2t", FMT_A2M}, { NULL, 0 } };
+        {".psm", FMT_PSM}, {".far", FMT_FAR}, {".mdl", FMT_MDL}, {".dmf", FMT_DMF}, {".amf", FMT_AMF}, {".sfx", FMT_SFX}, {".ahx", FMT_AHX}, {".dbm", FMT_DBM}, {".dsm", FMT_DSM}, {".dtm", FMT_DTM}, {".amd", FMT_AMD}, {".mad", FMT_MAD}, {".a2m", FMT_A2M}, {".a2t", FMT_A2M}, {".hsq", FMT_HERAD}, {".sqx", FMT_HERAD}, {".sdb", FMT_HERAD}, {".agd", FMT_HERAD}, {".ha2", FMT_HERAD}, { NULL, 0 } };
     for (int i = 0; map[i].ext; i++) if (!strcasecmp(d, map[i].ext)) return map[i].f;
     return FMT_NONE;
 }
@@ -1269,7 +1269,7 @@ static void chip_dip(float x, float y, float h, float beat) {            /* Paul
 static int chip_kind(void) {
     const char *f = song_format(g_song);
     int n = song_channels(g_song);
-    if (!strcmp(f, "AMD") || !strcmp(f, "MAD") || !strcmp(f, "A2M")) return 4;
+    if (!strcmp(f, "AMD") || !strcmp(f, "MAD") || !strcmp(f, "A2M") || !strcmp(f, "HERAD")) return 4;
     if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || !strcmp(f, "SFX") || ((!strcmp(f, "MOD") || !strcmp(f, "MED")) && n <= 4)) return 0;     /* the Amiga formats that run on the four Paula voices */
     return n > 32 ? 3 : (n >= 15 ? 2 : 1);
 }
