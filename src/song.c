@@ -396,6 +396,10 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
         song_close(s);
         return NULL;
     }
+    {   /* module titles are padded (XM: 20 characters with spaces): without the padding the "i" next to the title sits right behind the text */
+        size_t n = strlen(s->title);
+        while (n > 0 && ((unsigned char)s->title[n - 1] <= ' ')) s->title[--n] = 0;
+    }
     return s;
 }
 
