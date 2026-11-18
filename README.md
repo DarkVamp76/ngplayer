@@ -39,11 +39,13 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | IT (Impulse Tracker) | supported, still being completed |
 | DMF (X-Tracker, v8) | supported, some rare effects still missing |
 | DTM (Digital Tracker, Atari Falcon030, `D.T.`) | supported (4-24 channels, 8/16-bit and stereo samples, pattern formats "2.04" and ProTracker cells; played through the IT engine like libopenmpt does; the tick-based "2.06" format of Digital Home Studio, instrument envelopes and the global panning/volume chunk are not implemented) |
+| AMD (AMUSIC Adlib Tracker, Elyssis) | supported (AdLib FM, OPL2, 9 channels; packed and unpacked modules; played by an own replayer on the Nuked-OPL3 emulator) |
+| MAD (Mlat Adlib Tracker, `MAD+`) | supported (AdLib FM, OPL2, 9 channels, 32 rows per pattern; same FM engine as AMD) |
 | TFMX (Chris Hülsbeck, `mdat.NAME` + `smpl.NAME` or `NAME.tfx` + `NAME.sam`) | supported (subsong 0, no pattern view yet) |
 
 Looking for DMF files to try? The [Radical Rhythms Archive](https://www.radicalrhythms.org/) collects tracks by a German tracker group from the mid-1990s, including DMF modules.
 
-Planned: DSM, 15-sample MOD, WAV/VOC, MP1/MP2/MP3.
+Planned: 15-sample MOD, WAV/VOC, MP1/MP2/MP3, more FM formats (RAD).
 
 ## Features
 
