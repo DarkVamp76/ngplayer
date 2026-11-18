@@ -119,8 +119,8 @@ ITSong *it_load(const uint8_t *b, size_t n, int *err){
     s->cwt = r16(b + 0x28); s->cmwt = r16(b + 0x2A); s->flags = r16(b + 0x2C);
     /* OpenMPT's extension block sits at the end of the file; its tempo mode chunk is "..MT", size 1 */
     s->mpt_tempo_mode = 0; s->mpt_mixlevels = -1;
-    if (s->cmwt == 0x888 && n >= 16) { size_t from = n > 8192 ? n - 8192 : 0; for (size_t i = n - 7; i > from; i--) if (!memcmp(b + i, "..MT\x01\x00", 6)) { s->mpt_tempo_mode = b[i + 6]; break; } }
-    if (s->cmwt == 0x888 && n >= 16) { size_t from = n > 8192 ? n - 8192 : 0; for (size_t i = n - 7; i > from; i--) if (!memcmp(b + i, ".MMP", 4) && b[i + 5] == 0 && (b[i + 4] == 1 || b[i + 4] == 4)) { s->mpt_mixlevels = b[i + 6]; break; } }
+    if ((s->cmwt == 0x888 || s->cwt >= 0x5000) && n >= 16) { size_t from = n > 8192 ? n - 8192 : 0; for (size_t i = n - 7; i > from; i--) if (!memcmp(b + i, "..MT\x01\x00", 6)) { s->mpt_tempo_mode = b[i + 6]; break; } }
+    if ((s->cmwt == 0x888 || s->cwt >= 0x5000) && n >= 16) { size_t from = n > 8192 ? n - 8192 : 0; for (size_t i = n - 7; i > from; i--) if (!memcmp(b + i, ".MMP", 4) && b[i + 5] == 0 && (b[i + 4] == 1 || b[i + 4] == 4)) { s->mpt_mixlevels = b[i + 6]; break; } }
     s->rsv = r32(b + 0x3C); s->gv = b[0x30]; s->mv = b[0x31]; s->schism_days = (s->cwt >> 12) == 1 ? (int)(s->cwt == 0x1FFF ? r32(b + 0x3C) : (unsigned)s->cwt - 0x1050) : -1;
     { int pa = omp_preamp(b, n); if (pa > 0 && pa <= 1024) s->mv = pa; } s->speed = b[0x32] ? b[0x32] : 6; s->tempo = b[0x33] >= 32 ? b[0x33] : 125; s->sep = b[0x34]; s->pwd = b[0x35];
     memcpy(s->chpan, b + 0x40, 64); memcpy(s->chvol, b + 0x80, 64);
