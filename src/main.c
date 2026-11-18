@@ -1469,12 +1469,25 @@ static int ma_loading(void);
 static int g_rand;
 static int g_rpt;                          /* repeat (RPT): 0 off, 1 the whole list starts again after its last song, 2 the current song plays endlessly */
 static Uint32 rand_fail_t;                 /* a draw that failed: wait a few seconds before the next try (the song end would retry every frame) */
+/* ---- Prefetch: in random mode the next module is loaded while the last song of the Mod Archive list is still playing, so that it can start
+ * the moment the song ends (or the user presses "next") without a gap. It uses the same download as everything else (dl_*), marked dl_prefetch,
+ * and waits in pf_* until it is wanted. ---- */
+static int dl_prefetch;                    /* the running download is a prefetch: its result is only kept, not played */
+static int pf_ready, pf_id; static char pf_path[1100];
+static Uint32 pf_fail_t;                   /* a prefetch that failed: wait before the next try */
+static int dl_defer_id;                    /* a module the user asked for while a prefetch was running: loaded when that is done */
+static void ma_poll(void);
+static int ma_take_prefetch(void);         /* start the prefetched module; 0 = there is none */
+static int ma_prefetch_running(void);
+static void ma_prefetch_adopt(void);       /* the running prefetch becomes the real draw (dice, wait for it) */
 static int last_of_group(int i) {
     for (int j = i + 1; j < npl; j++) if ((pl[j].ma_id > 0) == (pl[i].ma_id > 0)) return 0;
     return 1;
 }
 static void next_user(int d) {              /* next / previous as the user asks for it */
     if (d > 0 && g_rand && cur >= 0 && cur < npl && pl[cur].ma_id > 0 && last_of_group(cur)) {
+        if (ma_take_prefetch()) return;                                              /* loaded in advance: no gap */
+        if (ma_prefetch_running()) { ma_prefetch_adopt(); return; }                  /* still on its way: wait for it, with the dice */
         if (ma_busy()) { if (ma_loading()) { snprintf(toast_txt, sizeof toast_txt, "Still loading ..."); toast_t = 1.5f; } }
         else if (!rand_fail_t || SDL_GetTicks() - rand_fail_t > 5000) { snprintf(toast_txt, sizeof toast_txt, "Drawing a random module ..."); toast_t = 2.5f; ma_random(); }
         return;
@@ -1815,7 +1828,7 @@ static char ma_msg[160]; static int ma_msg_err;
 static volatile int dl_state;              /* 0 leer, 1 laedt, 2 fertig, 3 Fehler */
 static int dl_id, dl_rc, dl_random; static char dl_path[1100]; static SDL_Thread *dl_thr;   /* dl_random: the dice asked for it, dl_id 0 = ID not known yet */
 static int ma_loading(void) { return dl_state == 1; }
-static int ma_busy(void) { return dl_state != 0; }   /* running, or finished and not yet taken over by ma_poll (a new draw must not discard that result) */
+static int ma_busy(void) { return dl_state != 0 && !dl_prefetch; }   /* a prefetch in the background does not block the user (it is taken over or deferred) */   /* running, or finished and not yet taken over by ma_poll (a new draw must not discard that result) */
 static int dl_want = -1;                 /* entry that asked for its file (restored list), played when the download is done */
 #ifdef __EMSCRIPTEN__
 static void ma_need_download(int idx) {
@@ -1848,10 +1861,7 @@ static void ma_show(int on) {
     ma_open = on; ma_eat = on; ma_msg[0] = 0; ma_msg_err = 0;
     if (on) SDL_StartTextInput(); else SDL_StopTextInput();
 }
-static void ma_start(void) {
-    if (dl_state != 0) return;
-    int id = ma_parse_id(ma_buf);
-    if (!id) { snprintf(ma_msg, sizeof ma_msg, "No module ID found. Expected: a number or a modarchive link."); ma_msg_err = 1; return; }
+static void ma_start_id(int id) {
 #ifdef __EMSCRIPTEN__
     /* Web: der Download laeuft ueber die Webseite (fetch auf ma.php), Ergebnis kommt per ng_web_ma_done() zurueck */
     dl_id = id; dl_state = 1;
@@ -1864,17 +1874,48 @@ static void ma_start(void) {
     snprintf(ma_msg, sizeof ma_msg, "Downloading module #%d ...", id); ma_msg_err = 0;
     net_cancel = 0; dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
 }
-static void ma_random(void) {
+static void ma_start(void) {
+    if (dl_state != 0 && !(dl_state == 1 && dl_prefetch)) return;
+    int id = ma_parse_id(ma_buf);
+    if (!id) { snprintf(ma_msg, sizeof ma_msg, "No module ID found. Expected: a number or a modarchive link."); ma_msg_err = 1; return; }
+    if (dl_state != 0) { dl_defer_id = id; snprintf(ma_msg, sizeof ma_msg, "Waiting for the preloaded module, then module #%d ...", id); ma_msg_err = 0; return; }   /* the prefetch is on its way: this one follows */
+    ma_start_id(id);
+}
+static void ma_random_go(int prefetch) {
     if (dl_state != 0) return;
 #ifdef __EMSCRIPTEN__
-    dl_id = 0; dl_random = 1; dl_state = 1; dice_start();
+    dl_id = 0; dl_random = !prefetch; dl_prefetch = prefetch; dl_state = 1; if (!prefetch) dice_start();
     EM_ASM({ if (window.ngMaRandom) window.ngMaRandom(); });          /* the page asks ma.php for an ID, then fetches the module */
     return;
 #endif
-    if (!net_have_curl()) { snprintf(toast_txt, sizeof toast_txt, "curl not found - please install it"); toast_t = 3.0f; return; }
-    dl_id = 0; dl_random = 1; dl_state = 1; dice_start();
-    net_log("random draw started (playlist %d, current %d, song ended %d)", npl, cur, g_ended);
+    if (!net_have_curl()) { if (!prefetch) { snprintf(toast_txt, sizeof toast_txt, "curl not found - please install it"); toast_t = 3.0f; } return; }
+    dl_id = 0; dl_random = !prefetch; dl_prefetch = prefetch; dl_state = 1; if (!prefetch) dice_start();
+    net_log("random draw started%s (playlist %d, current %d, song ended %d)", prefetch ? " in advance" : "", npl, cur, g_ended);
     net_cancel = 0; dl_thr = SDL_CreateThread(dl_thread, "download", NULL);
+}
+static void ma_random(void) {
+    if (ma_prefetch_running()) { ma_prefetch_adopt(); return; }
+    if (ma_take_prefetch()) return;                                    /* the dice also takes the module that is ready */
+    ma_random_go(0);
+}
+static int ma_prefetch_running(void) { return dl_state == 1 && dl_prefetch; }
+static void ma_prefetch_adopt(void) { dl_prefetch = 0; dl_random = 1; dice_start(); snprintf(toast_txt, sizeof toast_txt, "Drawing a random module ..."); toast_t = 2.5f; }
+static int ma_take_prefetch(void) {
+    if (!pf_ready || dl_state != 0) return 0;
+    pf_ready = 0; dl_id = pf_id; dl_rc = 0; dl_want = -1; dl_random = 0; dl_prefetch = 0;
+    snprintf(dl_path, sizeof dl_path, "%s", pf_path); dl_state = 2;
+    net_log("prefetched module #%d starts", dl_id);
+    ma_poll();                                                         /* the same take-over as after a download */
+    return 1;
+}
+/* once per call of ma_poll: start the prefetch when the last song of the Mod Archive list has been playing for a moment in random mode */
+static void ma_prefetch_tick(void) {
+    if (!g_rand || g_rpt || !g_song || cur < 0 || cur >= npl || pl[cur].ma_id <= 0 || !last_of_group(cur)) return;
+    if (dl_state != 0 || pf_ready || g_ended || g_paused) return;
+    if ((double)g_frames / g_rate < 2.0) return;
+    if (pf_fail_t && SDL_GetTicks() - pf_fail_t < 20000) return;
+    if (rand_fail_t && SDL_GetTicks() - rand_fail_t < 5000) return;
+    ma_random_go(1);
 }
 static void ma_poll(void) {
 #ifdef __EMSCRIPTEN__
@@ -1893,6 +1934,18 @@ static void ma_poll(void) {
         else if (SDL_GetTicks() - busy_since > 75000) { fprintf(stderr, "ngplayer: download thread does not answer, given up\n"); net_log("download thread does not answer after 75 s, given up"); if (dl_thr) SDL_DetachThread(dl_thr); dl_thr = NULL; dl_rc = 28; dl_state = 3; busy_since = 0; }
     }
 #endif
+    if ((dl_state == 2 || dl_state == 3) && dl_prefetch) {      /* a prefetch is done: keep the module, do not play it */
+        if (dl_thr) SDL_WaitThread(dl_thr, NULL);
+        dl_thr = NULL; dl_prefetch = 0;
+        if (dl_state == 2) { pf_ready = 1; pf_id = dl_id; snprintf(pf_path, sizeof pf_path, "%s", dl_path); net_log("prefetch: module #%d is ready", dl_id); }
+        else { pf_fail_t = SDL_GetTicks() | 1; net_log("prefetch failed, code %d", dl_rc); }
+        dl_state = 0; dl_id = 0;
+#ifdef __EMSCRIPTEN__
+        if (cur >= 0 && cur < npl) EM_ASM({ try { history.replaceState(null, '', $0 ? '#' + $0 : location.pathname + location.search); } catch (e) {} }, pl[cur].ma_id);   /* the page has put the ID of the loaded module into the address; it belongs to the playing one */
+#endif
+        if (dl_defer_id) { int id = dl_defer_id; dl_defer_id = 0; ma_start_id(id); }
+        return;
+    }
     if (dl_state == 2 || dl_state == 3) {
         if (dl_thr) SDL_WaitThread(dl_thr, NULL);
         dl_thr = NULL;
@@ -1928,6 +1981,7 @@ static void ma_poll(void) {
         dl_want = -1;
         dl_state = 0;
     }
+    ma_prefetch_tick();
 }
 static void ma_key(const SDL_KeyboardEvent *k) {
     switch (k->keysym.sym) {
