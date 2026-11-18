@@ -435,7 +435,20 @@ static int ctx_idx = -1; static float ctx_x, ctx_y;        /* context menu ("Sha
 static float toast_t; static char toast_txt[48];
 #define CTX_W 120.0f
 #define CTX_ROW 30.0f
-static int ctx_n(int idx) { return idx >= 0 && idx < npl && pl[idx].ma_id ? 4 : 2; }      /* MA entries: Share, Info (the Mod Archive page), Specs, Remove; local files: Specs, Remove */
+/* The list menu: Share and Info (the Mod Archive page) for Mod Archive entries, Specs in the web player, on touch screens and in the narrow layout (the
+ * desktop player has an I button next to the x of each row instead), Remove for all. Items are numbered 0 Share, 1 Info, 2 Specs, 3 Remove. */
+static int ctx_acts(int idx, int *act) {
+    int n = 0, ma = idx >= 0 && idx < npl && pl[idx].ma_id;
+    if (ma) { act[n++] = 0; act[n++] = 1; }
+#ifdef __EMSCRIPTEN__
+    act[n++] = 2;
+#else
+    if (g_mobile || g_portrait) act[n++] = 2;                 /* the narrow layout has no I button in its rows either */
+#endif
+    act[n++] = 3;
+    return n;
+}
+static int ctx_n(int idx) { int a[4]; return ctx_acts(idx, a); }
 #define CTX_H(idx) (ctx_n(idx) * CTX_ROW + 2.0f)
 static int hit(float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; }
 static int clicked(float x, float y, float w, float h) { return click && clickx >= x && clickx < x + w && clicky >= y && clicky < y + h; }
@@ -1939,6 +1952,7 @@ static void draw_ma_dialog(double t) {
 
 static void draw_ui_portrait(float W, float H);
 static void draw_specs_chip(float x, float y);
+static void specs_open_entry(int idx);
 static void draw_ui(double t) {
     (void)t;
     float W = view_w, H = view_h;
@@ -1988,7 +2002,7 @@ static void draw_ui(double t) {
             float tx = x + 20;
             tx += draw_fmt_badge(tx, yy + 6, &pl[i], isc);      /* file format in its own colour */
             float tgw = tg[0] ? text_width(tg, 14) : 0;
-            float mob = g_mobile ? MOB_BTN_W - 18 : 0, bx = x + w - 8 - MOB_BTN_W;       /* touch devices: the menu button of the phone list instead of the hover x */
+            float mob = g_mobile ? MOB_BTN_W - 18 : 28, bx = x + w - 8 - MOB_BTN_W;       /* touch devices: the menu button of the phone list instead of the hover x */
             fit_text(lab, w - 74 - mob - (tx - (x + 20)) - tgw, 14);
             text(tx, yy + 5, 14, isc ? TXT : DIM, lab);
             if (tg[0]) text_right(x + w - 44 - mob, yy + 5, 14, VC[1], tg);      /* #ID, left of the remove / menu button */
@@ -2009,6 +2023,16 @@ static void draw_ui(double t) {
                     text(x + w - 31, yy + 5, 15, xhv ? WARN : alpha(WARN, 0.55f), "\xd7");
                 }
                 if (hv && xhv && click && clickx >= x + w - 38 && clickx < x + w - 12 && clicky >= yy && clicky < yy + rh) { pl_remove(i); click = 0; break; }
+#ifndef __EMSCRIPTEN__
+                {                       /* I: the Specs of this entry, left of the x */
+                    int ihv = hit(x + w - 66, yy + 2, 26, rh - 6);
+                    if (hv) {
+                        if (ihv) rrect(x + w - 66, yy + 3, 26, rh - 8, 6, alpha(VC[0], 0.22f));
+                        text(x + w - 66 + (26 - text_width("I", 14)) / 2, yy + 6, 14, ihv ? TXT : alpha(TXT, 0.62f), "I");
+                    }
+                    if (hv && ihv && click && clickx >= x + w - 66 && clickx < x + w - 40 && clicky >= yy && clicky < yy + rh) { specs_open_entry(i); click = 0; }
+                }
+#endif
             }
             if (rclick && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {
                 ctx_idx = i; rclick = 0;
@@ -2903,6 +2927,7 @@ static void specs_show_entry(int idx) {                  /* any entry of the lis
     if (!t) { snprintf(toast_txt, sizeof toast_txt, "Specs not available"); toast_t = 2.0f; return; }
     specs_fill(t, pl[idx].label); song_close(t);
 }
+static void specs_open_entry(int idx) { specs_show_entry(idx); specs_just = 1; }
 static void specs_geom(float *x, float *y, float *w, float *h) {
     float chh = view_h - 24 < 440 ? 84.0f : 110.0f;
     float need = 14 + chh * 1.12f + 10 + 36 + 12 + 3 * 26 + 6 + 12 + specs_info.nextra * 22 + 52;     /* the window is as high as its content */
@@ -2948,14 +2973,14 @@ static void draw_specs_window(void) {
 static void draw_ctx_menu(void) {
     if (ctx_idx >= 0 && ctx_idx < npl) {
         static const char *const item[4] = { "Share", "Info", "Specs", "Remove" };
-        int n = ctx_n(ctx_idx), off = 4 - n;           /* local files only show the last two items (Specs, Remove) */
+        int act[4], n = ctx_acts(ctx_idx, act);
         rrect(ctx_x - 1, ctx_y - 1, CTX_W + 2, CTX_H(ctx_idx) + 2, 9, alpha(EDGE, 0.9f));
         rrect(ctx_x, ctx_y, CTX_W, CTX_H(ctx_idx), 8, CARDHI);
         for (int j = 0; j < n; j++) {
             float iy = ctx_y + 1 + j * CTX_ROW;
             int hv = mx >= ctx_x && mx < ctx_x + CTX_W && my >= iy && my < iy + CTX_ROW;
             if (hv) rrect(ctx_x + 3, iy + 2, CTX_W - 6, CTX_ROW - 4, 6, alpha(VC[0], 0.22f));
-            text(ctx_x + 14, iy + 7, 14, item[j + off][0] == 'R' ? (hv ? WARN : alpha(WARN, 0.75f)) : (hv ? TXT : DIM), item[j + off]);
+            text(ctx_x + 14, iy + 7, 14, act[j] == 3 ? (hv ? WARN : alpha(WARN, 0.75f)) : (hv ? TXT : DIM), item[act[j]]);
         }
     }
     if (toast_t > 0) {
@@ -3046,6 +3071,7 @@ static void iter(void) {
         mouse_down = (mb & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
         float k = ww ? (float)dw / (float)ww / view_scale : 1;
         mx = (float)mxi * k; my = (float)myi * k;
+        { static int tm = -1; static float tx, ty; if (tm < 0) { const char *e = getenv("NGPLAYER_TEST_MOUSE"); tm = e && sscanf(e, "%f,%f", &tx, &ty) == 2; } if (tm) { mx = tx; my = ty; } }      /* test hook: the pointer at a fixed place (view units), for screenshots */
         if (lp_on && !mouse_down) lp_on = 0;
         if (lp_on && !lp_fired && SDL_GetTicks() - lp_t >= 500) {      /* held still for half a second: open the menu like a right click */
             lp_fired = 1; lp_on = 0; lp_swallow = 1;
@@ -3059,7 +3085,8 @@ static void iter(void) {
         if (ctx_idx >= 0 && click) {                         /* click on the open menu: copy the link; any click closes it */
             float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;     /* touch: current pointer (the event coordinates are not reliable on iOS) */
             if (cmx >= ctx_x && cmx < ctx_x + CTX_W && cmy >= ctx_y && cmy < ctx_y + CTX_H(ctx_idx) && ctx_idx < npl) {
-                int j = (int)((cmy - ctx_y - 1) / CTX_ROW) + 4 - ctx_n(ctx_idx);          /* 0 Share, 1 Info, 2 Specs, 3 Remove */
+                int act[4], na = ctx_acts(ctx_idx, act), jj = (int)((cmy - ctx_y - 1) / CTX_ROW);
+                int j = jj >= 0 && jj < na ? act[jj] : -1;                                 /* 0 Share, 1 Info, 2 Specs, 3 Remove */
                 if (j == 0) share_link(ctx_idx); else if (j == 1) info_open(ctx_idx); else if (j == 2) specs_show_entry(ctx_idx); else if (j == 3) pl_remove(ctx_idx);
             }
             ctx_idx = -1; click = 0; lp_swallow = 1;
