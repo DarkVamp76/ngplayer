@@ -129,25 +129,25 @@ static int is_mod_name(const char *n) {
     if (tfmx_is_song_name(n)) return 1;          /* mdat.NAME / NAME.tfx; smpl.* und .sam sind nur Sampledaten */
     const char *d = strrchr(n, '.');
     if (!d) return 0;
-    static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".med", ".psm", ".far", ".mdl", ".mmd0", ".mmd1", ".mmd2", ".mmd3", ".xm", ".it", ".dmf", ".amf", ".dsm", ".sfx", ".ahx", ".dbm", ".dtm", NULL };
+    static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".med", ".psm", ".far", ".mdl", ".mmd0", ".mmd1", ".mmd2", ".mmd3", ".xm", ".it", ".dmf", ".amf", ".dsm", ".sfx", ".ahx", ".dbm", ".dtm", ".amd", ".mad", NULL };
     for (int i = 0; ext[i]; i++) if (!strcasecmp(d, ext[i])) return 1;
     return 0;
 }
 
 /* ---- File format badge in front of each list entry (colour per format) ---- */
-enum { FMT_NONE, FMT_MOD, FMT_S3M, FMT_XM, FMT_IT, FMT_STM, FMT_PTM, FMT_ULT, FMT_669, FMT_MTM, FMT_MED, FMT_PSM, FMT_FAR, FMT_MDL, FMT_DMF, FMT_TFMX, FMT_AMF, FMT_SFX, FMT_AHX, FMT_DBM, FMT_DSM, FMT_DTM, FMT_COUNT };
-static const char *const FMT_NAME[FMT_COUNT] = { "", "MOD", "S3M", "XM", "IT", "STM", "PTM", "ULT", "669", "MTM", "MED", "PSM", "FAR", "MDL", "DMF", "TFMX", "AMF", "SFX", "AHX", "DBM", "DSM", "DTM" };
+enum { FMT_NONE, FMT_MOD, FMT_S3M, FMT_XM, FMT_IT, FMT_STM, FMT_PTM, FMT_ULT, FMT_669, FMT_MTM, FMT_MED, FMT_PSM, FMT_FAR, FMT_MDL, FMT_DMF, FMT_TFMX, FMT_AMF, FMT_SFX, FMT_AHX, FMT_DBM, FMT_DSM, FMT_DTM, FMT_AMD, FMT_MAD, FMT_COUNT };
+static const char *const FMT_NAME[FMT_COUNT] = { "", "MOD", "S3M", "XM", "IT", "STM", "PTM", "ULT", "669", "MTM", "MED", "PSM", "FAR", "MDL", "DMF", "TFMX", "AMF", "SFX", "AHX", "DBM", "DSM", "DTM", "AMD", "MAD" };
 static const col FMT_COL[FMT_COUNT] = {
     { 0.5f, 0.5f, 0.5f, 1 }, { 1.00f, 0.76f, 0.28f, 1 }, { 0.35f, 0.95f, 0.55f, 1 }, { 0.24f, 0.88f, 1.00f, 1 }, { 1.00f, 0.36f, 0.80f, 1 },
     { 0.30f, 0.85f, 0.75f, 1 }, { 0.65f, 0.50f, 1.00f, 1 }, { 1.00f, 0.55f, 0.25f, 1 }, { 1.00f, 0.42f, 0.38f, 1 }, { 0.75f, 0.95f, 0.30f, 1 },
-    { 0.40f, 0.60f, 1.00f, 1 }, { 0.90f, 0.45f, 1.00f, 1 }, { 0.85f, 0.75f, 0.55f, 1 }, { 0.55f, 1.00f, 0.85f, 1 }, { 1.00f, 0.60f, 0.65f, 1 }, { 0.85f, 0.88f, 1.00f, 1 }, { 0.95f, 0.62f, 0.50f, 1 }, { 0.80f, 0.78f, 0.45f, 1 }, { 0.55f, 0.90f, 0.30f, 1 }, { 0.40f, 0.78f, 0.95f, 1 }, { 0.95f, 0.85f, 0.35f, 1 }, { 0.62f, 0.80f, 0.95f, 1 } };
+    { 0.40f, 0.60f, 1.00f, 1 }, { 0.90f, 0.45f, 1.00f, 1 }, { 0.85f, 0.75f, 0.55f, 1 }, { 0.55f, 1.00f, 0.85f, 1 }, { 1.00f, 0.60f, 0.65f, 1 }, { 0.85f, 0.88f, 1.00f, 1 }, { 0.95f, 0.62f, 0.50f, 1 }, { 0.80f, 0.78f, 0.45f, 1 }, { 0.55f, 0.90f, 0.30f, 1 }, { 0.40f, 0.78f, 0.95f, 1 }, { 0.95f, 0.85f, 0.35f, 1 }, { 0.62f, 0.80f, 0.95f, 1 }, { 0.95f, 0.55f, 0.35f, 1 }, { 0.85f, 0.45f, 0.55f, 1 } };
 static int fmt_from_name(const char *fn) {
     if (tfmx_is_song_name(fn)) return FMT_TFMX;
     const char *d = strrchr(fn, '.');
     if (!d) return FMT_NONE;
     static const struct { const char *ext; int f; } map[] = { {".mod", FMT_MOD}, {".s3m", FMT_S3M}, {".xm", FMT_XM}, {".it", FMT_IT}, {".stm", FMT_STM}, {".ptm", FMT_PTM},
         {".ult", FMT_ULT}, {".669", FMT_669}, {".mtm", FMT_MTM}, {".med", FMT_MED}, {".mmd0", FMT_MED}, {".mmd1", FMT_MED}, {".mmd2", FMT_MED}, {".mmd3", FMT_MED},
-        {".psm", FMT_PSM}, {".far", FMT_FAR}, {".mdl", FMT_MDL}, {".dmf", FMT_DMF}, {".amf", FMT_AMF}, {".sfx", FMT_SFX}, {".ahx", FMT_AHX}, {".dbm", FMT_DBM}, {".dsm", FMT_DSM}, {".dtm", FMT_DTM}, { NULL, 0 } };
+        {".psm", FMT_PSM}, {".far", FMT_FAR}, {".mdl", FMT_MDL}, {".dmf", FMT_DMF}, {".amf", FMT_AMF}, {".sfx", FMT_SFX}, {".ahx", FMT_AHX}, {".dbm", FMT_DBM}, {".dsm", FMT_DSM}, {".dtm", FMT_DTM}, {".amd", FMT_AMD}, {".mad", FMT_MAD}, { NULL, 0 } };
     for (int i = 0; map[i].ext; i++) if (!strcasecmp(d, map[i].ext)) return map[i].f;
     return FMT_NONE;
 }
@@ -162,6 +162,8 @@ static int fmt_sniff(const char *path) {
     if (n >= 14 && !memcmp(b, "THX", 3) && b[3] <= 1) return FMT_AHX;   /* AHX */
     if (!memcmp(b, "IMPM", 4)) return FMT_IT;
     if (n >= 22 && !memcmp(b, "D.T.", 4)) return FMT_DTM;
+    if (n >= 130 && !memcmp(b, "MAD+", 4)) return FMT_MAD;
+    if (n >= 1072 && (!memcmp(b + 1062, "<o\xefQU\xeeRoR", 9) || !memcmp(b + 1062, "MaDoKaN96", 9))) return FMT_AMD;
     if (n >= 17 && !memcmp(b, "Extended Module: ", 17)) return FMT_XM;
     if (n > 0x30 && !memcmp(b + 0x2C, "SCRM", 4)) return FMT_S3M;
     if (n > 0x30 && !memcmp(b + 0x2C, "PTMF", 4)) return FMT_PTM;
@@ -1243,11 +1245,11 @@ static void draw_seal(float cx, float cy, float r, const char *label) {
    Gezeichnet mit den vorhandenen Primitiven (Koordinaten im 320x200-Raster, Chip um 160,100). */
 #define BEATC C(0.133f, 0.827f, 0.933f, 1)      /* Akzentfarbe des Beat-Pulses (Cyan wie das Logo) */
 static float chip_tsz(float fs, float k) { float z = fs * k; return z < 7.0f ? 7.0f : z; }
-static void chip_dip(float x, float y, float h, float beat) {            /* Paula, DIP-48 (MOS 8364R7); h = Hoehe, Breite = 5 * h */
+static void chip_dip_gen(float x, float y, float h, float beat, int pins, const char *l1, const char *l2, const char *l3) {   /* a DIP chip; h = height, width = 5 * h; pins = pins per side */
     float k = h / 100.0f;
     col pin = mix(C(0.62f, 0.65f, 0.70f, 1), BEATC, 0.55f * beat), body = C(0.23f, 0.24f, 0.255f, 1), ink = mix(C(0.79f, 0.80f, 0.83f, 1), C(1, 1, 1, 1), 0.5f * beat), dimple = C(0.09f, 0.095f, 0.10f, 1);
-    float x0 = 10, x1 = 490, pw = (x1 - x0) / 24.0f;
-    for (int i = 0; i < 24; i++) {
+    float x0 = 10, x1 = 490, pw = (x1 - x0) / (float)pins;
+    for (int i = 0; i < pins; i++) {
         float px = x0 + i * pw + pw * 0.22f;
         rect(x + px * k, y, pw * 0.56f * k, 12 * k, pin);
         rect(x + px * k, y + 88 * k, pw * 0.56f * k, 12 * k, pin);
@@ -1257,14 +1259,18 @@ static void chip_dip(float x, float y, float h, float beat) {            /* Paul
     rrect(x + (95 - 12) * k, y + (50 - 12) * k, 24 * k, 24 * k, 12 * k, dimple);
     rrect(x + (415 - 12) * k, y + (50 - 12) * k, 24 * k, 24 * k, 12 * k, dimple);
     float cx = x + 250 * k, z;
-    z = chip_tsz(15, k); text(cx - text_width("MOS", z) / 2, y + 36 * k - z * 0.8f, z, ink, "MOS");
-    z = chip_tsz(17, k); text(cx - text_width("8364R7", z) / 2, y + 57 * k - z * 0.8f, z, ink, "8364R7");
-    z = chip_tsz(14, k); text(cx - text_width("1589  27", z) / 2, y + 77 * k - z * 0.8f, z, ink, "1589  27");
+    z = chip_tsz(15, k); text(cx - text_width(l1, z) / 2, y + 36 * k - z * 0.8f, z, ink, l1);
+    z = chip_tsz(17, k); text(cx - text_width(l2, z) / 2, y + 57 * k - z * 0.8f, z, ink, l2);
+    z = chip_tsz(14, k); text(cx - text_width(l3, z) / 2, y + 77 * k - z * 0.8f, z, ink, l3);
 }
-/* Which chip: 0 = Paula (TFMX, AHX, SoundFX, MOD and MED up to 4 channels), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices) */
+static void chip_dip(float x, float y, float h, float beat) { chip_dip_gen(x, y, h, beat, 24, "MOS", "8364R7", "1589  27"); }       /* Paula, DIP-48 */
+static void chip_dip_opl(float x, float y, float h, float beat) { chip_dip_gen(x, y, h, beat, 12, "YAMAHA", "YM3812", "OPL2  8735"); }   /* the AdLib FM chip, DIP-24 */
+/* Which chip: 0 = Paula (TFMX, AHX, SoundFX, MOD and MED up to 4 channels), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices),
+ * 4 = the Yamaha OPL2 of the AdLib card (the FM formats) */
 static int chip_kind(void) {
     const char *f = song_format(g_song);
     int n = song_channels(g_song);
+    if (!strcmp(f, "AMD") || !strcmp(f, "MAD")) return 4;
     if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || !strcmp(f, "SFX") || ((!strcmp(f, "MOD") || !strcmp(f, "MED")) && n <= 4)) return 0;     /* the Amiga formats that run on the four Paula voices */
     return n > 32 ? 3 : (n >= 15 ? 2 : 1);
 }
@@ -1272,7 +1278,7 @@ static int chip_kind(void) {
 static float chips_width(float h) {                       /* Breite des Chipbereichs (0 = keiner) */
     if (!g_song) return 0;
     int k = chip_kind();
-    if (k == 0) return 5.0f * h * 0.5f;                            /* Paula: flacher Streifen (5:1), in halber Hoehe */
+    if (k == 0 || k == 4) return 5.0f * h * 0.5f;                  /* Paula and the OPL2: a flat strip (5:1), at half height */
     return 1.12f * h * c3_box_aspect(k - 1);                       /* the rotating 3D sound card */
 }
 static void draw_chips(float x, float y, float h) {
@@ -1283,12 +1289,13 @@ static void draw_chips(float x, float y, float h) {
     float gx = x + cw / 2, gy = y + h / 2;
     if (beat > 0.01f) {                                   /* Glow hinter dem Chip */
         set_additive(1);
-        blob(gx, gy, (k == 0 ? cw * 0.30f : h * 0.55f) * (1.0f + 0.4f * beat), alpha(BEATC, 0.55f * beat));
+        blob(gx, gy, (k == 0 || k == 4 ? cw * 0.30f : h * 0.55f) * (1.0f + 0.4f * beat), alpha(BEATC, 0.55f * beat));
         set_additive(0);
     }
     float hh = h * sc;                                    /* leicht wachsen, um die Mitte */
     float xx = x - (cw * sc - cw) / 2, yy = y - (hh - h) / 2;
     if (k == 0) chip_dip(xx, yy + hh * 0.25f, hh * 0.5f, beat);            /* the chip is half as high as the slot: centred in it */
+    else if (k == 4) chip_dip_opl(xx, yy + hh * 0.25f, hh * 0.5f, beat);
     else { float b = 1.0f + 0.30f * beat; tex_quad(c3_texture(k - 1), xx, yy + hh * 0.57f - hh * 0.56f, cw * sc, hh * 1.12f, C(b, b, b, 1)); }
 }
 /* XTC-style water ripples behind the logo: one source per channel, amplitude follows the channel level */
@@ -2073,7 +2080,7 @@ static void draw_ui(double t) {
             if (bend > tl) tl = bend;
             float x0 = 0.5f * (tl + tr) - chw / 2;
             if (x0 < tl + 8) x0 = tl + 8;
-            { static const float lift[4] = { 0.0f, 0.05f, 0.03f, 0.08f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
+            { static const float lift[5] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.0f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
         }
     }
 
@@ -2090,7 +2097,7 @@ static void draw_ui(double t) {
     else if (g_vmode == 3) draw_scopes(ax, cy0 + oh + M, aw, avail - oh - M);
     else if (g_vmode == 2) draw_voxel(ax, cy0 + oh + M, aw, avail - oh - M);
     else draw_pattern(ax, cy0 + oh + M, aw, avail - oh - M);
-    if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "PTM") || !strcmp(song_format(g_song), "ULT") || !strcmp(song_format(g_song), "669") || !strcmp(song_format(g_song), "MED") || !strcmp(song_format(g_song), "PSM") || !strcmp(song_format(g_song), "IT"));
+    if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "PTM") || !strcmp(song_format(g_song), "ULT") || !strcmp(song_format(g_song), "669") || !strcmp(song_format(g_song), "MED") || !strcmp(song_format(g_song), "PSM") || !strcmp(song_format(g_song), "IT") || !strcmp(song_format(g_song), "AMD"));
     float vuw = 300, spw = aw - vuw - M;
     draw_spectrum(ax, sy, spw, sh);
     draw_level(ax + spw + M, sy, vuw, sh);
@@ -2309,7 +2316,7 @@ static void draw_ui_portrait(float W, float H) {
                 if (cx > tl) tl = cx;
                 if (tr - tl >= 40) { x0 = 0.5f * (tl + tr) - chw / 2; if (x0 < tl + 4) x0 = tl + 4; }   /* centred between the title and the time; on a phone it may reach into the time, not into the title */
                 else if (x0 < cx + 6) x0 = cx + 6;                                          /* a very long title: lower right, may cover part of the time */
-                if (chw > 0 && x0 + chw <= M + aw - 6) draw_chips(x0, chip_kind() == 0 ? hy + hh / 2 - chh / 2 : hy + 16 + (54 * k - chh) / 2, chh);   /* the Paula chip in the middle of the card, the cards as before */
+                if (chw > 0 && x0 + chw <= M + aw - 6) draw_chips(x0, chip_kind() == 0 || chip_kind() == 4 ? hy + hh / 2 - chh / 2 : hy + 16 + (54 * k - chh) / 2, chh);   /* the Paula chip in the middle of the card, the cards as before */
             }
         }
     }
@@ -2324,7 +2331,7 @@ static void draw_ui_portrait(float W, float H) {
     if (oh < 40) oh = 40;
     view_update();
     overview_update((float)g_dt);
-    if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "PTM") || !strcmp(song_format(g_song), "ULT") || !strcmp(song_format(g_song), "669") || !strcmp(song_format(g_song), "MED") || !strcmp(song_format(g_song), "PSM") || !strcmp(song_format(g_song), "IT"));
+    if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "PTM") || !strcmp(song_format(g_song), "ULT") || !strcmp(song_format(g_song), "669") || !strcmp(song_format(g_song), "MED") || !strcmp(song_format(g_song), "PSM") || !strcmp(song_format(g_song), "IT") || !strcmp(song_format(g_song), "AMD"));
     if (g_plopen) {
         draw_playlist_overlay(M, cy0, aw, sy + sh - cy0);   /* the transport bar below (LIST) still gets its click */
     } else {
@@ -2974,7 +2981,7 @@ static void iter(void) {
         /* Songende -> naechster Titel */
         if (!shot) song_end_advance();
 
-        if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
+        if (g_song && chip_kind() > 0 && chip_kind() < 4) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
         g_vpw = dw; g_vph = dh;
         glViewport(0, 0, dw, dh);
         glClearColor(BG0.r, BG0.g, BG0.b, 1);

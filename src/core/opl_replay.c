@@ -135,6 +135,7 @@ struct OplPlayer {
     int speed, del, songend, regbd, ord, rw; unsigned tempo, restartpos;
     double left;                         /* output samples left in the current tick */
     int ended;
+    unsigned mute; float *scope; int scope_len; unsigned scope_pos;
 };
 
 static void wr(OplPlayer *p, unsigned reg, unsigned v) { OPL3_WriteRegBuffered(&p->chip, (uint16_t)reg, (uint8_t)v);   /* buffered: key off and key on in one tick need a chip cycle in between */ }
@@ -324,6 +325,10 @@ int opl_position(const OplPlayer *p, int *order, int *row, int *speed) {
     return 0;
 }
 
+void opl_set_mute(OplPlayer *p, unsigned mask) { p->mute = mask & 0x1FF; OPL3_SetMute(&p->chip, p->mute); }
+void opl_set_scope(OplPlayer *p, float *buf, int len) { p->scope = buf; p->scope_len = len; p->scope_pos = 0; }
+unsigned opl_scope_pos(const OplPlayer *p) { return p->scope_pos; }
+
 int opl_render(OplPlayer *p, int16_t *out, int n) {
     int done = 0;
     while (done < n && !p->ended) {
@@ -332,7 +337,14 @@ int opl_render(OplPlayer *p, int16_t *out, int n) {
             p->left += (double)p->rate / refresh(p);
         }
         int chunk = (int)p->left; if (chunk < 1) chunk = 1; if (chunk > n - done) chunk = n - done;
-        for (int i = 0; i < chunk; i++) { int16_t f[2]; OPL3_GenerateResampled(&p->chip, f); out[2 * (done + i)] = f[0]; out[2 * (done + i) + 1] = f[1]; }
+        for (int i = 0; i < chunk; i++) {
+            int16_t f[2]; OPL3_GenerateResampled(&p->chip, f); out[2 * (done + i)] = f[0]; out[2 * (done + i) + 1] = f[1];
+            if (p->scope) {                                            /* the output of each FM channel, before the (mono) panning */
+                const int16_t *co = OPL3_ChannelOutput(&p->chip); unsigned w = p->scope_pos & (unsigned)(p->scope_len - 1);
+                for (int c = 0; c < 9; c++) p->scope[(size_t)c * p->scope_len + w] = (float)co[c] * (1.0f / 16384.0f);
+                p->scope_pos++;
+            }
+        }
         p->left -= chunk; done += chunk;
     }
     return done;

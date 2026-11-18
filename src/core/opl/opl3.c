@@ -28,6 +28,9 @@
  *          YMF262 and VRC VII decaps and die shots.
  *
  * version: 1.8
+ *
+ * Modified for ngPlayer (GPL-3.0-or-later project, this file stays LGPL-2.1+): per-channel output (chacc) and channel mute (chmute) in OPL3_Generate4Ch,
+ * plus OPL3_SetMute and OPL3_ChannelOutput at the end of the file.
  */
 
 #include <stdio.h>
@@ -1123,6 +1126,8 @@ inline void OPL3_Generate4Ch(opl3_chip *chip, int16_t *buf4)
         channel = &chip->channel[ii];
         out = channel->out;
         accm = *out[0] + *out[1] + *out[2] + *out[3];
+        chip->chacc[ii] = accm;
+        if ((chip->chmute >> ii) & 1) accm = 0;
 #if OPL_ENABLE_STEREOEXT
         mix[0] += (int16_t)((accm * channel->leftpan) >> 16);
 #else
@@ -1156,6 +1161,7 @@ inline void OPL3_Generate4Ch(opl3_chip *chip, int16_t *buf4)
         channel = &chip->channel[ii];
         out = channel->out;
         accm = *out[0] + *out[1] + *out[2] + *out[3];
+        if ((chip->chmute >> ii) & 1) accm = 0;
 #if OPL_ENABLE_STEREOEXT
         mix[0] += (int16_t)((accm * channel->rightpan) >> 16);
 #else
@@ -1514,4 +1520,15 @@ void OPL3_GenerateStream(opl3_chip *chip, int16_t *sndptr, uint32_t numsamples)
         OPL3_GenerateResampled(chip, sndptr);
         sndptr += 2;
     }
+}
+
+/* ngPlayer modification */
+void OPL3_SetMute(opl3_chip *chip, uint32_t mask)
+{
+    chip->chmute = mask;
+}
+
+const int16_t *OPL3_ChannelOutput(const opl3_chip *chip)
+{
+    return chip->chacc;
 }

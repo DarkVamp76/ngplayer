@@ -5,6 +5,7 @@
 #include "dmf.h"
 #include "tfmx.h"
 #include "ahx.h"
+#include "opl_replay.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,7 +25,7 @@ int xxm_chan_pan(const void *p, int ch);
 int itp_chan_pan(const ITPlayer *p, int ch);
 void itp_pos(const ITPlayer *p, int *ord, int *pat, int *row);
 
-enum { K_MOD, K_S3M, K_XM, K_IT, K_DMF, K_TFMX, K_AHX };
+enum { K_MOD, K_S3M, K_XM, K_IT, K_DMF, K_TFMX, K_AHX, K_OPL };
 
 struct Song {
     int kind;
@@ -38,6 +39,7 @@ struct Song {
     TfmxSong *tf;
     TfmxPlayer *tp;
     AhxPlayer *ap;          /* AHX */
+    OplSong *os; OplPlayer *op;   /* AdLib FM: AMD, MAD */
     int tstart;             /* TFMX: erste Trackstep-Zeile des Subsongs */
     int nsub, cursub;       /* TFMX: Anzahl echter Subsongs, aktueller (0-basiert) */
     char title[40];
@@ -120,6 +122,17 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
             snprintf(s->title, sizeof s->title, "%s", s->it->title);
             s->nch = s->it->nch; s->nord = s->it->nord;
             s->ip = itp_new(s->it, rate);
+        }
+    } else if (opl_probe(b, (size_t)n)) {
+        int e = 0;
+        s->os = opl_load(b, (size_t)n, &e);
+        if (!s->os) { r = e ? e : -1; }
+        else {
+            s->kind = K_OPL; s->fmt = s->os->is_mad ? "MAD" : "AMD";
+            snprintf(s->title, sizeof s->title, "%s", s->os->is_mad ? "" : s->os->title);
+            s->nch = s->os->nchan; s->nord = s->os->length;
+            s->op = opl_new(s->os, rate);
+            if (!s->op) r = -1;
         }
     } else if (n > 66 && !memcmp(b, "DDMF", 4)) {
         int e = 0;
@@ -282,7 +295,7 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
         }
     }
     free(b);
-    if (r || (!s->xp && !s->xxp && !s->ip && !s->dp && !s->tp && !s->ap)) {
+    if (r || (!s->xp && !s->xxp && !s->ip && !s->dp && !s->tp && !s->ap && !s->op)) {
         snprintf(err, errcap, "unsupported or damaged module (%d)", r);
         song_close(s);
         return NULL;
@@ -298,14 +311,17 @@ void song_close(Song *s) {
     if (s->dp) dmp_free(s->dp);
     if (s->dm) dmf_free(s->dm);
     if (s->ap) ahx_free(s->ap);
+    if (s->op) opl_pfree(s->op);
+    if (s->os) opl_free(s->os);
     if (s->tp) tfp_free(s->tp);
     if (s->tf) tfmx_free(s->tf);
     if (s->it) it_free(s->it);
-    if (s->kind != K_IT && s->kind != K_DMF && s->kind != K_TFMX && s->kind != K_AHX) xsong_free(&s->xs);
+    if (s->kind != K_IT && s->kind != K_DMF && s->kind != K_TFMX && s->kind != K_AHX && s->kind != K_OPL) xsong_free(&s->xs);
     free(s);
 }
 
 int song_render(Song *s, int16_t *out, int n) {
+    if (s->op) { opl_set_mute(s->op, (unsigned)song_get_mute()); return opl_render(s->op, out, n); }
     if (s->ap) { ahx_set_mute(s->ap, (unsigned)song_get_mute()); return ahx_render(s->ap, out, n); }
     if (s->ip) return itp_render(s->ip, out, n);
     if (s->dp) return dmp_render(s->dp, out, n);
@@ -322,6 +338,7 @@ int song_subsongs(const Song *s) { return s->kind == K_TFMX && s->nsub > 0 ? s->
 int song_subsong(const Song *s) { return s->kind == K_TFMX ? s->cursub : 0; }
 Song *song_open(const char *path, int rate, char *err, size_t errcap) { return song_open_sub(path, rate, 0, err, errcap); }
 int song_order(const Song *s) {
+    if (s->op) { int o = 0; opl_position(s->op, &o, NULL, NULL); return o; }
     if (s->ap) { int o = 0; ahx_pos(s->ap, &o, NULL); return o; }
     if (s->dp) { int o = 0; dmp_pos(s->dp, &o, NULL, NULL); return o; }
     if (s->tp) { int o = tfp_pos(s->tp) - s->tstart; return o < 0 ? 0 : o; }
@@ -334,6 +351,7 @@ int song_order(const Song *s) {
 static int pat_of(const Song *s, int order) {
     if (order < 0 || order >= s->nord) return -1;
     if (s->kind == K_TFMX || s->kind == K_AHX) return order;          /* TFMX: Trackstep-Zeile; AHX: die Position (4 Tracks) ist das Pattern */
+    if (s->kind == K_OPL) { int p = s->os->order[order]; return p >= 0x80 || p >= s->os->nop ? -1 : p; }
     if (s->kind == K_DMF) { int p = s->dm->order[order]; return p < s->dm->npat ? p : -1; }
     if (s->kind == K_IT) { int p = s->it->orders[order]; return p >= 254 ? -1 : (p < s->it->npat ? p : -1); }
     int p = s->xs.orders[order];
@@ -342,6 +360,7 @@ static int pat_of(const Song *s, int order) {
 int song_order_pattern(const Song *s, int order) { return pat_of(s, order); }
 
 int song_pattern_rows(const Song *s, int pattern) {
+    if (s->kind == K_OPL) return s->os->nrows;
     if (s->kind == K_AHX) return ahx_tracklen(s->ap);
     if (s->kind == K_DMF) return pattern >= 0 && pattern < s->dm->npat ? s->dm->pat[pattern].nrows : 64;
     if (s->kind == K_IT) return pattern >= 0 && pattern < s->it->npat ? s->it->rows[pattern] : 64;
@@ -352,7 +371,8 @@ int song_pattern_rows(const Song *s, int pattern) {
 
 void song_pos(const Song *s, SongPos *o) {
     int ord = 0, row = 0, pat = 0;
-    if (s->ip) itp_pos(s->ip, &ord, &pat, &row);
+    if (s->op) { opl_position(s->op, &ord, &row, NULL); pat = pat_of(s, ord); }
+    else if (s->ip) itp_pos(s->ip, &ord, &pat, &row);
     else if (s->ap) { ahx_pos(s->ap, &ord, &row); pat = ord; }
     else if (s->dp) dmp_pos(s->dp, &ord, &pat, &row);
     else if (s->tp) { ord = tfp_pos(s->tp) - s->tstart; if (ord < 0) ord = 0; pat = ord; row = tfp_row(s->tp); }
@@ -500,6 +520,19 @@ void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
         if (note) { put_note(t.note, note + 11); t.has_note = 1; }              /* AHX note 1 = C-1 */
         if (inst) { t.inst[0] = hexc(inst >> 4); t.inst[1] = hexc(inst); }
         if (fx || par) { fx3(t.fx, fxc(fx), par); t.fxclass = (fx == 1 || fx == 2 || fx == 3 || fx == 5) ? 2 : (fx == 0xA || fx == 0xC) ? 1 : (fx == 0xB || fx == 0xD || fx == 0xF) ? 4 : 5; }
+    } else if (s->kind == K_OPL) {
+        const OplSong *os = s->os;
+        if (pattern < 0 || pattern >= os->nop || row >= os->nrows || ch >= os->nchan) return;
+        unsigned tk = os->trackord[pattern * 9 + ch]; if (!tk) return;
+        const OplCell *x = &os->tracks[(size_t)(tk - 1) * os->nrows + row];
+        if (x->note == 127) strcpy(t.note, "===");
+        else if (x->note) { put_note(t.note, x->note - 1); t.has_note = 1; }
+        if (x->inst) { t.inst[0] = hexc(x->inst >> 4); t.inst[1] = hexc(x->inst); }
+        if (x->command || x->p1 || x->p2) {
+            fx3(t.fx, fxc(x->command), (x->p1 << 4) | (x->p2 & 15));
+            int e = x->command;
+            t.fxclass = (e >= 1 && e <= 6) || (e == 0 && (x->p1 || x->p2)) ? 2 : (e == 9 || e == 10 || e == 12 || e == 17) ? 1 : (e == 7 || e == 11 || e == 13 || e == 15 || e == 18) ? 4 : 5;
+        }
     } else if (s->kind == K_DMF) {
         if (pattern >= s->dm->npat || row >= s->dm->pat[pattern].nrows || ch >= 32) return;
         const DMFCell *x = &s->dm->pat[pattern].cell[(size_t)row * 32 + ch];
@@ -541,7 +574,8 @@ void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
 }
 
 void song_scope_enable(Song *s, float *buf, int len) {
-    if (s->ap) ahx_set_scope(s->ap, buf, len);
+    if (s->op) opl_set_scope(s->op, buf, len);
+    else if (s->ap) ahx_set_scope(s->ap, buf, len);
     else if (s->ip) itp_set_scope(s->ip, buf, len);
     else if (s->dp) dmp_set_scope(s->dp, buf, len);
     else if (s->tp) tfp_set_scope(s->tp, buf, len);
@@ -549,6 +583,7 @@ void song_scope_enable(Song *s, float *buf, int len) {
     else xplay_set_scope(s->xp, buf, len);
 }
 unsigned song_scope_pos(const Song *s) {
+    if (s->op) return opl_scope_pos(s->op);
     if (s->ap) return ahx_scope_pos(s->ap);
     if (s->ip) return itp_scope_pos(s->ip);
     if (s->dp) return dmp_scope_pos(s->dp);
@@ -574,6 +609,7 @@ unsigned long long song_get_mute(void) { return xplay_mute; }
 
 int song_chan_pan(const Song *s, int ch) {
     if (ch < 0 || ch >= s->nch) return 128;
+    if (s->op) return 128;                                   /* the OPL2 is mono */
     if (s->ap) return ahx_chan_pan(s->ap, ch);
     if (s->ip) return itp_chan_pan(s->ip, ch);
     if (s->dp) return dmp_chan_pan(s->dp, ch);
@@ -589,7 +625,16 @@ const char *song_fx_name(const Song *s, const SongCell *c, int *is_vol) {
     char L = c->fx[0];
     if (L != '.') {
         int par = (hexv(c->fx[1]) << 4) | hexv(c->fx[2]);
-        if (s->kind == K_AHX) {
+        if (s->kind == K_OPL) {
+            switch (L) {
+            case '0': return "Arpeggio";       case '1': return "Slide Up";        case '2': return "Slide Down";
+            case '3': return "Tone Porta";     case '4': return "Vibrato";         case '5': return "TPorta+VolSlide";
+            case '6': return "Vib+VolSlide";   case '7': return "Set Tempo";       case '8': return "Key Off";
+            case '9': return "Set Op Volume";  case 'A': return "Vol Slide";       case 'B': return "Pos Jump";
+            case 'C': return "Set Volume";     case 'D': return "Pattern Break";   case 'E': return "Extended";
+            case 'F': return "Set Speed";      case 'H': return "Set Volume";      case 'I': return "Set Speed";
+            }
+        } else if (s->kind == K_AHX) {
             switch (L) {
             case '0': return "Pos Jump (hi)";   case '1': return "Porta Up";      case '2': return "Porta Down";
             case '3': return "Tone Porta";      case '4': return "Filter";        case '5': return "TPorta+VolSlide";

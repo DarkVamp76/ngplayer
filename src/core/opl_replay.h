@@ -28,3 +28,6 @@ OplPlayer *opl_new(const OplSong *s, int rate);
 void opl_pfree(OplPlayer *p);
 int opl_render(OplPlayer *p, int16_t *out, int nframes);      /* 0 at the end of the song */
 int opl_position(const OplPlayer *p, int *order, int *row, int *speed);
+void opl_set_mute(OplPlayer *p, unsigned mask);                /* bit n = FM channel n is muted */
+void opl_set_scope(OplPlayer *p, float *buf, int len);         /* scope ring buffer: buf[channel * len + pos], len a power of two, nine channels */
+unsigned opl_scope_pos(const OplPlayer *p);

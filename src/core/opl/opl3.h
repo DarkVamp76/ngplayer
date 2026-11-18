@@ -49,6 +49,7 @@ extern "C" {
 typedef struct _opl3_slot opl3_slot;
 typedef struct _opl3_channel opl3_channel;
 typedef struct _opl3_chip opl3_chip;
+/* ngPlayer modification: per-channel output and mute (see OPL3_SetMute, OPL3_ChannelOutput) */
 
 struct _opl3_slot {
     opl3_channel *channel;
@@ -133,6 +134,8 @@ struct _opl3_chip {
     uint32_t noise;
     int16_t zeromod;
     int32_t mixbuff[4];
+    int16_t chacc[18];     /* ngPlayer modification: the last output of every channel before panning (for the scopes) */
+    uint32_t chmute;       /* ngPlayer modification: bit n = channel n is muted */
     uint8_t rm_hh_bit2;
     uint8_t rm_hh_bit3;
     uint8_t rm_hh_bit7;
@@ -171,5 +174,8 @@ void OPL3_Generate4ChStream(opl3_chip *chip, int16_t *sndptr1, int16_t *sndptr2,
 #ifdef __cplusplus
 }
 #endif
+
+void OPL3_SetMute(opl3_chip *chip, uint32_t mask);                  /* ngPlayer modification */
+const int16_t *OPL3_ChannelOutput(const opl3_chip *chip);          /* ngPlayer modification: 18 values */
 
 #endif
