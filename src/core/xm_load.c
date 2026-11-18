@@ -23,12 +23,12 @@ int xxm_load(XSong *s, const uint8_t *b, size_t n){
     unsigned ver = rd16(b + 58), hs = rd32(b + 60);
     unsigned nord = rd16(b + 64), rst = rd16(b + 66), nch = rd16(b + 68), npat = rd16(b + 70), nins = rd16(b + 72);
     unsigned flags = rd16(b + 74), speed = rd16(b + 76), tempo = rd16(b + 78);
-    if (ver < 0x0104 || nch < 1 || nch > 32 || nord > 256 || npat > 256 || nins > 128) return -2;
+    if (ver < 0x0104 || nch < 1 || nch > 64 || nord > 256 || npat > 256 || nins > 128) return -2;
     if (60 + hs > n || hs < 20) return -3;
     s->nch = nch; s->nord = nord; s->npat = npat; s->ninst = nins; s->linear = flags & 1; s->restart = rst;
     s->speed = speed ? (int)speed : 6; s->tempo = tempo ? (int)tempo : 125;
     memcpy(s->orders, b + 80, nord > 256 ? 256 : nord);
-    for (int i = 0; i < 32; i++) { s->chpan[i] = -1; s->chen[i] = 1; }
+    for (int i = 0; i < 64; i++) { s->chpan[i] = -1; s->chen[i] = 1; }
     size_t off = 60 + hs;
     s->pat = calloc((size_t)(npat ? npat : 1) * 64 * nch, sizeof(XCell));
     /* Pattern: Zeilenzahl je Pattern variabel (1..256). Wir speichern fest 64 Zeilen/Pattern nur fuer MOD/S3M;
