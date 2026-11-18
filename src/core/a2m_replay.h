@@ -1,4 +1,4 @@
-/* Adlib Tracker 2 replayer (A2M versions 9-14); the OPL chip is reached through a write callback. LGPL-2.1-or-later (derived from AdPlug's a2m-v2.cpp) */
+/* Adlib Tracker 2 replayer (A2M and A2T, file versions 1-14); the OPL chip is reached through a write callback. LGPL-2.1-or-later (derived from AdPlug's a2m-v2.cpp) */
 #pragma once
 #include "a2m_load.h"
 typedef struct A2P A2P;

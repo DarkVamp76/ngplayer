@@ -43,5 +43,5 @@ typedef struct A2mSong {
 } A2mSong;
 
 int a2m_probe(const uint8_t *buf, size_t len);                 /* 1 = Adlib Tracker 2 module (A2M or A2T) */
-A2mSong *a2m_load(const uint8_t *buf, size_t len, int *err);   /* NULL on error, err < 0; versions 9-14 for now */
+A2mSong *a2m_load(const uint8_t *buf, size_t len, int *err);   /* NULL on error, err < 0; file versions 1-14, A2M and A2T */
 void a2m_free(A2mSong *s);
