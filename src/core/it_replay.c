@@ -893,7 +893,7 @@ int itp_render(ITPlayer *p, int16_t *out, int n){
             update_channels(p);
             /* tick length: rate * 2.5 / tempo. IT files use the truncated whole number of samples (checked bit-exact against libopenmpt
              * at 44.1 kHz on 20 files). OpenMPT files in its alternative or modern tempo mode (extension chunk "..MT") use the exact fractional length instead: carry the remainder. */
-            if (p->s->mpt_tempo_mode >= 1) { double tl = (double)p->rate * 2.5 / p->tempo + p->tk_frac; p->tk_len = p->tk_left = (int)tl; p->tk_frac = tl - p->tk_len; }
+            if (p->s->mpt_tempo_mode >= 1) { double tl = (p->s->mpt_tempo_mode == 2 ? (double)p->rate * 60.0 / ((double)p->tempo * p->speed * p->s->mpt_rpb) : (double)p->rate * 2.5 / p->tempo) + p->tk_frac;   /* modern: ticks per beat = speed * rows per beat (24 at speed 6 and 4 rows, the classic length) */ p->tk_len = p->tk_left = (int)tl; p->tk_frac = tl - p->tk_len; }
             else p->tk_len = p->tk_left = (int)(p->rate * 5 / (p->tempo * 2));
             if (p->tk_left < 1) p->tk_left = p->tk_len = 1;
             if (p->tkcap < p->tk_len * 2) { p->tkcap = p->tk_len * 2; p->tkbuf = realloc(p->tkbuf, sizeof(double) * p->tkcap); p->tkout = realloc(p->tkout, sizeof(int16_t) * p->tkcap); }
