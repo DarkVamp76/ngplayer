@@ -43,6 +43,7 @@ level of quality on Linux, together with an interface that is a joy to look at.
 | MAD (Mlat Adlib Tracker, `MAD+`) | supported (AdLib FM, OPL2, 9 channels, 32 rows per pattern; same FM engine as AMD) |
 | A2M (Adlib Tracker 2, Subz3ro) | supported for file versions 9 to 14 (OPL3, 18 channels, two effects per cell, instrument macros, 4-operator instruments; the replayer is a C port of the Adlib Tracker 2 player core, register-identical to AdPlug on 36 test modules); versions 1 to 8 and the tiny `.a2t` variant are not supported yet |
 | HERAD (Herbulot AdLib System, Cryo: Dune and others; `.hsq` `.sqx` `.sdb` `.agd` `.ha2`) | supported (HSQ and SQX unpackers, versions 1 and 2, keymaps and instrument macros, pitch slides; OPL2 with 9 voices, `.agd` runs the OPL3 with 18 voices and instrument panning, hands out the channels like the Dune AGD driver does and plays its 4-operator instruments (instrument mode 4); the pattern view shows one row per tick, 96 per measure; register-identical to AdPlug on 23 test files; `.agd` files also drive the AdLib Gold surround processor (YM7128B reverb / surround) and stereo processor (TDA8425 bass, treble, stereo mode) with the settings stored in the file header, as the Dune driver does) |
+| RAD (Reality ADlib Tracker, `RAD by REALiTY!!`, `.rad`) | supported for file formats 1.0 (OPL2) and 2.1 (OPL3: 4-operator instruments, instrument and channel riffs, BPM); a C port of the public domain RAD2 replayer including its tune validation; register-identical to AdPlug on 5 test tunes; 9 channels, 64 lines per pattern |
 | TFMX (Chris Hülsbeck, `mdat.NAME` + `smpl.NAME` or `NAME.tfx` + `NAME.sam`) | supported (subsong 0, no pattern view yet) |
 
 Looking for DMF files to try? The [Radical Rhythms Archive](https://www.radicalrhythms.org/) collects tracks by a German tracker group from the mid-1990s, including DMF modules.
@@ -57,7 +58,7 @@ Planned: 15-sample MOD, WAV/VOC, MP1/MP2/MP3, more FM formats (RAD).
 - Time-continuous scrolling locked to the audio clock, drawn at the full refresh rate of your monitor
 - Spectrum analyser and level meters
 - Four views for the main area (key **V**): **pattern** (the notes only; click a column number to mute, Ctrl+click for solo), **scopes** (one oscilloscope tile per voice with live panning), **orb** (a geodesic sphere shaped by the spectrum) and **voxel** (the spectrum as stacks of real voxel cubes in perspective)
-- A turning 3D model of the sound card in the header, chosen by the number of voices: the Paula chip (up to 4 voices), the Gravis UltraSound (GF1, up to 14), the UltraSound PnP (AMD InterWave, 15 to 32) and the Terratec EWS64 (more than 32 voices) The FM formats (AMD, MAD, A2M, HERAD) show the AdLib Gold card (Yamaha OPL3).
+- A turning 3D model of the sound card in the header, chosen by the number of voices: the Paula chip (up to 4 voices), the Gravis UltraSound (GF1, up to 14), the UltraSound PnP (AMD InterWave, 15 to 32) and the Terratec EWS64 (more than 32 voices) The FM formats (AMD, MAD, A2M, HERAD, RAD) show the AdLib Gold card (Yamaha OPL3).
 - Seek inside a song (Left/Right), drag and drop for files and folders, playlist
 
 ## Technical details

@@ -5,6 +5,7 @@
 #include "a2m_replay.h"
 #include "herad.h"
 #include "adgold.h"
+#include "rad.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -137,7 +138,7 @@ typedef struct {
 #define GOLD_TRIM 0.12f
 
 struct OplPlayer {
-    const OplSong *s; const A2mSong *a2s; A2P *a2; int a2map[20], a2n; const HeradSong *hs; HeradPlayer *hp; AdGold *gold; opl3_chip chip; int rate;
+    const OplSong *s; const A2mSong *a2s; A2P *a2; int a2map[20], a2n; const HeradSong *hs; HeradPlayer *hp; AdGold *gold; const RadSong *rs; RadPlayer *rp; unsigned rmask[9]; opl3_chip chip; int rate;
     Chn ch[9];
     int speed, del, songend, regbd, ord, rw; unsigned tempo, restartpos;
     int rem; double acc;                 /* output samples left in the current tick, and the fractional remainder carried to the next one */
@@ -223,6 +224,7 @@ static int resolve_order(OplPlayer *p) {
 static double refresh(const OplPlayer *p) {
     if (p->a2) return (double)a2p_refresh(p->a2);
     if (p->hp) return HERAD_REFRESH;
+    if (p->rp) return (double)p->rs->hertz;
     if (p->s->is_mad) return p->s->fixed_refresh;
     return p->tempo ? (double)p->tempo : (double)18.2f;      /* the PC timer default, as a float like the reference player */
 }
@@ -240,6 +242,7 @@ static void reset_player(OplPlayer *p) {
 static int update(OplPlayer *p) {
     if (p->a2) return a2p_update(p->a2);
     if (p->hp) return herad_update(p->hp);
+    if (p->rp) return rad_update(p->rp);
     const OplSong *s = p->s; int pattbreak = 0, pattern_delay = 0;
     if (!p->speed) return 0;
     for (int c = 0; c < 9; c++) {
@@ -352,11 +355,22 @@ OplPlayer *opl_new_herad(const HeradSong *s, int rate) {
     herad_rewind(p->hp);
     return p;
 }
-void opl_pfree(OplPlayer *p) { if (p && p->a2) a2p_free(p->a2); if (p && p->hp) herad_free_player(p->hp); if (p && p->gold) adgold_free(p->gold); free(p); }
+static void rad_write(void *u, int reg, int val) { OplPlayer *p = u; OPL3_WriteRegBuffered(&p->chip, (uint16_t)reg, (uint8_t)val); }
+OplPlayer *opl_new_rad(const RadSong *s, int rate) {
+    OplPlayer *p = calloc(1, sizeof *p); if (!p) return NULL;
+    p->rs = s; p->rate = rate; OPL3_Reset(&p->chip, (uint32_t)rate);
+    p->rp = rad_new(s, rad_write, p); if (!p->rp) { free(p); return NULL; }
+    p->a2n = RAD_CHANNELS;
+    static const unsigned m3[9] = { 1u << 0 | 1u << 3, 1u << 1 | 1u << 4, 1u << 2 | 1u << 5, 1u << 9 | 1u << 12, 1u << 10 | 1u << 13, 1u << 11 | 1u << 14, 1u << 6 | 1u << 15, 1u << 7 | 1u << 16, 1u << 8 | 1u << 17 };
+    for (int c = 0; c < 9; c++) p->rmask[c] = s->use_opl3 ? m3[c] : 1u << c;       /* a RAD channel plays on two OPL3 channels in version 2 */
+    return p;
+}
+void opl_pfree(OplPlayer *p) { if (p && p->rp) rad_free_player(p->rp); if (p && p->a2) a2p_free(p->a2); if (p && p->hp) herad_free_player(p->hp); if (p && p->gold) adgold_free(p->gold); free(p); }
 
 int opl_position(const OplPlayer *p, int *order, int *row, int *speed) {
     if (p->a2) { int pat; return a2p_position(p->a2, order, &pat, row, speed); }
     if (p->hp) return herad_position(p->hp, order, row);
+    if (p->rp) return rad_position(p->rp, order, row, speed);
     if (order) *order = p->ord;
     if (row) *row = p->rw;
     if (speed) *speed = p->speed;
@@ -368,6 +382,7 @@ static void herad_apply_mute(OplPlayer *p) {                                    
     OPL3_SetMute(&p->chip, m);
 }
 void opl_set_mute(OplPlayer *p, unsigned mask) {
+    if (p->rp) { unsigned m = 0; for (int c = 0; c < 9; c++) if ((mask >> c) & 1) m |= p->rmask[c]; p->mute = mask; OPL3_SetMute(&p->chip, m); return; }
     if (p->hp) { p->mute = mask; herad_apply_mute(p); return; }
     if (!p->a2 && !p->hp) { p->mute = mask & 0x1FF; OPL3_SetMute(&p->chip, p->mute); return; }
     unsigned m = 0; for (int c = 0; c < p->a2n; c++) if (((mask >> c) & 1) && p->a2map[c] >= 0) m |= 1u << p->a2map[c];     /* AT2 channel -> OPL3 channel */
@@ -391,7 +406,8 @@ int opl_render(OplPlayer *p, int16_t *out, int n) {
             if (p->gold) { float l, r; adgold_process(p->gold, f[0], f[1], &l, &r); l *= GOLD_TRIM; r *= GOLD_TRIM; f[0] = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l); f[1] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : r); } out[2 * (done + i)] = f[0]; out[2 * (done + i) + 1] = f[1];
             if (p->scope) {                                            /* the output of each FM channel, before the (mono) panning */
                 const int16_t *co = OPL3_ChannelOutput(&p->chip); unsigned w = p->scope_pos & (unsigned)(p->scope_len - 1);
-                if (p->hp) { for (int c = 0; c < p->a2n; c++) { unsigned m = herad_channel_mask(p->hp, c); float v = 0; for (int k = 0; k < 18; k++) if ((m >> k) & 1) v += (float)co[k]; p->scope[(size_t)c * p->scope_len + w] = v * (1.0f / 16384.0f); } }
+                if (p->rp) { for (int c = 0; c < 9; c++) { float v = 0; for (int k = 0; k < 18; k++) if ((p->rmask[c] >> k) & 1) v += (float)co[k]; p->scope[(size_t)c * p->scope_len + w] = v * (1.0f / 16384.0f); } }
+                else if (p->hp) { for (int c = 0; c < p->a2n; c++) { unsigned m = herad_channel_mask(p->hp, c); float v = 0; for (int k = 0; k < 18; k++) if ((m >> k) & 1) v += (float)co[k]; p->scope[(size_t)c * p->scope_len + w] = v * (1.0f / 16384.0f); } }
                 else if (p->a2) { for (int c = 0; c < p->a2n; c++) p->scope[(size_t)c * p->scope_len + w] = p->a2map[c] >= 0 ? (float)co[p->a2map[c]] * (1.0f / 16384.0f) : 0.0f; }
                 else for (int c = 0; c < 9; c++) p->scope[(size_t)c * p->scope_len + w] = (float)co[c] * (1.0f / 16384.0f);
                 p->scope_pos++;

@@ -5,7 +5,7 @@ SDL_CFLAGS ?= $(shell sdl2-config --cflags)
 SDL_LIBS   ?= $(shell sdl2-config --libs)
 CFLAGS  += -w -Isrc -Isrc/core -Ibuild $(SDL_CFLAGS)
 LIBS     = $(SDL_LIBS) -lm
-CORE     = $(addprefix src/core/,replay.c mod_load.c s3m_load.c stm_load.c ptm_load.c ult_load.c s669_load.c mtm_load.c asylum_load.c amf_load.c dsm_load.c sfx_load.c ahx.c med_load.c psm_load.c far_load.c mdl_load.c xm_load.c dbm_load.c xm_replay.c it_load.c dtm_load.c opl_replay.c opl/opl3.c ym7128b/YM7128B_emu.c adgold.c a2m_unpack.c a2m_load.c a2m_replay.c herad.c it_replay.c it_unpack.c period.c dmf_load.c dmf_replay.c tfmx_load.c tfmx_replay.c)
+CORE     = $(addprefix src/core/,replay.c mod_load.c s3m_load.c stm_load.c ptm_load.c ult_load.c s669_load.c mtm_load.c asylum_load.c amf_load.c dsm_load.c sfx_load.c ahx.c med_load.c psm_load.c far_load.c mdl_load.c xm_load.c dbm_load.c xm_replay.c it_load.c dtm_load.c opl_replay.c opl/opl3.c ym7128b/YM7128B_emu.c adgold.c a2m_unpack.c a2m_load.c a2m_replay.c herad.c rad.c it_replay.c it_unpack.c period.c dmf_load.c dmf_replay.c tfmx_load.c tfmx_replay.c)
 SRC      = src/main.c src/song.c src/net.c $(CORE)
 PREFIX  ?= /usr/local
 
@@ -40,7 +40,7 @@ clean:
 # WebAssembly-Build (braucht Emscripten und das Kit-Repo 'ngweb' neben diesem Ordner)
 NGWEB ?= ../ngweb
 web: build/version.h
-	$(MAKE) -f $(NGWEB)/ngweb.mk APPDIR=$(CURDIR) NAME=ngPlayer WEB_EXPORTS=_main,_ng_web_add,_ng_web_ma_done,_ng_web_paste,_ng_web_parse_id,_ng_web_size,_ng_web_media HINT="Drop MOD, S3M, STM, PTM, ULT, 669, MTM, MED, PSM, FAR, MDL, DBM, DSM, AMF, SFX, AHX, XM, IT, DMF, DTM, AMD, MAD, A2M, HSQ, SQX, SDB, AGD, HA2 or TFMX files here (TFMX: mdat.* and smpl.* together)" SRC="$(SRC)"
+	$(MAKE) -f $(NGWEB)/ngweb.mk APPDIR=$(CURDIR) NAME=ngPlayer WEB_EXPORTS=_main,_ng_web_add,_ng_web_ma_done,_ng_web_paste,_ng_web_parse_id,_ng_web_size,_ng_web_media HINT="Drop MOD, S3M, STM, PTM, ULT, 669, MTM, MED, PSM, FAR, MDL, DBM, DSM, AMF, SFX, AHX, XM, IT, DMF, DTM, AMD, MAD, A2M, RAD, HSQ, SQX, SDB, AGD, HA2 or TFMX files here (TFMX: mdat.* and smpl.* together)" SRC="$(SRC)"
 
 .PHONY: all install clean FORCE web
 
