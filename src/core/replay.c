@@ -178,7 +178,7 @@ static void trigger_note(XPlayer *p, int chn, Ch *c, const XCell *x){
     else note = x->note;
     if (!c->inst || !note || note >= 0x7f) return;
     { static int ni=-1; if(ni<0) ni=getenv("XNOINS")==NULL;
-      if (ni && s->fmt == 1 && inst_ok && !x->note && c->smp) {
+      if (ni && (s->fmt == 1 || s->s3m_ni) && inst_ok && !x->note && c->smp) {          /* an instrument number without a note: the volume is reset, the sample is not restarted (MOD, and Scream Tracker 3 modules) */
           const XSmp *m0 = &s->smp[c->inst];
           if (m0->vol <= s->maxvol) c->vD8 = c->v44 = m0->vol;
           c->vE8 = c->v44; if (s->fmt == 1 && s->pt_tuning == 2 && m0 != &s->smp[c->smp]) {
