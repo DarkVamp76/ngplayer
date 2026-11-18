@@ -4,6 +4,7 @@
 #include "opl/opl3.h"
 #include "a2m_replay.h"
 #include "herad.h"
+#include "adgold.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -131,8 +132,12 @@ typedef struct {
     int8_t trigger;
 } Chn;
 
+/* The AGD driver sets +4/+6 dB volume, +15 dB bass and +6 dB treble, and the surround adds a boosted wet signal: peaks come out 8 to 10 times the dry FM level.
+ * The Gold output is scaled back to about the level of the plain OPL output (DOSBox has a master compressor for this). */
+#define GOLD_TRIM 0.12f
+
 struct OplPlayer {
-    const OplSong *s; const A2mSong *a2s; A2P *a2; int a2map[20], a2n; const HeradSong *hs; HeradPlayer *hp; opl3_chip chip; int rate;
+    const OplSong *s; const A2mSong *a2s; A2P *a2; int a2map[20], a2n; const HeradSong *hs; HeradPlayer *hp; AdGold *gold; opl3_chip chip; int rate;
     Chn ch[9];
     int speed, del, songend, regbd, ord, rw; unsigned tempo, restartpos;
     int rem; double acc;                 /* output samples left in the current tick, and the fractional remainder carried to the next one */
@@ -322,6 +327,11 @@ OplPlayer *opl_new(const OplSong *s, int rate) {
     p->s = s; p->rate = rate; p->restartpos = 0; reset_player(p);
     return p;
 }
+static void herad_write(void *u, int chip, int reg, int val) {
+    OplPlayer *p = u;
+    if (chip < 2) OPL3_WriteRegBuffered(&p->chip, (uint16_t)((chip << 8) | reg), (uint8_t)val);
+    else if (p->gold) { if (chip == 2) adgold_ctrl(p->gold, reg, val); else adgold_surround(p->gold, reg, val); }
+}
 static void a2_write(void *u, int chip, int reg, int val) { OplPlayer *p = u; OPL3_WriteRegBuffered(&p->chip, (uint16_t)((chip << 8) | reg), (uint8_t)val); }
 OplPlayer *opl_new_a2m(const A2mSong *s, int rate) {
     OplPlayer *p = calloc(1, sizeof *p); if (!p) return NULL;
@@ -335,13 +345,14 @@ OplPlayer *opl_new_a2m(const A2mSong *s, int rate) {
 OplPlayer *opl_new_herad(const HeradSong *s, int rate) {
     OplPlayer *p = calloc(1, sizeof *p); if (!p) return NULL;
     p->hs = s; p->rate = rate; OPL3_Reset(&p->chip, (uint32_t)rate);
-    p->hp = herad_new(s, a2_write, p); if (!p->hp) { free(p); return NULL; }
+    if (s->agd) p->gold = adgold_new(rate);
+    p->hp = herad_new(s, herad_write, p); if (!p->hp) { free(p); return NULL; }
     p->a2n = s->ntracks > (s->agd ? 18 : 9) ? (s->agd ? 18 : 9) : s->ntracks;
     for (int c = 0; c < p->a2n; c++) p->a2map[c] = c;                /* track n plays on FM channel n */
     herad_rewind(p->hp);
     return p;
 }
-void opl_pfree(OplPlayer *p) { if (p && p->a2) a2p_free(p->a2); if (p && p->hp) herad_free_player(p->hp); free(p); }
+void opl_pfree(OplPlayer *p) { if (p && p->a2) a2p_free(p->a2); if (p && p->hp) herad_free_player(p->hp); if (p && p->gold) adgold_free(p->gold); free(p); }
 
 int opl_position(const OplPlayer *p, int *order, int *row, int *speed) {
     if (p->a2) { int pat; return a2p_position(p->a2, order, &pat, row, speed); }
@@ -370,7 +381,8 @@ int opl_render(OplPlayer *p, int16_t *out, int n) {
         }
         int chunk = p->rem > n - done ? n - done : p->rem;
         for (int i = 0; i < chunk; i++) {
-            int16_t f[2]; OPL3_GenerateResampled(&p->chip, f); out[2 * (done + i)] = f[0]; out[2 * (done + i) + 1] = f[1];
+            int16_t f[2]; OPL3_GenerateResampled(&p->chip, f);
+            if (p->gold) { float l, r; adgold_process(p->gold, f[0], f[1], &l, &r); l *= GOLD_TRIM; r *= GOLD_TRIM; f[0] = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l); f[1] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : r); } out[2 * (done + i)] = f[0]; out[2 * (done + i) + 1] = f[1];
             if (p->scope) {                                            /* the output of each FM channel, before the (mono) panning */
                 const int16_t *co = OPL3_ChannelOutput(&p->chip); unsigned w = p->scope_pos & (unsigned)(p->scope_len - 1);
                 if (p->a2 || p->hp) { for (int c = 0; c < p->a2n; c++) p->scope[(size_t)c * p->scope_len + w] = p->a2map[c] >= 0 ? (float)co[p->a2map[c]] * (1.0f / 16384.0f) : 0.0f; }

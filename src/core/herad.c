@@ -225,6 +225,7 @@ HeradSong *herad_load(const uint8_t *buf, size_t len, int *err) {
     unsigned first = rd16(data, size, 2);
     if (first != 0x32 && first != 0x52) { *err = -4; goto fail; }
     s->agd = first == 0x52;
+    if (s->agd && size >= 0x54) memcpy(s->gold, data + 0x34, 32);
     s->speed = (uint16_t)rd16(data, size, 0x32);
     if (s->speed == 0) { *err = -4; goto fail; }
     s->ntracks = 0;
@@ -279,7 +280,13 @@ void herad_rewind(HeradPlayer *p) {
         p->chn[i].program = 0; p->chn[i].playprog = 0; p->chn[i].note = 0; p->chn[i].keyon = 0; p->chn[i].bend = BEND_CENTER; p->chn[i].slide_dur = 0;
     }
     W(p, 0, 1, 32); W(p, 0, 0xBD, 0); W(p, 0, 8, 64);
-    if (s->agd) { W(p, 1, 5, 1); W(p, 1, 4, 0); }
+    if (s->agd) {
+        W(p, 1, 5, 1); W(p, 1, 4, 0);
+        /* what the AGD driver does when it starts a song: stereo processor settings, then the stereo mode and the YM7128B registers stored in the file header */
+        W(p, 2, 4, 0xFE); W(p, 2, 5, 0xFF); W(p, 2, 6, 0xFB); W(p, 2, 7, 0xF7);
+        W(p, 2, 8, s->gold[0]);
+        for (int i = 0; i < 31; i++) W(p, 3, i, s->gold[1 + i]);
+    }
 }
 
 static void set_freq(HeradPlayer *p, int c, int oct, unsigned freq, int on) {
