@@ -51,3 +51,8 @@ unsigned long long song_get_mute(void);
 int song_chan_pan(const Song *s, int ch);                 /* 0 (links) .. 255 (rechts) */
 /* Klartext-Name des Effekts bzw. des Volumenspalten-Effekts; NULL wenn keiner. *is_vol = 1 bei Volumenspalte */
 const char *song_fx_name(const Song *s, const SongCell *c, int *is_vol);
+
+/* ---- Info window: what the file says about itself ---- */
+#define SONG_INFO_LINES 6
+typedef struct { char title[48], format[56], tracker[64], voice_unit[16]; int voices; char extra[SONG_INFO_LINES][88]; int nextra; } SongInfo;
+void song_info(const Song *s, SongInfo *out);
