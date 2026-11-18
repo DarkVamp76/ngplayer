@@ -133,7 +133,7 @@ struct OplPlayer {
     const OplSong *s; opl3_chip chip; int rate;
     Chn ch[9];
     int speed, del, songend, regbd, ord, rw; unsigned tempo, restartpos;
-    double left;                         /* output samples left in the current tick */
+    int rem; double acc;                 /* output samples left in the current tick, and the fractional remainder carried to the next one */
     int ended;
     unsigned mute; float *scope; int scope_len; unsigned scope_pos;
 };
@@ -215,7 +215,7 @@ static int resolve_order(OplPlayer *p) {
 
 static double refresh(const OplPlayer *p) {
     if (p->s->is_mad) return p->s->fixed_refresh;
-    return p->tempo ? (double)p->tempo : 18.2;
+    return p->tempo ? (double)p->tempo : (double)18.2f;      /* the PC timer default, as a float like the reference player */
 }
 
 static void reset_player(OplPlayer *p) {
@@ -332,11 +332,12 @@ unsigned opl_scope_pos(const OplPlayer *p) { return p->scope_pos; }
 int opl_render(OplPlayer *p, int16_t *out, int n) {
     int done = 0;
     while (done < n && !p->ended) {
-        if (p->left <= 0) {
+        if (p->rem <= 0) {                                             /* a new timer tick: the whole samples of its length, the fraction is carried over */
             if (!update(p)) p->ended = 1;
-            p->left += (double)p->rate / refresh(p);
+            p->acc += (double)((float)p->rate / (float)refresh(p)); p->rem = (int)p->acc; p->acc -= p->rem;    /* single precision like the reference player */
+            if (p->rem <= 0) continue;
         }
-        int chunk = (int)p->left; if (chunk < 1) chunk = 1; if (chunk > n - done) chunk = n - done;
+        int chunk = p->rem > n - done ? n - done : p->rem;
         for (int i = 0; i < chunk; i++) {
             int16_t f[2]; OPL3_GenerateResampled(&p->chip, f); out[2 * (done + i)] = f[0]; out[2 * (done + i) + 1] = f[1];
             if (p->scope) {                                            /* the output of each FM channel, before the (mono) panning */
@@ -345,7 +346,7 @@ int opl_render(OplPlayer *p, int16_t *out, int n) {
                 p->scope_pos++;
             }
         }
-        p->left -= chunk; done += chunk;
+        p->rem -= chunk; done += chunk;
     }
     return done;
 }
