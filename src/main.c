@@ -1432,6 +1432,7 @@ static int ma_loading(void);
 /* ---- Random mode (RND): at the end of the Mod Archive list "next" (button, key, lock screen) and the end of a song draw a new random
  * module instead of wrapping around to the first entry. Remembered between runs. ---- */
 static int g_rand;
+static int g_rpt;                          /* repeat (RPT): 0 off, 1 the whole list starts again after its last song, 2 the current song plays endlessly */
 static Uint32 rand_fail_t;                 /* a draw that failed: wait a few seconds before the next try (the song end would retry every frame) */
 static int last_of_group(int i) {
     for (int j = i + 1; j < npl; j++) if ((pl[j].ma_id > 0) == (pl[i].ma_id > 0)) return 0;
@@ -1446,7 +1447,11 @@ static void next_user(int d) {              /* next / previous as the user asks 
     next_prev(d);
 }
 static void song_end_advance(void) {        /* song ended -> next entry (a new random one at the end of the list in random mode) */
-    if (g_ended && cur >= 0 && (npl > 1 || (g_rand && npl == 1 && pl[cur].ma_id > 0))) next_user(1);
+    if (!g_ended || cur < 0 || cur >= npl) return;
+    if (g_rpt == 2) { play_index_sub(cur, g_open_sub); return; }                      /* RPT 1: the same song again */
+    if (g_rpt == 1) { next_prev(1); return; }                                       /* RPT: the next song, after the last one the first (also with a single song) */
+    if (g_rand) { if (npl > 1 || (npl == 1 && pl[cur].ma_id > 0)) next_user(1); return; }
+    if (!last_of_group(cur)) next_prev(1);                                          /* no repeat: the list plays through and stops after its last song */
 }
 static int dice_roll, dice_stop_req;         /* rolling / the module has arrived, stop as soon as the roll was long enough */
 static float dice_t, dice_since, dice_hop, dice_w[3], dice_Rm[3][3] = { {1, 0, 0}, {0, 1, 0}, {0, 0, 1} };   /* orientation + angular velocity */
@@ -1730,6 +1735,8 @@ static void draw_dice_big(float W, float H) {
 #ifdef __EMSCRIPTEN__
 EM_JS(int, web_rand_get, (void), { try { return localStorage.getItem('ngp.random') === '1' ? 1 : 0; } catch (e) { return 0; } });
 EM_JS(void, web_rand_set, (int v), { try { localStorage.setItem('ngp.random', v ? '1' : '0'); } catch (e) {} });
+EM_JS(int, web_rpt_get, (void), { try { var v = parseInt(localStorage.getItem('ngp.repeat') || '0', 10); return v === 1 || v === 2 ? v : 0; } catch (e) { return 0; } });
+EM_JS(void, web_rpt_set, (int v), { try { localStorage.setItem('ngp.repeat', String(v)); } catch (e) {} });
 #endif
 /* RND chip next to the dice: switches the random mode (see next_user) */
 static void draw_rand_chip(float x, float y, float w) {
@@ -1739,10 +1746,29 @@ static void draw_rand_chip(float x, float y, float w) {
     text(x + (w - text_width("RND", 11)) / 2, y + 5.5f, 11, g_rand ? TXT : DIM, "RND");
     if (clicked(x, y, w, h)) {
         g_rand = !g_rand;
+        if (g_rand) g_rpt = 0;                                  /* random and repeat exclude each other */
 #ifdef __EMSCRIPTEN__
-        web_rand_set(g_rand);
+        web_rand_set(g_rand); web_rpt_set(g_rpt);
 #endif
         snprintf(toast_txt, sizeof toast_txt, g_rand ? "Random mode on" : "Random mode off"); toast_t = 1.8f;
+        click = 0;
+    }
+}
+/* RPT chip left of RND: one click repeats the whole list (after the last song the first one follows), the next click repeats the current song
+ * (a small 1 on the chip), the third switches it off. Switching it on switches RND off. */
+static void draw_rpt_chip(float x, float y, float w) {
+    const float h = 22;
+    int hv = hit(x, y, w, h);
+    rrect(x, y, w, h, 7, alpha(g_rpt ? VC[0] : (hv ? VC[2] : EDGE), g_rpt ? 0.32f : 0.30f));
+    text(x + (w - text_width("RPT", 11)) / 2, y + 5.5f, 11, g_rpt ? TXT : DIM, "RPT");
+    if (g_rpt == 2) { rrect(x + w - 9, y - 5, 14, 14, 7, VC[0]); text(x + w - 9 + (14 - text_width("1", 10)) / 2, y - 5 + 1.5f, 10, C(0.02f, 0.05f, 0.1f, 1), "1"); }
+    if (clicked(x, y, w, h)) {
+        g_rpt = (g_rpt + 1) % 3;
+        if (g_rpt) g_rand = 0;
+#ifdef __EMSCRIPTEN__
+        web_rpt_set(g_rpt); web_rand_set(g_rand);
+#endif
+        snprintf(toast_txt, sizeof toast_txt, g_rpt == 1 ? "Repeat: whole list" : g_rpt == 2 ? "Repeat: this song" : "Repeat off"); toast_t = 1.8f;
         click = 0;
     }
 }
@@ -1991,6 +2017,7 @@ static void draw_ui(double t) {
         { char vb[96]; snprintf(vb, sizeof vb, "ngPlayer %s", NGPLAYER_VERSION); text(x + 18, y + h - 28, 11, FAINT, vb); }
         draw_dice(x + w - 44, y + h - 33, 12.5f);
         draw_rand_chip(x + w - 104, y + h - 44, 38);
+        draw_rpt_chip(x + w - 148, y + h - 44, 38);
         if (npl && !nvis) text(x + 18, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
         if (!npl) {
             text(x + 18, y + 60, 14, DIM, "No files.");
@@ -2340,7 +2367,8 @@ static void draw_ui_portrait(float W, float H) {
         else if (g_vmode == 3) draw_scopes(M, cy0 + oh + M, aw, avail - oh - M);
         else if (g_vmode == 2) draw_voxel(M, cy0 + oh + M, aw, avail - oh - M);
         else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
-        draw_rand_chip(M + aw - 56, cy0 + oh + M + (avail - oh - M) - 34, 44);       /* RND in the lower right corner of the pattern / orb card */
+        draw_rand_chip(M + aw - 56, cy0 + oh + M + (avail - oh - M) - 34, 44);
+        draw_rpt_chip(M + aw - 106, cy0 + oh + M + (avail - oh - M) - 34, 44);       /* RND (and RPT left of it) in the lower right corner of the pattern / orb card */
         float vuw = 130, spw = aw - vuw - M;
         if (!nosp) { draw_spectrum(M, sy, spw, sh); draw_level(M + spw + M, sy, vuw, sh); }
     }
@@ -2453,6 +2481,7 @@ static void settings_load(void) {
         else if (sscanf(line, "orb=%d", &v) == 1) g_vmode = v != 0;                  /* older settings files */
         else if (sscanf(line, "view=%d", &v) == 1 && v >= 0 && v <= 3) g_vmode = v;
         else if (sscanf(line, "random=%d", &v) == 1) g_rand = v != 0;
+        else if (sscanf(line, "repeat=%d", &v) == 1) { g_rpt = v == 1 || v == 2 ? v : 0; if (g_rpt) g_rand = 0; }
         else if (sscanf(line, "window_x=%d", &v) == 1) g_win_x = v;
         else if (sscanf(line, "window_y=%d", &v) == 1) g_win_y = v;
     }
@@ -2514,7 +2543,7 @@ static void settings_save(void) {
         SDL_GetWindowPosition(win, &px, &py);
         if ((px || py) && (px & 0xFFFF0000) != 0x2FFF0000 && (px & 0xFFFF0000) != 0x1FFF0000) { g_win_x = px; g_win_y = py; }      /* Wayland has no window position (SDL returns 0,0 or the "centered" flag): then keep the old value */
     }
-    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\nview=%d\nrandom=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_vmode, g_rand ? 1 : 0);
+    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\nview=%d\nrandom=%d\nrepeat=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_vmode, g_rand ? 1 : 0, g_rpt);
     fclose(f);
 }
 #endif
@@ -3115,7 +3144,7 @@ int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
     g_mobile = EM_ASM_INT({ return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 1 : 0; });
     web_media_setup();
-    g_rand = web_rand_get();
+    g_rand = web_rand_get(); g_rpt = web_rpt_get(); if (g_rpt) g_rand = 0;
     emscripten_async_call(bg_tick, NULL, 400);
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
