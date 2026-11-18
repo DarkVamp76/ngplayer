@@ -1,5 +1,5 @@
 # usage: python3 tools/bake_card3d.py DIR_WITH_GLB_FILES > src/card3d_data.h   (needs numpy and Pillow)
-# DIR must hold gus_ultrasound_rev34.glb (GF1) and gus_pnp_v30.glb (InterWave); output goes to the file given as second argument
+# DIR must hold gus_ultrasound_rev34.glb (GF1), gus_pnp_v30.glb (InterWave), ews64.glb and adlib_gold.glb; output goes to the file given as second argument
 import os,sys,io,numpy as np
 sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
 from glb import *
@@ -208,10 +208,10 @@ def make_back_generic(tag,comps,board,fingers,pal,lines):
     pimg=Image.new('P',(1,1));pimg.putpalette([c for col in pal for c in col]+[0]*(768-3*len(pal)))
     return np.asarray(im.quantize(palette=pimg,dither=Image.Dither.NONE)).astype(np.uint8)
 
-def bake_ews(tag,glb,texw):
+def bake_ews(tag,glb,texw,part_names=('cap_dark','chip_black','plastic_white','plastic_black','metal','pcb_green'),lines=('EWS64','AUDIOSYSTEM'),auto_outline=False):
     j,b=load(U+glb)
     def tr(P): return np.column_stack([P[:,0],-P[:,2],P[:,1]])          # card coordinates: x, y = -z, z = up (a proper rotation)
-    V=[];VC=[];I=[];pal=[];TV=[];TUV=[];TI=[];comps=[];fingers=[];board=None
+    V=[];VC=[];I=[];pal=[];TV=[];TUV=[];TI=[];comps=[];fingers=[];board=None;outline=[]
     names=[n.get('name') for n in j['nodes']]
     for ni,n in enumerate(j['nodes']):
         m=j['meshes'][n['mesh']];pr=m['primitives'][0];at=pr['attributes']
@@ -227,11 +227,13 @@ def bake_ews(tag,glb,texw):
             for k in range(len(P)): V.append(P[k]);VC.append(pal.index(col))
             I+=[base+int(i) for i in ia]
             cps=components(P,ia.astype(int))
-            if names[ni] in ('pcb_bottom',): board=(P[:,0].min(),P[:,1].min(),P[:,0].max(),P[:,1].max())
+            if names[ni] in ('pcb_bottom',):
+                board=(P[:,0].min(),P[:,1].min(),P[:,0].max(),P[:,1].max())
+                outline=[(lo[0],lo[1],hi[0],hi[1]) for lo,hi in cps]                  # the rectangles of the board bottom (the main part and the connector strip)
             elif names[ni]=='gold':
                 for lo,hi in cps:                                              # the edge connector fingers: thin pieces lying on the board
                     if hi[2]<=1.7 and lo[2]>=1.5 and (hi[1]-lo[1])>3: fingers.append((lo[0],lo[1],hi[0],hi[1]))
-            elif names[ni] in ('cap_dark','chip_black','plastic_white','plastic_black','metal','pcb_green'):
+            elif names[ni] in part_names:
                 comps+= [(lo,hi) for lo,hi in cps if hi[2]>1.7]
     V=np.array(V);TV=np.array(TV);TUV=np.array(TUV,dtype=np.float64)
     allp=np.vstack([V,TV]);lo=allp.min(0);hi=allp.max(0)
@@ -240,9 +242,10 @@ def bake_ews(tag,glb,texw):
     img_bv=j['bufferViews'][j['images'][0]['bufferView']];img=Image.open(io.BytesIO(b[img_bv.get('byteOffset',0):img_bv.get('byteOffset',0)+img_bv['byteLength']])).convert('RGB')
     th=int(round(texw*img.height/img.width));img=img.resize((texw,th),Image.LANCZOS)
     a=np.asarray(img).astype(np.uint16);t565=((a[:,:,0]>>3)<<11)|((a[:,:,1]>>2)<<5)|(a[:,:,2]>>3)
-    bimg=make_back_generic(tag,comps,board,fingers,PAL_EWS,('EWS64','AUDIOSYSTEM'))
+    bimg=make_back_generic(tag,comps,board,fingers,PAL_EWS,lines)
     # the back picture: the board outline (the part with fingers is narrower) as two quads
     bq=[(board[0],-43.2,board[2],board[3]),(-36.6,board[1],board[2],-43.2)]       # the board outline: the main part and the strip with the edge connector
+    if auto_outline: bq=outline                                                      # other boards: the rectangles of their own bottom
     bv=[];buv=[];bi=[]
     for (x0,y0,x1,y1) in bq:
         base=len(bv)
@@ -263,4 +266,6 @@ def bake_ews(tag,glb,texw):
 
 out='/* 3D models of the Gravis Ultrasound (GF1, rev 3.4) and Ultrasound PnP (AMD InterWave) cards and the Terratec EWS64. GPL-3.0-or-later */\n#include <stdint.h>\n'
 out+=bake('GF1','gus_ultrasound_rev34.glb',320)+bake('IW','gus_pnp_v30.glb',320)+bake_ews('EWS','ews64.glb',320)
+if os.path.exists(U+'adlib_gold.glb'):                                       # the AdLib Gold card (Yamaha OPL3): the FM formats
+    out+=bake_ews('GOLD','adlib_gold.glb',320,('cap_silver','cap_gold','chip_black','plastic_white','plastic_black','metal'),('ADLIB GOLD','1000 MUSIC CARD'),True)
 open(sys.argv[2] if len(sys.argv)>2 else 'src/card3d_data.h','w').write(out);print(len(out)//1024,'KB')
