@@ -6,6 +6,7 @@
 #include "herad.h"
 #include "adgold.h"
 #include "rad.h"
+#include "lds.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -138,7 +139,7 @@ typedef struct {
 #define GOLD_TRIM 0.12f
 
 struct OplPlayer {
-    const OplSong *s; const A2mSong *a2s; A2P *a2; int a2map[20], a2n; const HeradSong *hs; HeradPlayer *hp; AdGold *gold; const RadSong *rs; RadPlayer *rp; unsigned rmask[9]; opl3_chip chip; int rate;
+    const OplSong *s; const A2mSong *a2s; A2P *a2; int a2map[20], a2n; const HeradSong *hs; HeradPlayer *hp; AdGold *gold; const RadSong *rs; RadPlayer *rp; unsigned rmask[9]; const LdsSong *ls; LdsPlayer *lp; opl3_chip chip; int rate;
     Chn ch[9];
     int speed, del, songend, regbd, ord, rw; unsigned tempo, restartpos;
     int rem; double acc;                 /* output samples left in the current tick, and the fractional remainder carried to the next one */
@@ -225,6 +226,7 @@ static double refresh(const OplPlayer *p) {
     if (p->a2) return (double)a2p_refresh(p->a2);
     if (p->hp) return HERAD_REFRESH;
     if (p->rp) return (double)p->rs->hertz;
+    if (p->lp) return lds_player_refresh(p->lp);
     if (p->s->is_mad) return p->s->fixed_refresh;
     return p->tempo ? (double)p->tempo : (double)18.2f;      /* the PC timer default, as a float like the reference player */
 }
@@ -243,6 +245,7 @@ static int update(OplPlayer *p) {
     if (p->a2) return a2p_update(p->a2);
     if (p->hp) return herad_update(p->hp);
     if (p->rp) return rad_update(p->rp);
+    if (p->lp) return lds_update(p->lp);
     const OplSong *s = p->s; int pattbreak = 0, pattern_delay = 0;
     if (!p->speed) return 0;
     for (int c = 0; c < 9; c++) {
@@ -365,12 +368,20 @@ OplPlayer *opl_new_rad(const RadSong *s, int rate) {
     for (int c = 0; c < 9; c++) p->rmask[c] = s->use_opl3 ? m3[c] : 1u << c;       /* a RAD channel plays on two OPL3 channels in version 2 */
     return p;
 }
-void opl_pfree(OplPlayer *p) { if (p && p->rp) rad_free_player(p->rp); if (p && p->a2) a2p_free(p->a2); if (p && p->hp) herad_free_player(p->hp); if (p && p->gold) adgold_free(p->gold); free(p); }
+static void lds_write(void *u, int reg, int val) { OplPlayer *p = u; OPL3_WriteRegBuffered(&p->chip, (uint16_t)reg, (uint8_t)val); }
+OplPlayer *opl_new_lds(const LdsSong *s, int rate) {
+    OplPlayer *p = calloc(1, sizeof *p); if (!p) return NULL;
+    p->ls = s; p->rate = rate; OPL3_Reset(&p->chip, (uint32_t)rate);
+    p->lp = lds_new(s, lds_write, p); if (!p->lp) { free(p); return NULL; }
+    return p;                                                        /* nine OPL2 channels: scope and mute work like for AMD */
+}
+void opl_pfree(OplPlayer *p) { if (p && p->lp) lds_free_player(p->lp); if (p && p->rp) rad_free_player(p->rp); if (p && p->a2) a2p_free(p->a2); if (p && p->hp) herad_free_player(p->hp); if (p && p->gold) adgold_free(p->gold); free(p); }
 
 int opl_position(const OplPlayer *p, int *order, int *row, int *speed) {
     if (p->a2) { int pat; return a2p_position(p->a2, order, &pat, row, speed); }
     if (p->hp) return herad_position(p->hp, order, row);
     if (p->rp) return rad_position(p->rp, order, row, speed);
+    if (p->lp) return lds_position(p->lp, order, row, speed);
     if (order) *order = p->ord;
     if (row) *row = p->rw;
     if (speed) *speed = p->speed;

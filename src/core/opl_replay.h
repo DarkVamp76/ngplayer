@@ -28,6 +28,7 @@ OplPlayer *opl_new(const OplSong *s, int rate);
 struct A2mSong; OplPlayer *opl_new_a2m(const struct A2mSong *s, int rate);   /* Adlib Tracker 2: OPL3, 18 channels */
 struct HeradSong; OplPlayer *opl_new_herad(const struct HeradSong *s, int rate);   /* HERAD: OPL2, or OPL3 with 18 channels for AGD */
 struct RadSong; OplPlayer *opl_new_rad(const struct RadSong *s, int rate);       /* Reality ADlib Tracker: OPL2 (version 1) or OPL3 (version 2) */
+struct LdsSong; OplPlayer *opl_new_lds(const struct LdsSong *s, int rate);       /* LOUDNESS Sound System: OPL2, 9 channels */
 void opl_pfree(OplPlayer *p);
 int opl_render(OplPlayer *p, int16_t *out, int nframes);      /* 0 at the end of the song */
 int opl_position(const OplPlayer *p, int *order, int *row, int *speed);
