@@ -2307,14 +2307,15 @@ static void draw_ui_portrait(float W, float H) {
             if (song_subsongs(g_song) > 1) { snprintf(b, sizeof b, "SONG %d/%d", song_subsong(g_song) + 1, song_subsongs(g_song)); cx += chip(cx, cy, b, VC[2], 1); }
             {   /* the sound card (the turning 3D model), lower right of the title card between the badges and the time column */
                 float k = fminf(fmaxf(aw / 410.0f, 1.0f), 1.6f), unit = chips_width(1.0f);              /* both cards get about the same width: the wide Ultrasound is made lower */
-                float chh = 54 * k;
+                float chh = fminf(54 * k, hh - 14);                                                    /* never higher than the title card allows, however wide the window is */
                 if (unit > 0 && unit * chh > 96 * k) chh = 96 * k / unit;
                 float chw = chips_width(chh), rightE = M + aw - 60, x0 = rightE - chw;                  /* narrow: may cover part of the time while it turns */
                 float tl = M + 16 + fmaxf(text_width(title, tsize), text_width(sub, 13)), tr = M + aw - 16 - text_width(tb, 28);
                 if (cx > tl) tl = cx;
                 if (tr - tl >= 40) { x0 = 0.5f * (tl + tr) - chw / 2; if (x0 < tl + 4) x0 = tl + 4; }   /* centred between the title and the time; on a phone it may reach into the time, not into the title */
                 else if (x0 < cx + 6) x0 = cx + 6;                                          /* a very long title: lower right, may cover part of the time */
-                if (chw > 0 && x0 + chw <= M + aw - 6) draw_chips(x0, chip_kind() == 0 ? hy + hh / 2 - chh / 2 : hy + 16 + (54 * k - chh) / 2, chh);   /* the Paula chip in the middle of the card, the cards as before */
+                if (chw > 0 && x0 + chw <= M + aw - 6) { static const float lift[5] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f };               /* the same lift per model as in the landscape header */
+                    draw_chips(x0, chip_kind() == 0 ? hy + hh / 2 - chh / 2 : hy + (hh - chh) / 2 - lift[chip_kind()] * chh, chh); }   /* centred in the title card at every width */
             }
         }
     }
