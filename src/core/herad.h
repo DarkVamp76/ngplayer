@@ -41,4 +41,6 @@ HeradPlayer *herad_new(const HeradSong *s, HeradWrite wr, void *user);
 void herad_free_player(HeradPlayer *p);
 void herad_rewind(HeradPlayer *p);                                  /* resets the chip registers the player owns and restarts the song */
 int herad_update(HeradPlayer *p);                                   /* one tick at 200.299 Hz; 0 at the end of the song */
+int herad_channel(const HeradPlayer *p, int track);                 /* OPL3 channel (0..17) a track plays on now, -1 = none; AGD voices move between channels */
+unsigned herad_channel_mask(const HeradPlayer *p, int track);       /* all OPL3 channels the track uses (two for a 4-operator voice) as a bit mask */
 int herad_position(const HeradPlayer *p, int *measure, int *tick);   /* measure = tick / 96, tick within the measure; the tick counts like the HeradEv ticks */
