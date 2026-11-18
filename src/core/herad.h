@@ -23,6 +23,7 @@ typedef struct HeradSong {
     uint32_t total_ticks;          /* length of the longest track in ticks, including a trailing delay */
     uint32_t last_tick;            /* tick of the last event of any track */
     HeradEv *ev[HERAD_MAX_TRACKS]; int nev[HERAD_MAX_TRACKS];
+    uint8_t gold[32];              /* AGD: header bytes 0x34..0x53 - the stereo switch function byte, then the 31 YM7128B registers */
 } HeradSong;
 
 int herad_probe(const uint8_t *buf, size_t len);                    /* 1 = the data look like a HERAD file (compressed or not) */
@@ -33,6 +34,7 @@ void herad_free(HeradSong *s);
 typedef struct { int note_kind, note, vel, prog, bend, touch; } HeradCell;
 void herad_cell(const HeradSong *s, int track, uint32_t tick, HeradCell *c);
 
+/* chip 0 / 1: OPL3 bank, 2: AdLib Gold control register (4 volume L, 5 volume R, 6 bass, 7 treble, 8 switch functions), 3: YM7128B surround register */
 typedef void (*HeradWrite)(void *user, int chip, int reg, int val);
 typedef struct HeradPlayer HeradPlayer;
 HeradPlayer *herad_new(const HeradSong *s, HeradWrite wr, void *user);
