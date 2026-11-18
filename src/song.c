@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <strings.h>
 
 extern void ngp_it_tables_init(void);
@@ -50,8 +51,57 @@ struct Song {
     int nsub, cursub;       /* TFMX: Anzahl echter Subsongs, aktueller (0-basiert) */
     char title[40];
     const char *fmt;
+    char tracker[64];             /* the tracker that wrote the file, as far as the header tells (Info window) */
     int nch, nord;
 };
+
+
+/* ---- Info window: which tracker wrote the file, read from the header while the file is still in memory ---- */
+static void trim_copy(char *dst, size_t cap, const uint8_t *src, size_t n) {
+    size_t k = 0; while (k < n && k + 1 < cap && src[k] >= 32 && src[k] < 127) { dst[k] = (char)src[k]; k++; }
+    while (k > 0 && dst[k - 1] == ' ') k--;
+    dst[k] = 0;
+}
+static void detect_tracker(Song *s, const uint8_t *b, long n) {
+    char *t = s->tracker; const char *f = s->fmt; t[0] = 0;
+    if (!strcmp(f, "XM") && n >= 58 && !memcmp(b, "Extended Module: ", 17)) trim_copy(t, 64, b + 38, 20);
+    else if (!strcmp(f, "S3M") && n > 0x2A) {
+        unsigned v = b[0x28] | (b[0x29] << 8), mj = (v >> 8) & 15;
+        switch (v >> 12) {
+        case 1: snprintf(t, 64, "Scream Tracker %u.%02x", mj, v & 0xFF); break;
+        case 2: snprintf(t, 64, "Imago Orpheus %u.%02x", mj, v & 0xFF); break;
+        case 3: snprintf(t, 64, "Impulse Tracker %u.%02x", mj, v & 0xFF); break;
+        case 4: snprintf(t, 64, "Schism Tracker"); break;
+        case 5: snprintf(t, 64, "OpenMPT"); break;
+        case 6: snprintf(t, 64, "BeRoTracker"); break;
+        case 7: snprintf(t, 64, "CreamTracker"); break;
+        default: snprintf(t, 64, "Scream Tracker compatible"); break;
+        }
+    } else if (!strcmp(f, "IT") && s->it) {
+        unsigned v = (unsigned)s->it->cwt, mj = (v >> 8) & 15;
+        if (v == 0x0888 || v == 0x0889) snprintf(t, 64, "OpenMPT (1.18 or later)");
+        else switch (v >> 12) {
+        case 0: snprintf(t, 64, "Impulse Tracker %u.%02x", mj, v & 0xFF); break;
+        case 1: snprintf(t, 64, "Schism Tracker"); break;
+        case 5: snprintf(t, 64, "OpenMPT"); break;
+        case 6: snprintf(t, 64, "BeRoTracker"); break;
+        case 7: snprintf(t, 64, "ITMCK"); break;
+        default: snprintf(t, 64, "Impulse Tracker compatible"); break;
+        }
+    } else if (!strcmp(f, "MOD") && n >= 1084) {
+        const uint8_t *m = b + 1080;
+        if (!memcmp(m, "M.K.", 4) || !memcmp(m, "M!K!", 4)) snprintf(t, 64, "ProTracker compatible (%.4s)", (const char *)m);
+        else if (!memcmp(m, "FLT", 3)) snprintf(t, 64, "Startrekker (%.4s)", (const char *)m);
+        else if (!memcmp(m, "OKTA", 4) || !memcmp(m, "CD81", 4)) snprintf(t, 64, "Oktalyzer / Atari (%.4s)", (const char *)m);
+        else if ((m[1] == 'C' && m[2] == 'H' && m[3] == 'N') || (m[2] == 'C' && m[3] == 'H')) snprintf(t, 64, "FastTracker II / TakeTracker (%.4s)", (const char *)m);
+        else snprintf(t, 64, "Soundtracker compatible");
+    } else if (!strcmp(f, "MOD")) snprintf(t, 64, "Soundtracker (15 samples)");
+    else if (!strcmp(f, "RAD") && n > 16) snprintf(t, 64, "Reality ADlib Tracker %d.%d", b[16] >> 4, b[16] & 15);
+    else if (!strcmp(f, "A2M") && s->a2s) snprintf(t, 64, "Adlib Tracker 2 (file version %d)", s->a2s->ffver);
+    else if (!strcmp(f, "HERAD") && s->hs) snprintf(t, 64, "HERAD System (Cryo)");
+    else if (!strcmp(f, "AMD")) snprintf(t, 64, "AMUSIC Adlib Tracker");
+    else if (!strcmp(f, "MAD")) snprintf(t, 64, "Mlat Adlib Tracker (Mad Tracker 2)");
+}
 
 /* TFMX braucht zwei Dateien (mdat.X + smpl.X oder X.tfx + X.sam); liefert 0 bei Erfolg */
 static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
@@ -329,6 +379,7 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
             s->xp = xplay_new(&s->xs, rate);
         }
     }
+    if (!r) detect_tracker(s, b, n);
     free(b);
     if (r || (!s->xp && !s->xxp && !s->ip && !s->dp && !s->tp && !s->ap && !s->op)) {
         snprintf(err, errcap, "unsupported or damaged module (%d)", r);
@@ -804,4 +855,89 @@ const char *song_fx_name(const Song *s, const SongCell *c, int *is_vol) {
     switch (v) { case 'a': case 'b': return "VolCol Fine Slide"; case 'c': case 'd': return "VolCol Slide"; case 'e': case 'f': return "VolCol Porta";
                  case 'g': return "VolCol Tone Porta"; case 'h': return "VolCol Vibrato"; case 'p': return "VolCol Set Pan"; }
     return "VolCol";
+}
+
+/* ---- Info window ---- */
+static const struct { const char *f, *name, *tracker; } FMT_INFO[] = {
+    { "MOD", "Amiga module", "" }, { "S3M", "Scream Tracker 3 module", "" }, { "XM", "Extended module", "" }, { "IT", "Impulse Tracker module", "" },
+    { "STM", "Scream Tracker 2 module", "Scream Tracker 2" }, { "PTM", "PolyTracker module", "PolyTracker" }, { "ULT", "UltraTracker module", "UltraTracker" },
+    { "669", "Composer 669 / UNIS 669", "Composer 669" }, { "MTM", "MultiTracker module", "MultiTracker" }, { "MED", "OctaMED module (MMD0-3)", "OctaMED" },
+    { "PSM", "Epic MegaGames PSM", "Protracker Studio (Epic MegaGames)" }, { "FAR", "Farandole Composer module", "Farandole Composer" },
+    { "MDL", "DigiTrakker module", "DigiTrakker" }, { "DMF", "X-Tracker module", "X-Tracker" }, { "TFMX", "TFMX song (mdat + smpl)", "TFMX (Chris Huelsbeck)" },
+    { "AMF", "AMF module", "DSMI / Asylum Music Format" }, { "SFX", "SoundFX module", "SoundFX" }, { "AHX", "AHX module", "AHX (Abyss' Highest eXperience)" },
+    { "DBM", "DigiBooster Pro module", "DigiBooster Pro" }, { "DSM", "DSIK module", "DSIK (Digital Sound Interface Kit)" }, { "DTM", "Digital Tracker module", "Digital Tracker (Atari Falcon030)" },
+    { "AMD", "AMUSIC module", "AMUSIC Adlib Tracker" }, { "MAD", "Mlat Adlib Tracker module", "Mlat Adlib Tracker" }, { "A2M", "Adlib Tracker 2 module", "Adlib Tracker 2" },
+    { "HERAD", "Herbulot AdLib System tune", "HERAD System (Cryo)" }, { "RAD", "Reality ADlib Tracker tune", "Reality ADlib Tracker" }, { NULL, NULL, NULL } };
+
+static void info_add(SongInfo *o, const char *fmt, ...) {
+    if (o->nextra >= SONG_INFO_LINES) return;
+    va_list ap; va_start(ap, fmt); vsnprintf(o->extra[o->nextra], sizeof o->extra[0], fmt, ap); va_end(ap); o->nextra++;
+}
+static void info_samples(SongInfo *o, int n8, int n16, int stereo) {
+    if (n8 + n16 == 0) return;
+    char b[64] = ""; if (n16 && n8) snprintf(b, sizeof b, "%d x 16-bit, %d x 8-bit", n16, n8); else if (n16) snprintf(b, sizeof b, "all 16-bit"); else snprintf(b, sizeof b, "all 8-bit");
+    if (stereo) { size_t l = strlen(b); snprintf(b + l, sizeof b - l, ", %d stereo", stereo); }
+    info_add(o, "Samples: %d (%s)", n8 + n16, b);
+}
+
+void song_info(const Song *s, SongInfo *o) {
+    memset(o, 0, sizeof *o);
+    snprintf(o->title, sizeof o->title, "%s", s->title);
+    int k = -1; for (int i = 0; FMT_INFO[i].f; i++) if (!strcmp(FMT_INFO[i].f, s->fmt)) { k = i; break; }
+    snprintf(o->format, sizeof o->format, "%s (%s)", k >= 0 ? FMT_INFO[k].name : "Module", s->fmt);
+    snprintf(o->tracker, sizeof o->tracker, "%s", s->tracker[0] ? s->tracker : k >= 0 && FMT_INFO[k].tracker[0] ? FMT_INFO[k].tracker : "unknown");
+    o->voices = s->nch; snprintf(o->voice_unit, sizeof o->voice_unit, "%s", s->kind == K_OPL ? "FM voices" : "channels");
+    if (s->kind == K_OPL) {
+        if (s->a2s) {
+            info_add(o, "Chip: OPL3 (YMF262), 18 FM channels, 4-operator capable");
+            info_add(o, "%d instruments, %d patterns", s->a2s->instrinfo.count, s->a2s->eventsinfo.patterns);
+            info_add(o, "Two effects per cell, instrument macros, arpeggio and vibrato tables");
+        } else if (s->hs) {
+            info_add(o, "File: %s, version %d%s", s->hs->agd ? "AGD (AdLib Gold)" : "SDB / HSQ (AdLib)", s->hs->v2 ? 2 : 1, s->hs->comp == 1 ? ", HSQ packed" : s->hs->comp == 2 ? ", SQX packed" : "");
+            if (s->hs->agd) { info_add(o, "Chip: OPL3 (YMF262), 18 voices"); info_add(o, "Instrument panning, 4-operator instruments"); info_add(o, "AdLib Gold: YM7128B surround, TDA8425 stereo"); }
+            else info_add(o, "Chip: OPL2 (YM3812), 9 voices");
+            int n4 = 0; for (int i = 0; i < s->hs->ninst; i++) if (s->hs->agd && (int8_t)s->hs->inst[i][0] == 4) n4++;
+            info_add(o, "%d instruments%s, %d tracks", s->hs->ninst, n4 ? " (some with 4 operators)" : "", s->hs->ntracks);
+        } else if (s->rd) {
+            if (s->rd->use_opl3) info_add(o, "Chip: OPL3 (YMF262), 9 channels, 4-operator instruments");
+            else info_add(o, "Chip: OPL2 (YM3812), 9 channels");
+            int riffs = 0; for (int i = 0; i < s->rd->ninst; i++) if (s->rd->inst[i].riff) riffs++;
+            info_add(o, "%d instruments%s, %d patterns", s->rd->ninst, riffs ? ", with instrument riffs" : "", s->rd->ntracks);
+            info_add(o, "Update rate %.1f Hz, initial speed %d", s->rd->hertz, s->rd->speed);
+        } else if (s->os) {
+            info_add(o, "Chip: OPL2 (YM3812), 9 FM voices");
+            info_add(o, "%d instruments, %d patterns, %d orders", s->os->ninst, s->os->nop, s->os->length);
+        }
+        return;
+    }
+    if (s->kind == K_IT && s->it) {
+        const ITSong *it = s->it; int n8 = 0, n16 = 0, st = 0;
+        for (int i = 1; i <= it->nsmp; i++) { if (!it->smp[i].len) continue; if (it->smp[i].is16) n16++; else n8++; if (it->smp[i].data2) st++; }
+        info_samples(o, n8, n16, st);
+        if (it->ninst > 0) info_add(o, "%d instruments", it->ninst);
+        info_add(o, "%d orders, %d patterns", it->nord, it->npat);
+        info_add(o, "Speed %d, tempo %d, %s frequency table", it->speed, it->tempo, (it->flags & 8) ? "linear" : "Amiga");
+    } else if (s->kind == K_DMF && s->dm) {
+        const DMFSong *d = s->dm; int n8 = 0, n16 = 0;
+        for (int i = 1; i <= d->nsmp; i++) { if (!d->smp[i].len) continue; if (d->smp[i].is16) n16++; else n8++; }
+        info_samples(o, n8, n16, 0);
+        info_add(o, "%d orders, %d patterns", d->nord, d->npat);
+        if (d->composer[0]) info_add(o, "Composer: %s", d->composer);
+    } else if (s->kind == K_TFMX && s->tf) {
+        info_add(o, "Paula, 4 voices (Amiga), 8-bit samples");
+        info_add(o, "%d patterns, %d macros, %s", s->tf->npat, s->tf->nmac, s->tf->pal ? "PAL" : "NTSC");
+        if (s->nsub > 1) info_add(o, "%d subsongs", s->nsub);
+    } else if (s->kind == K_AHX) {
+        info_add(o, "Synthesised on the Paula model: 4 voices, no samples");
+    } else {                                                  /* MOD, S3M, XM and the formats played through them */
+        const XSong *x = &s->xs; int n8 = 0, n16 = 0;
+        if (s->kind == K_XM) { for (int i = 0; i < x->nxsmp; i++) { if (!x->xsmp[i].len) continue; if (x->xsmp[i].is16) n16++; else n8++; } }
+        else for (int i = 1; i < 100; i++) { if (!x->smp[i].len) continue; if (x->smp[i].is16) n16++; else n8++; }
+        info_samples(o, n8, n16, 0);
+        if (s->kind == K_XM && x->ninst > 0) info_add(o, "%d instruments, %s frequency table", x->ninst, x->linear ? "linear" : "Amiga");
+        info_add(o, "%d orders, %d patterns", x->nord, x->npat);
+        info_add(o, "Speed %d, tempo %d", x->speed, x->tempo);
+        if (x->amiga) info_add(o, "Amiga module: Paula low-pass filter");
+        if (x->echo) info_add(o, "Echo DSP in use");
+    }
 }

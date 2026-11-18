@@ -435,7 +435,7 @@ static int ctx_idx = -1; static float ctx_x, ctx_y;        /* context menu ("Sha
 static float toast_t; static char toast_txt[48];
 #define CTX_W 120.0f
 #define CTX_ROW 30.0f
-static int ctx_n(int idx) { return idx >= 0 && idx < npl && pl[idx].ma_id ? 3 : 1; }      /* MA entries: Share, Info, Remove; local files: Remove */
+static int ctx_n(int idx) { return idx >= 0 && idx < npl && pl[idx].ma_id ? 4 : 2; }      /* MA entries: Share, Info (the Mod Archive page), Specs, Remove; local files: Specs, Remove */
 #define CTX_H(idx) (ctx_n(idx) * CTX_ROW + 2.0f)
 static int hit(float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; }
 static int clicked(float x, float y, float w, float h) { return click && clickx >= x && clickx < x + w && clicky >= y && clicky < y + h; }
@@ -1267,25 +1267,23 @@ static void chip_dip(float x, float y, float h, float beat) {            /* Paul
 }
 /* Which chip: 0 = Paula (TFMX, AHX, SoundFX, MOD and MED up to 4 channels), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices),
  * 4 = the AdLib Gold card (the FM formats, Yamaha OPL3) */
-static int chip_kind(void) {
-    const char *f = song_format(g_song);
-    int n = song_channels(g_song);
+static int chip_kind_of(const char *f, int n) {
     if (!strcmp(f, "AMD") || !strcmp(f, "MAD") || !strcmp(f, "A2M") || !strcmp(f, "HERAD") || !strcmp(f, "RAD")) return 4;
     if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || !strcmp(f, "SFX") || ((!strcmp(f, "MOD") || !strcmp(f, "MED")) && n <= 4)) return 0;     /* the Amiga formats that run on the four Paula voices */
     return n > 32 ? 3 : (n >= 15 ? 2 : 1);
 }
+static int chip_kind(void) { return chip_kind_of(song_format(g_song), song_channels(g_song)); }
 #include "card3d.inc"
-static float chips_width(float h) {                       /* Breite des Chipbereichs (0 = keiner) */
-    if (!g_song) return 0;
-    int k = chip_kind();
+static float chips_width_k(int k, float h) {
     if (k == 0) return 5.0f * h * 0.5f;                            /* Paula: a flat strip (5:1), at half height */
     return 1.12f * h * c3_box_aspect(k - 1);                       /* the rotating 3D sound card */
 }
-static void draw_chips(float x, float y, float h) {
-    if (!g_song) return;
-    int k = chip_kind();
-    float beat = g_paused ? 0.0f : g_beat;
-    float cw = chips_width(h), sc = 1.0f + 0.07f * beat;
+static float chips_width(float h) {                       /* Breite des Chipbereichs (0 = keiner) */
+    if (!g_song) return 0;
+    return chips_width_k(chip_kind(), h);
+}
+static void draw_chip_k(int k, float x, float y, float h, float beat) {
+    float cw = chips_width_k(k, h), sc = 1.0f + 0.07f * beat;
     float gx = x + cw / 2, gy = y + h / 2;
     if (beat > 0.01f) {                                   /* Glow hinter dem Chip */
         set_additive(1);
@@ -1296,6 +1294,10 @@ static void draw_chips(float x, float y, float h) {
     float xx = x - (cw * sc - cw) / 2, yy = y - (hh - h) / 2;
     if (k == 0) chip_dip(xx, yy + hh * 0.25f, hh * 0.5f, beat);            /* the chip is half as high as the slot: centred in it */
     else { float b = 1.0f + 0.30f * beat; tex_quad(c3_texture(k - 1), xx, yy + hh * 0.57f - hh * 0.56f, cw * sc, hh * 1.12f, C(b, b, b, 1)); }
+}
+static void draw_chips(float x, float y, float h) {
+    if (!g_song) return;
+    draw_chip_k(chip_kind(), x, y, h, g_paused ? 0.0f : g_beat);
 }
 /* XTC-style water ripples behind the logo: one source per channel, amplitude follows the channel level */
 static void logo_waves(float x, float y, float w, float h) {
@@ -1936,6 +1938,7 @@ static void draw_ma_dialog(double t) {
 }
 
 static void draw_ui_portrait(float W, float H);
+static void draw_specs_chip(float x, float y);
 static void draw_ui(double t) {
     (void)t;
     float W = view_w, H = view_h;
@@ -2065,11 +2068,13 @@ static void draw_ui(double t) {
             snprintf(sub, sizeof sub, TAGLINE);
         }
         float chh = hh - 14, chw = chips_width(chh);      /* Soundchip-Grafik zwischen Titel und Zeit */
-        float tmax = haw - 200 - (chw > 0 ? chw + 20 : 0);
+        float tmax = haw - 200 - (chw > 0 ? chw + 20 : 0) - (g_song ? 30 : 0);
         float tsize = 26;
         while (tsize > 18 && text_width(title, tsize) > tmax) tsize -= 2;
         fit_text(title, tmax, tsize);
         text(ax + 22, hy + 10, tsize, TXT, title);
+        float ichip = ax + 22 + text_width(title, tsize) + 12;                  /* the Specs button right of the title */
+        if (g_song) draw_specs_chip(ichip, hy + 10 + tsize * 0.5f - 11);
         fit_text(sub, tmax, 14);
         if (!g_error[0]) text(ax + 22, hy + 14 + tsize + 2, 14, DIM, sub);
         float bend = ax + 22;                              /* right end of the badges, for centring the card */
@@ -2103,6 +2108,7 @@ static void draw_ui(double t) {
         }
         if (chw > 0) {                                     /* the sound card sits in the middle between the title / badges and the time */
             float tl = ax + 22 + fmaxf(text_width(title, tsize), text_width(sub, 14)), tr = ax + haw - 22 - rw;
+            if (ichip + 28 > tl) tl = ichip + 28;
             if (bend > tl) tl = bend;
             float x0 = 0.5f * (tl + tr) - chw / 2;
             if (x0 < tl + 8) x0 = tl + 8;
@@ -2311,11 +2317,13 @@ static void draw_ui_portrait(float W, float H) {
             snprintf(title, sizeof title, "ngPlayer");
             snprintf(sub, sizeof sub, TAGLINE);
         }
-        float tmax = aw - 32 - 96;
+        float tmax = aw - 32 - 96 - (g_song ? 30 : 0);
         float tsize = 22;
         while (tsize > 15 && text_width(title, tsize) > tmax) tsize -= 1;
         fit_text(title, tmax, tsize);
         text(M + 16, hy + 10, tsize, TXT, title);
+        float ichip = M + 16 + text_width(title, tsize) + 10;                   /* the Specs button right of the title */
+        if (g_song) draw_specs_chip(ichip, hy + 10 + tsize * 0.5f - 11);
         fit_text(sub, tmax, 13);
         if (g_error[0]) text(M + 16, hy + 14 + tsize, 12, WARN, g_error);
         else text(M + 16, hy + 14 + tsize, 13, DIM, sub);
@@ -2339,6 +2347,7 @@ static void draw_ui_portrait(float W, float H) {
                 if (unit > 0 && unit * chh > 96 * k) chh = 96 * k / unit;
                 float chw = chips_width(chh), rightE = M + aw - 60, x0 = rightE - chw;                  /* narrow: may cover part of the time while it turns */
                 float tl = M + 16 + fmaxf(text_width(title, tsize), text_width(sub, 13)), tr = M + aw - 16 - text_width(tb, 28);
+                if (ichip + 28 > tl) tl = ichip + 28;
                 if (cx > tl) tl = cx;
                 if (tr - tl >= 40) { x0 = 0.5f * (tl + tr) - chw / 2; if (x0 < tl + 4) x0 = tl + 4; }   /* centred between the title and the time; on a phone it may reach into the time, not into the title */
                 else if (x0 < cx + 6) x0 = cx + 6;                                          /* a very long title: lower right, may cover part of the time */
@@ -2879,10 +2888,67 @@ static void info_open(int idx) {
     SDL_OpenURL(url);
 #endif
 }
+
+/* ---- Specs window: the 3D sound card as the head, then title, tracker, voices and the technical details of the file ---- */
+static int specs_just, specs_test; static int specs_on, specs_kind = -1; static SongInfo specs_info; static char specs_label[128];
+static void specs_fill(const Song *s, const char *label) {
+    song_info(s, &specs_info);
+    snprintf(specs_label, sizeof specs_label, "%s", specs_info.title[0] ? specs_info.title : label);
+    specs_kind = chip_kind_of(song_format(s), song_channels(s)); specs_on = 1;
+}
+static void specs_show_entry(int idx) {                  /* any entry of the list: the playing one, else the file is opened just for its header */
+    if (idx < 0 || idx >= npl) return;
+    if (idx == cur && g_song) { specs_fill(g_song, pl[idx].label); return; }
+    char err[160]; Song *t = song_open(pl[idx].path, 44100, err, sizeof err);
+    if (!t) { snprintf(toast_txt, sizeof toast_txt, "Specs not available"); toast_t = 2.0f; return; }
+    specs_fill(t, pl[idx].label); song_close(t);
+}
+static void specs_geom(float *x, float *y, float *w, float *h) {
+    float chh = view_h - 24 < 440 ? 84.0f : 110.0f;
+    float need = 14 + chh * 1.12f + 10 + 36 + 12 + 3 * 26 + 6 + 12 + specs_info.nextra * 22 + 52;     /* the window is as high as its content */
+    *w = view_w - 24 < 540 ? view_w - 24 : 540; *h = need < view_h - 24 ? need : view_h - 24;
+    *x = (view_w - *w) / 2; *y = (view_h - *h) / 2;
+}
+/* the small "i" next to the title: opens the Specs of the playing song */
+static void draw_specs_chip(float x, float y) {
+    const float d = 22;
+    int hv = hit(x, y, d, d);
+    rrect(x, y, d, d, d / 2, alpha(specs_on || hv ? VC[0] : EDGE, specs_on ? 0.45f : 0.32f));
+    text(x + (d - text_width("i", 14)) / 2, y + 3.5f, 14, specs_on || hv ? TXT : DIM, "i");
+    if (clicked(x, y, d, d)) { if (specs_on) specs_on = 0; else if (g_song && cur >= 0) { specs_fill(g_song, pl[cur].label); specs_just = 1; } click = 0; }
+}
+static void draw_specs_window(void) {
+    if (!specs_on) return;
+    float x, y, w, h; specs_geom(&x, &y, &w, &h);
+    rect(0, 0, view_w, view_h, C(0, 0, 0, 0.62f));
+    card(x, y, w, h, 0);
+    float chh = view_h - 24 < 440 ? 84.0f : 110.0f, cw = chips_width_k(specs_kind, chh);
+    draw_chip_k(specs_kind, x + (w - cw) / 2, y + 14, chh, 0.0f);
+    float cx = x + w - 38, cy = y + 14; int hv = hit(cx, cy, 24, 24);            /* close button */
+    rrect(cx, cy, 24, 24, 12, alpha(hv ? WARN : EDGE, hv ? 0.5f : 0.35f));
+    text(cx + (24 - text_width("x", 15)) / 2, cy + 3.5f, 15, hv ? TXT : DIM, "x");
+    float ty = y + 14 + chh * 1.12f + 10;
+    char title[128]; snprintf(title, sizeof title, "%s", specs_label); fit_text(title, w - 56, 22);
+    text(x + 28, ty, 22, TXT, title);
+    ty += 36; rect(x + 28, ty, w - 56, 1, alpha(EDGE, 0.5f)); ty += 12;
+    char vb[64]; snprintf(vb, sizeof vb, "%d %s", specs_info.voices, specs_info.voice_unit);
+    const char *lab[3] = { "TRACKER", "FORMAT", "VOICES" }, *val[3] = { specs_info.tracker, specs_info.format, vb };
+    for (int i = 0; i < 3; i++) {
+        text(x + 28, ty + 2, 11, FAINT, lab[i]);
+        char v[96]; snprintf(v, sizeof v, "%s", val[i]); fit_text(v, w - 56 - 96, 14);
+        text(x + 28 + 96, ty, 14, TXT, v); ty += 26;
+    }
+    ty += 6; rect(x + 28, ty, w - 56, 1, alpha(EDGE, 0.5f)); ty += 12;
+    for (int i = 0; i < specs_info.nextra; i++) {
+        char v[96]; snprintf(v, sizeof v, "%s", specs_info.extra[i]); fit_text(v, w - 56, 13);
+        text(x + 28, ty, 13, i == 0 ? VC[0] : DIM, v); ty += 22;
+    }
+    text(x + 28, y + h - 28, 11, FAINT, "Esc or a click outside closes");
+}
 static void draw_ctx_menu(void) {
     if (ctx_idx >= 0 && ctx_idx < npl) {
-        static const char *const item[3] = { "Share", "Info", "Remove" };
-        int n = ctx_n(ctx_idx), off = 3 - n;           /* local files only show the last item (Remove) */
+        static const char *const item[4] = { "Share", "Info", "Specs", "Remove" };
+        int n = ctx_n(ctx_idx), off = 4 - n;           /* local files only show the last two items (Specs, Remove) */
         rrect(ctx_x - 1, ctx_y - 1, CTX_W + 2, CTX_H(ctx_idx) + 2, 9, alpha(EDGE, 0.9f));
         rrect(ctx_x, ctx_y, CTX_W, CTX_H(ctx_idx), 8, CARDHI);
         for (int j = 0; j < n; j++) {
@@ -2931,7 +2997,8 @@ static void iter(void) {
                 switch (e.key.keysym.sym) {
                 case SDLK_o: ma_show(1); break;
                 case SDLK_v: { int t = 0; for (int k = 0; k < 4; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % 4]; } break;
-                case SDLK_ESCAPE: running = 0; break;
+                case SDLK_ESCAPE: if (specs_on) specs_on = 0; else running = 0; break;
+                case SDLK_i: if (specs_on) specs_on = 0; else if (g_song && cur >= 0) { specs_fill(g_song, pl[cur].label); specs_just = 1; } break;
                 case SDLK_SPACE: g_paused = !g_paused; break;
                 case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) > 0) play_index_sub(cur, song_subsong(g_song) - 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
                 case SDLK_RIGHT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0++; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) + 1 < song_subsongs(g_song)) play_index_sub(cur, song_subsong(g_song) + 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) + 1); break;
@@ -2992,12 +3059,24 @@ static void iter(void) {
         if (ctx_idx >= 0 && click) {                         /* click on the open menu: copy the link; any click closes it */
             float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;     /* touch: current pointer (the event coordinates are not reliable on iOS) */
             if (cmx >= ctx_x && cmx < ctx_x + CTX_W && cmy >= ctx_y && cmy < ctx_y + CTX_H(ctx_idx) && ctx_idx < npl) {
-                int j = (int)((cmy - ctx_y - 1) / CTX_ROW) + 3 - ctx_n(ctx_idx);          /* 0 Share, 1 Info, 2 Remove */
-                if (j == 0) share_link(ctx_idx); else if (j == 1) info_open(ctx_idx); else if (j == 2) pl_remove(ctx_idx);
+                int j = (int)((cmy - ctx_y - 1) / CTX_ROW) + 4 - ctx_n(ctx_idx);          /* 0 Share, 1 Info, 2 Specs, 3 Remove */
+                if (j == 0) share_link(ctx_idx); else if (j == 1) info_open(ctx_idx); else if (j == 2) specs_show_entry(ctx_idx); else if (j == 3) pl_remove(ctx_idx);
             }
             ctx_idx = -1; click = 0; lp_swallow = 1;
         }
         if (rclick && ctx_idx >= 0) ctx_idx = -1;
+        if (specs_on && !specs_just) {                       /* the Specs window is modal: it takes every click */
+            if (click) {
+                float sx, sy, sw, sh; specs_geom(&sx, &sy, &sw, &sh);
+                float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;
+                int inside = cmx >= sx && cmx < sx + sw && cmy >= sy && cmy < sy + sh;
+                int on_x = cmx >= sx + sw - 38 && cmx < sx + sw - 14 && cmy >= sy + 14 && cmy < sy + 38;
+                if (!inside || on_x) specs_on = 0;
+                click = 0; lp_swallow = 1;
+            }
+            rclick = 0;
+        }
+        specs_just = 0;
 
         Uint64 now = SDL_GetPerformanceCounter();
         double dt = (double)(now - tlast) / freq;
@@ -3011,6 +3090,7 @@ static void iter(void) {
         if (!shot) song_end_advance();
 
         if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
+        if (specs_on && specs_kind > 0 && (!g_song || specs_kind != chip_kind())) card3d_frame(specs_kind - 1, dw, dh);      /* the card of the Specs window, if it is another model */
         g_vpw = dw; g_vph = dh;
         glViewport(0, 0, dw, dh);
         glClearColor(BG0.r, BG0.g, BG0.b, 1);
@@ -3023,7 +3103,9 @@ static void iter(void) {
         glBindTexture(GL_TEXTURE_2D, fonttex);
         ma_poll();
         draw_ui((double)(now - t0) / freq);
+        if (specs_test && g_song && cur >= 0 && frame > 20) { specs_fill(g_song, pl[cur].label); specs_test = 0; }
         draw_ma_dialog((double)(now - t0) / freq);
+        draw_specs_window();
         draw_dice_big(view_w, view_h);
         draw_ctx_menu();
         set_additive(0);
@@ -3149,6 +3231,7 @@ int main(int argc, char **argv) {
     emscripten_async_call(bg_tick, NULL, 400);
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
+    if (getenv("NGPLAYER_TEST_SPECS")) specs_test = 1;       /* test hook: open the Specs window of the first song */
     if (getenv("NGPLAYER_TEST_PLOPEN")) g_plopen = 1;        /* test hook: playlist overlay open (phone layout) */
     if (getenv("NGPLAYER_TEST_ORB")) g_vmode = 1;                  /* test hook: orb view */
     if (getenv("NGPLAYER_TEST_SCOPES")) g_vmode = 3;               /* test hook: scopes view */
