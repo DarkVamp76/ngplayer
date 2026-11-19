@@ -1052,14 +1052,23 @@ static void draw_overview(float x, float y, float w, float h) {
     if (nch > 64) nch = 64;
     int cols = overview_cols(nch), rows = (nch + cols - 1) / cols;
     float rh = g_portrait ? 16.0f : (cols == 1 ? 17.0f : 15.0f), fs = cols == 1 ? 12.0f : 11.0f;
+    {   /* the card may be shorter than the list wants (low window): more columns first, then slightly tighter rows, so that no row runs out of the card */
+        const float rhmin = 12.5f, room = h - 48.0f;
+        int maxc = 4;                                       /* in the narrow layout too: a fourth column is better than a smaller pattern */
+        while (cols < maxc && rows * rhmin > room) { cols++; rows = (nch + cols - 1) / cols; }
+        if (cols > 1 && rh == (g_portrait ? 16.0f : 17.0f)) rh = g_portrait ? 16.0f : 15.0f;
+        if (rows * rh > room) { rh = room / rows; if (rh < rhmin) rh = rhmin; }
+        if (cols > 1) fs = 11.0f;
+    }
     text(x + 18, y + 10, 12, DIM, "CHANNELS");
     float cwid = (w - 36) / cols;
     float panw = cwid * 0.17f; if (panw < 54) panw = 54; if (panw > 150) panw = 150;
     float barw = cwid * 0.26f; if (barw < 64) barw = 64; if (barw > 300) barw = 300;
-    if (g_portrait) barw = cwid * (cols == 1 ? 0.55f : 0.48f);
+    if (g_portrait) barw = cwid * (cols == 1 ? 0.55f : (cols == 2 ? 0.48f : (cols == 3 ? 0.42f : 0.34f)));
     for (int c = 0; c < nch; c++) {
         int col_i = c / rows, row_i = c % rows;
         float cx = x + 18 + col_i * cwid, cy = y + 32 + row_i * rh;
+        if (cy + rh > y + h - 2) continue;                    /* never draw outside the card */
         col lc = VC[c % 3];
         /* Nummer */
         char nb[8]; snprintf(nb, sizeof nb, "%02d", c + 1);
@@ -2239,6 +2248,10 @@ static void draw_ui(double t) {
     float cy0 = hy + hh + M;
     float oh = g_song ? overview_height(song_channels(g_song) > 64 ? 64 : song_channels(g_song)) : 60.0f;
     float avail = sy - M - cy0;
+    int nosp = 0;
+    if (g_song && song_channels(g_song) > 8 && avail - oh - M < 190) {      /* many voices and the height runs out: drop spectrum and level, the room goes to channels + pattern */
+        nosp = 1; sh = 0; sy = by; avail = sy - M - cy0;
+    }
     if (avail - oh - M < 190) oh = avail - M - 190;
     view_update();
     overview_update((float)g_dt);
@@ -2249,8 +2262,7 @@ static void draw_ui(double t) {
     else draw_pattern(ax, cy0 + oh + M, aw, avail - oh - M);
     if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "PTM") || !strcmp(song_format(g_song), "ULT") || !strcmp(song_format(g_song), "669") || !strcmp(song_format(g_song), "MED") || !strcmp(song_format(g_song), "PSM") || !strcmp(song_format(g_song), "IT") || !strcmp(song_format(g_song), "AMD") || !strcmp(song_format(g_song), "RAD"));
     float vuw = 300, spw = aw - vuw - M;
-    draw_spectrum(ax, sy, spw, sh);
-    draw_level(ax + spw + M, sy, vuw, sh);
+    if (!nosp) { draw_spectrum(ax, sy, spw, sh); draw_level(ax + spw + M, sy, vuw, sh); }
 
     /* ---------------- Transport */
     {
@@ -2480,8 +2492,13 @@ static void draw_ui_portrait(float W, float H) {
     float botH = BOT + (has_seek ? SEEK_ROW : 0);
     float by = H - M - botH, sh = nosp ? 0 : 96, sy = nosp ? by : by - M - sh, cy0 = hy + hh + M;
     float oh = g_song ? overview_height(song_channels(g_song) > 64 ? 64 : song_channels(g_song)) : 60.0f;
+    if (g_song && nosp && song_channels(g_song) >= 36) {   /* 36 voices or more: only the channels are shown, so spectrum and level may stay when the whole list still fits above them */
+        float sy2 = by - M - 96.0f;
+        if (oh <= sy2 - M - cy0) { nosp = 0; sh = 96; sy = sy2; }
+    }
     float avail = sy - M - cy0;
-    if (avail - oh - M < 150) oh = avail - M - 150;   /* channel list keeps priority, the pattern may shrink */
+    int novis = 0;                                    /* many voices and the height runs out: only the channels, no visualisation, the whole room goes to the list */
+    if ((g_song && song_channels(g_song) >= 36) || avail - oh - M < 150) { novis = 1; oh = avail; }       /* 36 voices or more: always only the channels */
     if (oh < 40) oh = 40;
     view_update();
     overview_update((float)g_dt);
@@ -2491,12 +2508,15 @@ static void draw_ui_portrait(float W, float H) {
     } else {
         draw_overview(M, cy0, aw, oh);
         draw_seal(M + aw - 12, cy0 + 6, 21, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
-        if (g_vmode == 1) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
-        else if (g_vmode == 3) draw_scopes(M, cy0 + oh + M, aw, avail - oh - M);
-        else if (g_vmode == 2) draw_voxel(M, cy0 + oh + M, aw, avail - oh - M);
-        else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
-        draw_rand_chip(M + aw - 56, cy0 + oh + M + (avail - oh - M) - 34, 44);
-        draw_rpt_chip(M + aw - 106, cy0 + oh + M + (avail - oh - M) - 34, 44);       /* RND (and RPT left of it) in the lower right corner of the pattern / orb card */
+        if (!novis) {
+            if (g_vmode == 1) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
+            else if (g_vmode == 3) draw_scopes(M, cy0 + oh + M, aw, avail - oh - M);
+            else if (g_vmode == 2) draw_voxel(M, cy0 + oh + M, aw, avail - oh - M);
+            else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
+        }
+        float chy = novis ? cy0 + oh - 34 : cy0 + oh + M + (avail - oh - M) - 34;   /* without the visualisation the chips sit in the lower right corner of the channels card */
+        draw_rand_chip(M + aw - 56, chy, 44);
+        draw_rpt_chip(M + aw - 106, chy, 44);       /* RND (and RPT left of it) in the lower right corner of the pattern / orb card */
         float vuw = 130, spw = aw - vuw - M;
         if (!nosp) { draw_spectrum(M, sy, spw, sh); draw_level(M + spw + M, sy, vuw, sh); }
     }
