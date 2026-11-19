@@ -5,7 +5,7 @@
 
 typedef struct {
     uint8_t inst, note, vol;                 /* note: 0 keine, 1..108 Note, 129..236 gepuffert, 255 Cut */
-    uint8_t has;                             /* Bit0 inst, 1 note, 2 vol, 3 Instrument-Fx, 4 Noten-Fx, 5 Volumen-Fx (wie im Format) */
+    uint8_t has;                             /* flag bits as in the file: 0x40 inst, 0x20 note, 0x10 vol, 0x08 instrument fx, 0x04 note fx, 0x02 volume fx */
     uint8_t ie_cmd, ie_par, ne_cmd, ne_par, ve_cmd, ve_par;
 } DMFCell;
 

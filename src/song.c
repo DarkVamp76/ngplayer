@@ -700,14 +700,16 @@ void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
     } else if (s->kind == K_DMF) {
         if (pattern >= s->dm->npat || row >= s->dm->pat[pattern].nrows || ch >= 32) return;
         const DMFCell *x = &s->dm->pat[pattern].cell[(size_t)row * 32 + ch];
-        if (x->has & 2) {
+        /* the flag bits of DMFCell.has as the loader sets them: 0x40 instrument, 0x20 note, 0x10 volume, 0x08 instrument effect, 0x04 note effect, 0x02 volume effect */
+        if (x->has & 0x20) {
             if (x->note == 255) strcpy(t.note, "^^^");
-            else { int nn = x->note >= 129 ? x->note - 128 : x->note; put_note(t.note, nn - 1); t.has_note = 1; }
+            else { int nn = x->note >= 129 ? x->note - 128 : x->note; put_note(t.note, nn - 1); }
+            t.has_note = 1;
         }
-        if (x->has & 1) { t.inst[0] = hexc(x->inst >> 4); t.inst[1] = hexc(x->inst); }
-        if (x->has & 4) { int v = (x->vol + 2) / 4; t.vol[0] = 'v'; t.vol[1] = (char)('0' + v / 10 % 10); t.vol[2] = (char)('0' + v % 10); t.volclass = 1; }
-        else if ((x->has & 32) && (x->ve_cmd || x->ve_par)) { t.vol[0] = (char)('a' + (x->ve_cmd + 25) % 26); t.vol[1] = hexc(x->ve_par >> 4); t.vol[2] = hexc(x->ve_par); t.volclass = (x->ve_cmd == 7 || x->ve_cmd == 8 || x->ve_cmd == 9) ? 3 : 1; }
-        if ((x->has & 16) && (x->ne_cmd || x->ne_par)) { fx3(t.fx, fxc(x->ne_cmd), x->ne_par); t.fxclass = (x->ne_cmd >= 3 && x->ne_cmd <= 7) ? 2 : 5; }
+        if (x->has & 0x40) { t.inst[0] = hexc(x->inst >> 4); t.inst[1] = hexc(x->inst); }
+        if (x->has & 0x10) { int v = (x->vol + 2) / 4; t.vol[0] = 'v'; t.vol[1] = (char)('0' + v / 10 % 10); t.vol[2] = (char)('0' + v % 10); t.volclass = 1; }
+        else if ((x->has & 2) && (x->ve_cmd || x->ve_par)) { t.vol[0] = (char)('a' + (x->ve_cmd + 25) % 26); t.vol[1] = hexc(x->ve_par >> 4); t.vol[2] = hexc(x->ve_par); t.volclass = (x->ve_cmd == 7 || x->ve_cmd == 8 || x->ve_cmd == 9) ? 3 : 1; }
+        if ((x->has & 4) && (x->ne_cmd || x->ne_par)) { fx3(t.fx, fxc(x->ne_cmd), x->ne_par); t.fxclass = (x->ne_cmd >= 3 && x->ne_cmd <= 7) ? 2 : 5; }
         else if ((x->has & 8) && (x->ie_cmd || x->ie_par)) { fx3(t.fx, fxc(x->ie_cmd), x->ie_par); t.fxclass = 5; }
     } else if (s->kind == K_IT) {
         if (pattern >= s->it->npat || !s->it->pat[pattern] || row >= s->it->rows[pattern] || ch >= 64) return;
