@@ -32,7 +32,10 @@ static void set_timing(DMFPlayer *p){
     for (speed = 255; speed >= 1; speed--) { tempo = tickspeed * speed / 48; if (tempo >= 32 && tempo <= 255) break; }
     if (speed < 1) { speed = 1; tempo = tickspeed / 48; if (tempo < 32) tempo = 32; if (tempo > 255) tempo = 255; }
     p->speed = speed; p->tempo = tempo;
-    p->tick_len = p->rate * 2.5 / tempo;
+    /* The tempo is tickspeed * speed / 48, a fraction (e.g. 211.875). Truncating it to a whole number made every tick up to 0.4 % too long;
+     * the original X-PLAY (measured in DOSBox, SB16) keeps the fraction. Out of the 32..255 range (clamped) the clamped whole tempo is used. */
+    double texact = (double)tickspeed * speed / 48.0;
+    p->tick_len = p->rate * 2.5 / ((texact >= 32.0 && texact <= 255.0) ? texact : (double)tempo);
 }
 
 static double note_step(const DMFSmp *m, int note, int rate){
@@ -213,7 +216,8 @@ int dmp_render(DMFPlayer *p, int16_t *out, int nframes){
                 do_row(p);
                 if (p->done) break;
             }
-            int n = (int)p->tick_len; if (n < 1) n = 1;   /* wie libopenmpt: ganze Samples je Tick */
+            double tl = p->tick_len + p->acc; int n = (int)tl; if (n < 1) n = 1;   /* whole samples per tick, the remainder is carried to the next tick */
+            p->acc = tl - n; if (p->acc < 0) p->acc = 0;
             tick_fx(p, p->tick); gen_tick(p, n); p->tick++;
         }
         int k = p->tlen - p->toff; if (k > nframes - done) k = nframes - done;
