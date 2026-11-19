@@ -2856,6 +2856,18 @@ EM_JS(void, web_media_update, (const char *title, const char *artist, const char
     if (a) { if (playing) { var p = a.play(); if (p && p.then) p.then(Module.ngMediaHandlers).catch(function () {}); } else a.pause(); }
     if (Module.ngMediaHandlers) Module.ngMediaHandlers();
 });
+/* The artist of a Mod Archive module (ma.php?info=<id>, from the XML API; the key stays on the server). Asked once per ID; the answer goes to ng_web_ma_info. */
+EM_JS(void, web_ma_info, (int id), {
+    Module.ngMaInfo = Module.ngMaInfo || {};
+    if (Module.ngMaInfo[id] !== undefined) return;
+    Module.ngMaInfo[id] = '';
+    try {
+        fetch((window.NGWEB_MA_URL || 'ma.php') + '?info=' + id).then(function (r) { return r.status === 200 ? r.json() : null; }).then(function (j) {
+            var a = j && j.artist ? String(j.artist) : '';
+            Module.ccall('ng_web_ma_info', null, ['number', 'string'], [id, a]);
+        }).catch(function () {});
+    } catch (e) {}
+});
 /* The cover drawn for the current song: RGBA pixels from the GL read-back (bottom row first) -> opaque JPEG data URL -> artwork of the metadata,
  * but only when the song is still the one it was drawn for. A data URL, not a blob URL: it is just an image address for the system. */
 EM_JS(void, web_media_set_cover, (const unsigned char *px, int w, int h, int gen), {
@@ -2991,6 +3003,18 @@ static void probe_start(int idx) {
 /* ---- The cover of the current song (Media Session: lock screen, CarPlay): drawn off screen with the player's own 2D renderer, 600 x 600:
  * a background gradient and glow in an accent colour taken from the title, the sound card of the song (the same picture as in the header,
  * front on), the title in at most two big lines and "ngPlayer". Only a few big things: the cover is small in a car. */
+/* Artists of Mod Archive modules (from web_ma_info): a small ring of (ID, name); an empty name means "none known". */
+static struct { int id; char name[64]; } ma_art[32]; static int ma_art_n;
+EMSCRIPTEN_KEEPALIVE void ng_web_ma_info(int id, const char *artist) {
+    int k = ma_art_n++ & 31;
+    ma_art[k].id = id; snprintf(ma_art[k].name, sizeof ma_art[k].name, "%s", artist ? artist : "");
+}
+static const char *ma_artist_of(int id) {            /* NULL = not answered yet */
+    for (int i = 0; i < 32; i++) if (ma_art[i].id == id) return ma_art[i].name;
+    return NULL;
+}
+static char g_cover_by[64];                          /* the artist shown on the cover ("by ...") */
+
 #define COVER_PX 600
 static GLuint cv_fbo, cv_tex;
 static unsigned char cv_buf[COVER_PX * COVER_PX * 4];
@@ -3040,9 +3064,11 @@ static void cover_render(int dw, int dh) {
         const char *r = title + cut; while (*r == ' ') r++;
         snprintf(l2, sizeof l2, "%s", r); fit_text(l2, maxw, fs);
     }
-    float ty = l2[0] ? 392 : 420;
+    char byl[80] = ""; if (g_cover_by[0]) { snprintf(byl, sizeof byl, "by %s", g_cover_by); fit_text(byl, maxw, 32); }
+    float ty = l2[0] ? (byl[0] ? 372 : 392) : (byl[0] ? 396 : 420);
     text((COVER_PX - text_width(l1, fs)) / 2, ty, fs, TXT, l1);
     if (l2[0]) text((COVER_PX - text_width(l2, fs)) / 2, ty + 58, fs, TXT, l2);
+    if (byl[0]) text((COVER_PX - text_width(byl, 32)) / 2, ty + (l2[0] ? 124 : 66), 32, DIM, byl);
     rect(250, 530, 100, 4, alpha(acc, 0.9f));
     text((COVER_PX - text_width("ngPlayer", 26)) / 2, 548, 26, acc, "ngPlayer");
     flush();
@@ -3057,7 +3083,17 @@ static void media_sync(void) {
     const char *t = (cur >= 0 && cur < npl) ? pl[cur].label : "ngPlayer";
     int now = g_song && !g_paused && !g_ended;
     char artist[96] = "", album[96] = "";          /* the tracker the module was made with, and format and number of channels (CarPlay and the lock screen show these) */
-    if (g_song) { header_sub(artist, sizeof artist); snprintf(album, sizeof album, "%s \xc2\xb7 %d channels", song_format(g_song), song_channels(g_song)); }
+    char by[64] = "";
+    if (g_song) {
+        header_sub(artist, sizeof artist); snprintf(album, sizeof album, "%s \xc2\xb7 %d channels", song_format(g_song), song_channels(g_song));
+        int mid = (cur >= 0 && cur < npl) ? pl[cur].ma_id : 0;
+        if (mid > 0) {                                  /* a Mod Archive song: its artist (once the answer is there) instead of the tracker */
+            static int asked = -1; if (mid != asked) { asked = mid; web_ma_info(mid); }
+            const char *a = ma_artist_of(mid);
+            if (a && a[0]) { snprintf(artist, sizeof artist, "%s", a); snprintf(by, sizeof by, "%s", a); }
+        }
+    }
+    snprintf(g_cover_by, sizeof g_cover_by, "%s", by);
     int kind = g_song ? chip_kind() : 0; static int mk = -1;
     int newsong = strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb) || kind != mk;
     int changed = now != mp || newsong;
