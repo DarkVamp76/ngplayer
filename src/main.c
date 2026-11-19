@@ -3359,7 +3359,14 @@ static void ipc_poll(void) {
 /* iOS: the lock screen / CarPlay. Title, artist (the tracker) and position go to Now Playing when something changed (and every 15 s); the remote commands
  * (0 play, 1 pause, 2 next, 3 previous) are picked up here. While the app is in the background nothing is drawn (iOS does not allow OpenGL there), the
  * audio, the song change and this sync go on. */
-static int g_bg;
+static volatile int g_bg;
+/* called by SDL on the main thread the moment iOS says so (before the event queue): from WILLENTERBACKGROUND on no OpenGL call may follow */
+static int ios_bg_watch(void *ud, SDL_Event *e) {
+    (void)ud;
+    if (e->type == SDL_APP_WILLENTERBACKGROUND || e->type == SDL_APP_DIDENTERBACKGROUND) g_bg = 1;
+    else if (e->type == SDL_APP_DIDENTERFOREGROUND) g_bg = 0;
+    return 0;
+}
 static void ios_media_sync(void) {
     int c; while ((c = ios_media_poll()) >= 0) {
         if (c == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; }
@@ -3390,8 +3397,8 @@ static void iter(void) {
             switch (e.type) {
             case SDL_QUIT: running = 0; break;
 #if defined(__APPLE__) && TARGET_OS_IPHONE
-            case SDL_APP_DIDENTERBACKGROUND: g_bg = 1; break;
-            case SDL_APP_WILLENTERFOREGROUND: g_bg = 0; break;
+            case SDL_APP_WILLENTERBACKGROUND: case SDL_APP_DIDENTERBACKGROUND: g_bg = 1; break;
+            case SDL_APP_DIDENTERFOREGROUND: g_bg = 0; break;
 #endif
             case SDL_MOUSEBUTTONDOWN:
                 if (e.button.button == SDL_BUTTON_RIGHT) { rclick = 1; rclickx = (int)e.button.x; rclicky = (int)e.button.y; }
@@ -3623,6 +3630,7 @@ int main(int argc, char **argv) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS)) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     ios_media_setup();
+    SDL_AddEventWatch(ios_bg_watch, NULL);
 #endif
 #ifdef NG_GLES
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
