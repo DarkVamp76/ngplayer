@@ -2840,12 +2840,12 @@ EM_JS(void, web_media_setup, (void), {
     window.addEventListener('touchend', kick, true);
     window.addEventListener('click', kick, true);
 });
-EM_JS(void, web_media_update, (const char *title, const char *artist, const char *album, int playing), {
+EM_JS(void, web_media_update, (const char *title, const char *artist, const char *album, int kind, int playing), {
     if (!('mediaSession' in navigator)) return;
     var ms = navigator.mediaSession;
-    /* artwork: the site icon as an opaque full-bleed square (/icon-512.png). iOS rounds the artwork itself and paints transparent areas
+    /* artwork: a cover per sound card (/covers/card-1..5.png, opaque 600 x 600: the card, its name and "ngPlayer"), the site icon (/icon-512.png) as an opaque full-bleed square when there is no song. iOS rounds the artwork itself and paints transparent areas
      * white, so rounded corners in the image itself show up as white slivers. Without any artwork it takes the 180 px apple-touch-icon. */
-    try { ms.metadata = new MediaMetadata({ title: UTF8ToString(title), artist: UTF8ToString(artist) || 'ngPlayer', album: UTF8ToString(album) || 'ngplayer.org', artwork: [{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }] }); } catch (e) {}
+    try { ms.metadata = new MediaMetadata({ title: UTF8ToString(title), artist: UTF8ToString(artist) || 'ngPlayer', album: UTF8ToString(album) || 'ngplayer.org', artwork: kind > 0 ? [{ src: '/covers/card-' + kind + '.png', sizes: '600x600', type: 'image/png' }] : [{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }] }); } catch (e) {}
     ms.playbackState = playing ? 'playing' : 'paused';
     Module.ngMediaWant = !!playing;
     var a = Module.ngMediaEl;
@@ -2975,8 +2975,9 @@ static void media_sync(void) {
     int now = g_song && !g_paused && !g_ended;
     char artist[96] = "", album[96] = "";          /* the tracker the module was made with, and format and number of channels (CarPlay and the lock screen show these) */
     if (g_song) { header_sub(artist, sizeof artist); snprintf(album, sizeof album, "%s \xc2\xb7 %d channels", song_format(g_song), song_channels(g_song)); }
-    int changed = now != mp || strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb);
-    if (changed) { mp = now; snprintf(mt, sizeof mt, "%s", t); snprintf(ma, sizeof ma, "%s", artist); snprintf(mb, sizeof mb, "%s", album); web_media_update(mt, ma, mb, now); }
+    int kind = g_song ? chip_kind() : 0; static int mk = -1;
+    int changed = now != mp || strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb) || kind != mk;
+    if (changed) { mp = now; mk = kind; snprintf(mt, sizeof mt, "%s", t); snprintf(ma, sizeof ma, "%s", artist); snprintf(mb, sizeof mb, "%s", album); web_media_update(mt, ma, mb, kind, now); }
     {   /* progress: push on every change, when the length became known, after a jump (seek) and every 15 s */
         double pos = (double)g_frames / g_rate, rate = now ? 1.0 : 0.0;
         Uint32 tn = SDL_GetTicks();
