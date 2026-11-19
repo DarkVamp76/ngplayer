@@ -62,7 +62,12 @@ static Song *g_song;
 static int g_paused, g_ended;
 static float g_vol = 0.8f;
 static volatile unsigned long long g_frames;
+static float g_lag_ms = 46.0f;                 /* A/V sync: how long the picture is held back behind the rendered sound (iOS: the latency of the output route) */
 static float ringL[RING], ringR[RING];
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+#define DRING 262144                           /* iOS: 5.9 s of the output, so that the analysis can be delayed by the latency of the route (AirPlay: about 2 s) */
+static float dringL[DRING], dringR[DRING];
+#endif
 static volatile unsigned ringpos;
 static float peakL, peakR;
 static char g_error[160];
@@ -101,7 +106,11 @@ static void audio_cb(void *ud, Uint8 *stream, int len) {
             float l = p[0] * g_vol, r = p[1] * g_vol;
             p[0] = (int16_t)l; p[1] = (int16_t)r;
             float fl = l / 32768.0f, fr = r / 32768.0f;
-            ringL[ringpos % RING] = fl; ringR[ringpos % RING] = fr; ringpos++;
+            ringL[ringpos % RING] = fl; ringR[ringpos % RING] = fr;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+            dringL[ringpos % DRING] = fl; dringR[ringpos % DRING] = fr;
+#endif
+            ringpos++;
             if (fabsf(fl) > peakL) peakL = fabsf(fl);
             if (fabsf(fr) > peakR) peakR = fabsf(fr);
         }
@@ -138,6 +147,7 @@ void ios_media_setup(void);                                                     
 void ios_media_update(const char *title, const char *artist, const char *album, int playing, double pos, double duration);
 int ios_media_poll(void);
 int ios_gl_buffers(SDL_Window *win, unsigned *fb, unsigned *cb);                   /* ios_glue.m: the window's framebuffer and colour renderbuffer */
+float ios_output_latency_ms(void);                                               /* ios_glue.m: latency of the current output route in ms (AirPlay: ~2000) */
 void ios_audio_longform(void);                                                    /* ios_glue.m: AirPlay 2 (HomePod) needs the long-form route sharing policy */
 void ios_airplay_place(SDL_Window *win, float x, float y, float size, int visible);   /* ios_glue.m: the native AirPlay button over the window (points) */
 int ios_music_dir(char *out, int outlen);                                          /* ios_glue.m: Documents/Music, with the files bundled with the app copied in */
@@ -339,6 +349,9 @@ static void play_index_sub(int idx, int sub) {
     pat_last_order = -1; pat_disp = 0; pat_ch0 = 0;
     ov_reset = 1;
     ringpos = 0; memset(ringL, 0, sizeof ringL); memset(ringR, 0, sizeof ringR);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    memset(dringL, 0, sizeof dringL); memset(dringR, 0, sizeof dringR);
+#endif
     if (!s) { snprintf(g_error, sizeof g_error, "%s: %s", pl[idx].label, err); return; }
     g_error[0] = 0;
     memset(g_scope, 0, sizeof g_scope);
@@ -395,6 +408,19 @@ static void analyse(float dt) {
     float pl_, pr_;
     unsigned pos;
     if (g_dev) SDL_LockAudioDevice(g_dev);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    {   /* the picture follows the sound that is heard, not the sound that was just rendered: the window of the analysis ends g_lag_ms before the newest sample */
+        unsigned lagS = (unsigned)(g_lag_ms * (float)g_rate / 1000.0f); if (lagS > DRING - RING - 1) lagS = DRING - RING - 1;
+        static unsigned last_end;
+        pos = ringpos; unsigned end = pos - lagS;
+        for (int i = 0; i < RING; i++) { unsigned k = (end - RING + (unsigned)i) % DRING; scopeL[i] = dringL[k]; scopeR[i] = dringR[k]; }
+        unsigned nn = end - last_end; if ((int)nn < 0 || nn > 16384) nn = 16384;
+        float kl = 0, kr = 0;
+        for (unsigned i = 0; i < nn; i++) { unsigned k = (end - nn + i) % DRING; float a = fabsf(dringL[k]), b = fabsf(dringR[k]); if (a > kl) kl = a; if (b > kr) kr = b; }
+        last_end = end; pl_ = kl; pr_ = kr; peakL = peakR = 0;
+    }
+    if (g_dev) SDL_UnlockAudioDevice(g_dev);
+#else
     memcpy(scopeL, ringL, sizeof ringL); memcpy(scopeR, ringR, sizeof ringR);
     pos = ringpos; pl_ = peakL; pr_ = peakR; peakL = peakR = 0;
     if (g_dev) SDL_UnlockAudioDevice(g_dev);
@@ -402,6 +428,7 @@ static void analyse(float dt) {
     static float lin[RING][2];
     for (int i = 0; i < RING; i++) { unsigned k = (pos + (unsigned)i) % RING; lin[i][0] = scopeL[k]; lin[i][1] = scopeR[k]; }
     for (int i = 0; i < RING; i++) { scopeL[i] = lin[i][0]; scopeR[i] = lin[i][1]; }
+#endif
     for (int i = 0; i < FFTN; i++) { int k = RING - FFTN + i; re[i] = 0.5 * (scopeL[k] + scopeR[k]) * win[i]; im[i] = 0; }
     fft(re, im, FFTN);
     float mag[FFTN / 2 + 1];
@@ -539,7 +566,6 @@ static unsigned long long view_cur_frame;
 static double view_interval;
 static double clk_off; static int clk_init, was_running;
 static unsigned last_cb_seq;
-static float g_lag_ms = 46.0f;
 static int g_view_snap;          /* 1 = letzter Ereigniswechsel war ein Sprung */
 
 static void view_update(void) {
@@ -2628,6 +2654,8 @@ static int gl_compile(GLenum type, const char *src) {
 /* ---------------------------------------------------------------- Hauptschleife (als Funktion, damit sie auch im Browser laeuft) */
 #ifdef __EMSCRIPTEN__
 #define AUDIO_SAMPLES 2048
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+#define AUDIO_SAMPLES 4096                         /* iOS: AirPlay and Bluetooth need larger buffers, small ones crackle */
 #else
 #define AUDIO_SAMPLES 1024
 #endif
@@ -3482,6 +3510,15 @@ static void iter(void) {
         ma_sync_web(0);     /* save the Mod Archive list when it changed */
 #endif
 #if defined(__APPLE__) && TARGET_OS_IPHONE
+        {   /* A/V sync: the latency of the route (and of the two audio buffers of SDL) holds the picture back; looked at twice a second, changes glide in */
+            static Uint32 lt; Uint32 tn = SDL_GetTicks();
+            if (tn - lt > 500) {
+                lt = tn;
+                float L = ios_output_latency_ms() + 2.0f * AUDIO_SAMPLES * 1000.0f / (float)g_rate;
+                if (L < 20) L = 20; if (L > 5000) L = 5000;
+                g_lag_ms += (L - g_lag_ms) * (g_lag_ms == 46.0f ? 1.0f : 0.5f);
+            }
+        }
         ios_media_sync();
         if (g_bg) { if (!shot) song_end_advance(); SDL_Delay(100); return; }      /* in the background: no drawing, the sound goes on */
 #endif
