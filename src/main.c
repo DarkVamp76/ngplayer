@@ -138,6 +138,8 @@ void ios_media_setup(void);                                                     
 void ios_media_update(const char *title, const char *artist, const char *album, int playing, double pos, double duration);
 int ios_media_poll(void);
 int ios_gl_buffers(SDL_Window *win, unsigned *fb, unsigned *cb);                   /* ios_glue.m: the window's framebuffer and colour renderbuffer */
+void ios_audio_longform(void);                                                    /* ios_glue.m: AirPlay 2 (HomePod) needs the long-form route sharing policy */
+void ios_airplay_place(SDL_Window *win, float x, float y, float size, int visible);   /* ios_glue.m: the native AirPlay button over the window (points) */
 int ios_music_dir(char *out, int outlen);                                          /* ios_glue.m: Documents/Music, with the files bundled with the app copied in */
 #endif
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
@@ -1136,10 +1138,21 @@ static void draw_logo(float x, float y, float s) {
         rrect(x + LG_BAR[i][0] * k, y + LG_BAR[i][1] * k, 14 * k, LG_BAR[i][2] * k, 5 * k, (i & 1) ? pk : cy);
     rrect(x + 26 * k, y + 140 * k, 124 * k, 3 * k, 1.5f * k, alpha(cy, 0.35f));
 }
-#ifdef __EMSCRIPTEN__
-#define TAGLINE "Module player for the Web"
+#define TAGLINE "Ultimate Tracker Music Player"      /* the same line in every version (Linux, Web, iOS, macOS) */
+#ifdef __APPLE__
+/* Apple versions: no wax seal with the version number. On iOS its place (top right corner of the card) takes the AirPlay button: a native view
+ * (AVRoutePickerView, see ios_glue.m) put over the window; here only the round background is drawn and the place is remembered for the frame. */
+static float g_ap_x, g_ap_y, g_ap_r; static int g_ap_seen;
+static void draw_apple_corner(float cx, float cy, float r) {
+#if TARGET_OS_IPHONE
+    rrect(cx - r, cy - r, 2 * r, 2 * r, r, alpha(BG0, 0.0f));
+    set_additive(0);
+    rrect(cx - r, cy - r, 2 * r, 2 * r, r, C(0.13f, 0.18f, 0.28f, 0.92f));
+    g_ap_x = cx; g_ap_y = cy; g_ap_r = r; g_ap_seen = 1;
 #else
-#define TAGLINE "Module player for Linux"
+    (void)cx; (void)cy; (void)r;
+#endif
+}
 #endif
 /* ---------------------------------------------------------------- Wachssiegel (Meilenstein, oben rechts in der Logo-Box) */
 #define SEAL_TEXT "2.3"          /* Text im Siegel: hier aendern */
@@ -2199,7 +2212,11 @@ static void draw_ui(double t) {
     text(ax + haw + M + 88, hy + 22, 28, TXT, "ngPlayer");
     text(ax + haw + M + 89, hy + 56, 12, DIM, TAGLINE);
     text_right(ax + haw + M + bw - 12, hy + hh - 20, 10, alpha(FAINT, 0.9f), NGPLAYER_VERSION);      /* the internal version, small at the bottom right of the logo box */
+#ifdef __APPLE__
+    draw_apple_corner(ax + haw + M + bw - 24, hy + 26, 20);
+#else
     draw_seal(ax + haw + M + bw - 12, hy + 14, 24, SEAL_TEXT);
+#endif
     {
         char title[160], sub[200];
         if (g_song) {
@@ -2523,7 +2540,11 @@ static void draw_ui_portrait(float W, float H) {
         draw_playlist_overlay(M, cy0, aw, sy + sh - cy0);   /* the transport bar below (LIST) still gets its click */
     } else {
         draw_overview(M, cy0, aw, oh);
+#ifdef __APPLE__
+        draw_apple_corner(M + aw - 24, cy0 + 24, 18);
+#else
         draw_seal(M + aw - 12, cy0 + 6, 21, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
+#endif
         if (!novis) {
             if (g_vmode == 1) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
             else if (g_vmode == 3) draw_scopes(M, cy0 + oh + M, aw, avail - oh - M);
@@ -3405,7 +3426,7 @@ static void iter(void) {
             case SDL_QUIT: running = 0; break;
 #if defined(__APPLE__) && TARGET_OS_IPHONE
             case SDL_APP_WILLENTERBACKGROUND: case SDL_APP_DIDENTERBACKGROUND: g_bg = 1; break;
-            case SDL_APP_DIDENTERFOREGROUND: g_bg = 0; break;
+            case SDL_APP_DIDENTERFOREGROUND: g_bg = 0; ios_audio_longform(); break;
 #endif
             case SDL_MOUSEBUTTONDOWN:
                 if (e.button.button == SDL_BUTTON_RIGHT) { rclick = 1; rclickx = (int)e.button.x; rclicky = (int)e.button.y; }
@@ -3576,6 +3597,12 @@ static void iter(void) {
         flush();
         if (shot && ++frame >= shot_frames) { save_screenshot(shot, dw, dh); running = 0; }
 #if defined(__APPLE__) && TARGET_OS_IPHONE
+        {   /* the AirPlay button: view units -> points (the safe area offset vpx / vpy is in pixels, GL counts the bottom inset as y) */
+            int show = g_ap_seen && !specs_on && !ma_open && ww > 0 && wh > 0;
+            if (show) ios_airplay_place(win, (((float)vpx + g_ap_x * view_scale) * ww / fdw), ((((float)(fdh - dh - vpy)) + g_ap_y * view_scale) * wh / fdh), 2 * g_ap_r * view_scale * ww / fdw, 1);
+            else ios_airplay_place(win, 0, 0, 0, 0);
+            g_ap_seen = 0;
+        }
         glBindFramebuffer(GL_FRAMEBUFFER, g_fb0); glBindRenderbuffer(GL_RENDERBUFFER, g_cb0);      /* what SDL expects at the swap */
 #endif
         SDL_GL_SwapWindow(win);
@@ -3745,6 +3772,9 @@ int main(int argc, char **argv) {
     SDL_zero(want);
     want.freq = g_rate; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = AUDIO_SAMPLES; want.callback = audio_cb;
     g_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    ios_audio_longform();                                      /* after SDL has set its audio session: long-form playback, so that AirPlay 2 targets (HomePod) are offered */
+#endif
     if (!g_dev) fprintf(stderr, "Audio: %s (weiter ohne Ton)\n", SDL_GetError());
     else { g_rate = have.freq; SDL_PauseAudioDevice(g_dev, 0); }
 
