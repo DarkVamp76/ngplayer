@@ -2840,17 +2840,37 @@ EM_JS(void, web_media_setup, (void), {
     window.addEventListener('touchend', kick, true);
     window.addEventListener('click', kick, true);
 });
-EM_JS(void, web_media_update, (const char *title, const char *artist, const char *album, int kind, int playing), {
+EM_JS(void, web_media_update, (const char *title, const char *artist, const char *album, int kind, int gen, int playing), {
     if (!('mediaSession' in navigator)) return;
     var ms = navigator.mediaSession;
-    /* artwork: a cover per sound card (/covers/card-1..5.png, opaque 600 x 600: the card, its name and "ngPlayer"), the site icon (/icon-512.png) as an opaque full-bleed square when there is no song. iOS rounds the artwork itself and paints transparent areas
-     * white, so rounded corners in the image itself show up as white slivers. Without any artwork it takes the 180 px apple-touch-icon. */
-    try { ms.metadata = new MediaMetadata({ title: UTF8ToString(title), artist: UTF8ToString(artist) || 'ngPlayer', album: UTF8ToString(album) || 'ngplayer.org', artwork: kind > 0 ? [{ src: '/covers/card-' + kind + '.png', sizes: '600x600', type: 'image/png' }] : [{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }] }); } catch (e) {}
+    /* artwork: the cover drawn for this song (see web_media_set_cover) as soon as it is there; until then, and without WebGL, a cover per sound
+     * card (/covers/card-1..5.png, opaque 600 x 600: the card, its name and "ngPlayer"), and the site icon (/icon-512.png) when there is no song.
+     * All of them are opaque squares: iOS rounds the artwork itself and paints transparent areas white. */
+    Module.ngCoverWant = gen;
+    var art = (Module.ngCoverGen === gen && Module.ngCoverUrl) ? [{ src: Module.ngCoverUrl, sizes: '600x600', type: 'image/jpeg' }]
+            : kind > 0 ? [{ src: '/covers/card-' + kind + '.png', sizes: '600x600', type: 'image/png' }] : [{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }];
+    try { ms.metadata = new MediaMetadata({ title: UTF8ToString(title), artist: UTF8ToString(artist) || 'ngPlayer', album: UTF8ToString(album) || 'ngplayer.org', artwork: art }); } catch (e) {}
     ms.playbackState = playing ? 'playing' : 'paused';
     Module.ngMediaWant = !!playing;
     var a = Module.ngMediaEl;
     if (a) { if (playing) { var p = a.play(); if (p && p.then) p.then(Module.ngMediaHandlers).catch(function () {}); } else a.pause(); }
     if (Module.ngMediaHandlers) Module.ngMediaHandlers();
+});
+/* The cover drawn for the current song: RGBA pixels from the GL read-back (bottom row first) -> opaque JPEG data URL -> artwork of the metadata,
+ * but only when the song is still the one it was drawn for. A data URL, not a blob URL: it is just an image address for the system. */
+EM_JS(void, web_media_set_cover, (const unsigned char *px, int w, int h, int gen), {
+    try {
+        if (Module.ngCoverWant !== gen) return;
+        var c = document.createElement('canvas'); c.width = w; c.height = h;
+        var ctx = c.getContext('2d'), id = ctx.createImageData(w, h), src = HEAPU8.subarray(px, px + w * h * 4), row = w * 4;
+        for (var y = 0; y < h; y++) id.data.set(src.subarray((h - 1 - y) * row, (h - y) * row), y * row);
+        for (var i = 3; i < id.data.length; i += 4) id.data[i] = 255;
+        ctx.putImageData(id, 0, 0);
+        var url = c.toDataURL('image/jpeg', 0.88);
+        Module.ngCoverUrl = url; Module.ngCoverGen = gen;
+        var ms = navigator.mediaSession, m = ms && ms.metadata;
+        if (m) ms.metadata = new MediaMetadata({ title: m.title, artist: m.artist, album: m.album, artwork: [{ src: url, sizes: w + 'x' + h, type: 'image/jpeg' }] });
+    } catch (e) {}
 });
 /* Lock screen progress: iOS only knows the 1 s of the silent loop and lets the bar swing back and forth unless it is told the real length
  * and position. The length of a module is not known up front, so a second instance of the song is rendered silently up to its end in
@@ -2968,6 +2988,69 @@ static void probe_start(int idx) {
 /* Pushes the title and the playing state to the Media Session when one of them changed. Also called right after a lock screen command:
  * with the screen locked the browser stops requestAnimationFrame (the main loop), only the audio keeps running, so the loop alone would
  * leave the old title on the lock screen. */
+/* ---- The cover of the current song (Media Session: lock screen, CarPlay): drawn off screen with the player's own 2D renderer, 600 x 600:
+ * a background gradient and glow in an accent colour taken from the title, the sound card of the song (the same picture as in the header,
+ * front on), the title in at most two big lines and "ngPlayer". Only a few big things: the cover is small in a car. */
+#define COVER_PX 600
+static GLuint cv_fbo, cv_tex;
+static unsigned char cv_buf[COVER_PX * COVER_PX * 4];
+static int cover_pending, g_cover_gen;
+static col hue_col(float h) {                         /* hue 0..1 at full saturation, brightness 0.95 */
+    float r = fabsf(h * 6 - 3) - 1, g = 2 - fabsf(h * 6 - 2), b = 2 - fabsf(h * 6 - 4);
+    r = r < 0 ? 0 : r > 1 ? 1 : r; g = g < 0 ? 0 : g > 1 ? 1 : g; b = b < 0 ? 0 : b > 1 ? 1 : b;
+    return C(0.25f + 0.70f * r, 0.25f + 0.70f * g, 0.25f + 0.70f * b, 1);
+}
+static void cover_render(int dw, int dh) {
+    if (!g_song) return;
+    int kind = chip_kind();
+    char title[160];
+    const char *tt = song_title(g_song);
+    snprintf(title, sizeof title, "%s", tt[0] ? tt : (cur >= 0 && cur < npl ? pl[cur].label : "ngPlayer"));
+    unsigned hs = 2166136261u; for (const char *q = title; *q; q++) hs = (hs ^ (unsigned char)*q) * 16777619u;
+    col acc = hue_col((float)(hs % 360) / 360.0f);
+    if (kind > 0) { c3_setup(kind - 1); c3_render(kind - 1, 0.0f, c3gl[kind - 1].fbo2, dw, dh); }       /* the card, front on, into the picture the Specs window uses too */
+    if (!cv_fbo) {
+        glGenTextures(1, &cv_tex); glBindTexture(GL_TEXTURE_2D, cv_tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, COVER_PX, COVER_PX, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glGenFramebuffers(1, &cv_fbo); glBindFramebuffer(GL_FRAMEBUFFER, cv_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, cv_tex, 0);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, cv_fbo);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { glBindFramebuffer(GL_FRAMEBUFFER, 0); return; }
+    glViewport(0, 0, COVER_PX, COVER_PX);
+    glClearColor(BG0.r, BG0.g, BG0.b, 1); glClear(GL_COLOR_BUFFER_BIT);
+    glUseProgram(prog); glUniform2f(u_res, COVER_PX, COVER_PX); glUniform1f(u_pxs, 1.0f); glUniform1i(u_tex, 0);
+    glBindVertexArray(vao); glBindTexture(GL_TEXTURE_2D, fonttex);
+    set_additive(0);
+    rect_grad(0, 0, COVER_PX, COVER_PX, mix(BG0, acc, 0.32f), BG0);
+    set_additive(1); blob(300, 235, 150, alpha(acc, 0.50f)); set_additive(0);
+    if (kind > 0) {
+        float cw = 500, chh = cw / c3_box_aspect(kind - 1);
+        tex_quad(c3_texture_swing(kind - 1), (COVER_PX - cw) / 2, 235 - chh / 2, cw, chh, C(1, 1, 1, 1));
+    }
+    const float fs = 50, maxw = 520;
+    char l1[160] = "", l2[160] = "";
+    if (text_width(title, fs) <= maxw) snprintf(l1, sizeof l1, "%s", title);
+    else {
+        int cut = -1, n = (int)strlen(title);
+        for (int i = 1; i < n; i++) if (title[i] == ' ') { char tmp[160]; memcpy(tmp, title, (size_t)i); tmp[i] = 0; if (text_width(tmp, fs) <= maxw) cut = i; else break; }
+        if (cut < 1) { cut = n; char tmp[160]; while (cut > 1) { memcpy(tmp, title, (size_t)cut); tmp[cut] = 0; if (text_width(tmp, fs) <= maxw) break; cut--; } }
+        memcpy(l1, title, (size_t)cut); l1[cut] = 0;
+        const char *r = title + cut; while (*r == ' ') r++;
+        snprintf(l2, sizeof l2, "%s", r); fit_text(l2, maxw, fs);
+    }
+    float ty = l2[0] ? 392 : 420;
+    text((COVER_PX - text_width(l1, fs)) / 2, ty, fs, TXT, l1);
+    if (l2[0]) text((COVER_PX - text_width(l2, fs)) / 2, ty + 58, fs, TXT, l2);
+    rect(250, 530, 100, 4, alpha(acc, 0.9f));
+    text((COVER_PX - text_width("ngPlayer", 26)) / 2, 548, 26, acc, "ngPlayer");
+    flush();
+    glReadPixels(0, 0, COVER_PX, COVER_PX, GL_RGBA, GL_UNSIGNED_BYTE, cv_buf);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    web_media_set_cover(cv_buf, COVER_PX, COVER_PX, g_cover_gen);
+}
+
 static void media_sync(void) {
     static char mt[160], ma[96], mb[96]; static int mp = -1;
     if (g_hold && SDL_GetTicks() - g_hold_t > 700) g_hold = 0;      /* the element never answered: do not keep the song silent */
@@ -2976,8 +3059,10 @@ static void media_sync(void) {
     char artist[96] = "", album[96] = "";          /* the tracker the module was made with, and format and number of channels (CarPlay and the lock screen show these) */
     if (g_song) { header_sub(artist, sizeof artist); snprintf(album, sizeof album, "%s \xc2\xb7 %d channels", song_format(g_song), song_channels(g_song)); }
     int kind = g_song ? chip_kind() : 0; static int mk = -1;
-    int changed = now != mp || strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb) || kind != mk;
-    if (changed) { mp = now; mk = kind; snprintf(mt, sizeof mt, "%s", t); snprintf(ma, sizeof ma, "%s", artist); snprintf(mb, sizeof mb, "%s", album); web_media_update(mt, ma, mb, kind, now); }
+    int newsong = strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb) || kind != mk;
+    int changed = now != mp || newsong;
+    if (newsong) { g_cover_gen++; cover_pending = kind > 0; }                    /* a new song: its own cover is drawn in the next frame */
+    if (changed) { mp = now; mk = kind; snprintf(mt, sizeof mt, "%s", t); snprintf(ma, sizeof ma, "%s", artist); snprintf(mb, sizeof mb, "%s", album); web_media_update(mt, ma, mb, kind, g_cover_gen, now); }
     {   /* progress: push on every change, when the length became known, after a jump (seek) and every 15 s */
         double pos = (double)g_frames / g_rate, rate = now ? 1.0 : 0.0;
         Uint32 tn = SDL_GetTicks();
@@ -3341,6 +3426,9 @@ static void iter(void) {
 
         if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
         if (specs_on && specs_kind > 0) card3d_frame_swing(specs_kind - 1, dw, dh);      /* the card of the Specs window swings to and fro and shows its front only */
+#ifdef __EMSCRIPTEN__
+        if (cover_pending && g_song) { cover_pending = 0; cover_render(dw, dh); }      /* the cover of the new song, drawn off screen (after the card of the song was rendered) */
+#endif
         g_vpw = dw; g_vph = dh;
         glViewport(0, 0, dw, dh);
         glClearColor(BG0.r, BG0.g, BG0.b, 1);
