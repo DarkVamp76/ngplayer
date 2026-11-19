@@ -530,7 +530,7 @@ static tADTRACK2_EVENT * get_event_p(A2P *p, int pattern, int channel, int row)
 
 // End of patterns helpers ========================================================================
 
-inline bool note_in_range(uint8_t note)
+static inline bool note_in_range(uint8_t note)
 {
     uint8_t n = note & (uint8_t)~keyoff_flag;
     /* Pascal output_note: NOT (note in [1..12*8+1]) uses the inclusive upper bound 97 (a2player.pas). */

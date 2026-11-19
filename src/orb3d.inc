@@ -110,7 +110,7 @@ static void ob_gpu_draw(float cx, float cy, float R, float spin, float t, float 
     glUniform4f(ob_uanim, spin, t, beat, 0);
     glUniform1fv(ob_ubs, 64, bs);
     glUniform3f(ob_uc0, VC[0].r, VC[0].g, VC[0].b); glUniform3f(ob_uc1, VC[1].r, VC[1].g, VC[1].b); glUniform3f(ob_uc2, VC[2].r, VC[2].g, VC[2].b);
-#ifndef __EMSCRIPTEN__
+#ifndef NG_GLES
     glEnable(GL_PROGRAM_POINT_SIZE);
 #endif
     for (int p = 0; p < 3; p++) {

@@ -137,7 +137,7 @@ static void c3_setup(int mi) {
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *col, 0);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, *dep);
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fprintf(stderr, "card3d: incomplete framebuffer\n");
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, g_fb0);
     }
     g->ready = 1;
 }
@@ -166,7 +166,7 @@ static void c3_render(int mi, float ang, GLuint fbo, int fw, int fh) {
     glBindVertexArray(g->vao[2]);
     glDrawElements(GL_TRIANGLES, m->nbt * 3, GL_UNSIGNED_SHORT, (const void *)0);
     glDisable(GL_DEPTH_TEST);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_fb0);
     glBindTexture(GL_TEXTURE_2D, fbo == g->fbo2 ? g->color2 : g->color);
     glGenerateMipmap(GL_TEXTURE_2D);
     glBindVertexArray(0);
