@@ -1,6 +1,16 @@
 /* ================================================================== OpenGL loader */
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+#if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+#define NG_GLES 1                                  /* OpenGL ES 3: the browser (WebGL 2) and iOS; the desktop uses its own loader for GL 3.3 core */
+#endif
 #ifdef __EMSCRIPTEN__
 #include <GLES3/gl3.h>
+static int gl_load(void) { return 0; }
+#define GLSL_VERSION "#version 300 es\nprecision highp float;\nprecision highp int;\n"
+#elif defined(NG_GLES)
+#include <OpenGLES/ES3/gl.h>                       /* iOS (deprecated by Apple, still works) */
 static int gl_load(void) { return 0; }
 #define GLSL_VERSION "#version 300 es\nprecision highp float;\nprecision highp int;\n"
 #else

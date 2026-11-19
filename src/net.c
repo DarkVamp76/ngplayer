@@ -1,4 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #include "net.h"
 #include <errno.h>
 #include <stdio.h>
@@ -48,6 +51,8 @@ void net_log(const char *fmt, ...) {
 /* Web-Version: kein Hilfsprozess curl */
 int net_have_curl(void) { return 0; }
 int net_get(const char *url, const char *dest, int timeout_s) { (void)url; (void)dest; (void)timeout_s; return -1; }
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+/* iOS: there is no fork/exec of curl. net_have_curl() and net_get() are provided by the iOS app (NSURLSession, same contract as below). */
 #else
 static int run_curl(char *const argv[]) {
     pid_t pid = fork();

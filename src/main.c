@@ -3549,8 +3549,12 @@ int main(int argc, char **argv) {
     /* Tastatur nur vom Canvas, damit HTML-Eingabefelder der Seite (Mod-Archive-Dialog) normal funktionieren */
     SDL_SetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT, "#canvas");
 #endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    SDL_SetHint(SDL_HINT_AUDIO_CATEGORY, "playback");          /* iOS: audio session "playback" (keeps playing with the screen locked, with the background mode "audio") */
+    SDL_SetHint(SDL_HINT_IOS_HIDE_HOME_INDICATOR, "1");        /* the home indicator fades out */
+#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS)) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
-#ifdef __EMSCRIPTEN__
+#ifdef NG_GLES
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
@@ -3631,6 +3635,9 @@ int main(int argc, char **argv) {
     web_media_setup();
     g_rand = web_rand_get(); g_rpt = web_rpt_get(); if (g_rpt) g_rand = 0;
     emscripten_async_call(bg_tick, NULL, 400);
+#endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    g_mobile = 1;                                              /* iOS: the touch layout */
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
     if (getenv("NGPLAYER_TEST_SPECS")) specs_test = 1;       /* test hook: open the Specs window of the first song */
