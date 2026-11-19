@@ -34,7 +34,7 @@ static const char *C3_FS =
     " float sh=umode==1?0.62+0.55*d:0.36+0.64*d;\n"
     " o=vec4(base*sh,1.0); }\n";
 
-typedef struct { GLuint vao[3], vbo[3], ebo[3], tex, btex, fbo, color, depth; int ready, w, h; } C3Gl;
+typedef struct { GLuint vao[3], vbo[3], ebo[3], tex, btex, fbo, color, depth, fbo2, color2, depth2; int ready, w, h; } C3Gl;   /* the second target (…2) is the picture of the Specs window: the card swings there instead of turning */
 static C3Gl c3gl[C3_N];
 static GLuint c3_prog;
 static GLint c3_mvp, c3_mv, c3_umode, c3_utex;
@@ -122,36 +122,32 @@ static void c3_setup(int mi) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
     g->w = g_mobile ? 320 : 512; g->h = (int)(g->w / c3_box_aspect(mi) + 0.5f);       /* off-screen target, shown at about half this size: smooth edges through the mip maps */
-    glGenTextures(1, &g->color);
-    glBindTexture(GL_TEXTURE_2D, g->color);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, g->w, g->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glGenRenderbuffers(1, &g->depth);
-    glBindRenderbuffer(GL_RENDERBUFFER, g->depth);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, g->w, g->h);
-    glGenFramebuffers(1, &g->fbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, g->fbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g->color, 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, g->depth);
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fprintf(stderr, "card3d: incomplete framebuffer\n");
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    for (int t = 0; t < 2; t++) {                                    /* target 0: the turning card of the header, target 1: the swinging card of the Specs window */
+        GLuint *col = t ? &g->color2 : &g->color, *dep = t ? &g->depth2 : &g->depth, *fb = t ? &g->fbo2 : &g->fbo;
+        glGenTextures(1, col);
+        glBindTexture(GL_TEXTURE_2D, *col);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, g->w, g->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glGenRenderbuffers(1, dep);
+        glBindRenderbuffer(GL_RENDERBUFFER, *dep);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, g->w, g->h);
+        glGenFramebuffers(1, fb);
+        glBindFramebuffer(GL_FRAMEBUFFER, *fb);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *col, 0);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, *dep);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fprintf(stderr, "card3d: incomplete framebuffer\n");
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
     g->ready = 1;
 }
 
-/* once per frame, before the 2D pass: advance the turn and draw the card into its texture (only while a GUS card is shown) */
-static void card3d_frame(int mi, int fw, int fh) {
-    c3_setup(mi);
+/* draws the card at the angle ang into the given target */
+static void c3_render(int mi, float ang, GLuint fbo, int fw, int fh) {
     C3Gl *g = &c3gl[mi]; const C3Model *m = &C3M[mi];
-    static int last_mi = -1;
-    const char *fix = getenv("NGPLAYER_TEST_CARDANG");
-    if (fix) c3_ang = (float)atof(fix) * 0.017453293f;
-    else if (!g_paused) c3_ang += (float)g_dt * 0.55f;
-    else if (!c3_first && last_mi == mi) return;                                 /* paused: keep the last picture */
-    c3_first = 0; last_mi = mi;
     float mvp[16], mv[16];
-    c3_matrices(c3_ang, m->tilt > 0 ? m->tilt : 0.17f, m->fit > 0 ? m->fit : 0.95f, (float)g->w / (float)g->h, mvp, mv);
-    glBindFramebuffer(GL_FRAMEBUFFER, g->fbo);
+    c3_matrices(ang, m->tilt > 0 ? m->tilt : 0.17f, m->fit > 0 ? m->fit : 0.95f, (float)g->w / (float)g->h, mvp, mv);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, g->w, g->h);
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -171,10 +167,31 @@ static void card3d_frame(int mi, int fw, int fh) {
     glDrawElements(GL_TRIANGLES, m->nbt * 3, GL_UNSIGNED_SHORT, (const void *)0);
     glDisable(GL_DEPTH_TEST);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, g->color);
+    glBindTexture(GL_TEXTURE_2D, fbo == g->fbo2 ? g->color2 : g->color);
     glGenerateMipmap(GL_TEXTURE_2D);
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);                                           /* the 2D renderer uploads into the buffer that is bound */
     glViewport(0, 0, fw, fh);
 }
+/* once per frame, before the 2D pass: advance the turn and draw the card into its texture (only while a card is shown) */
+static void card3d_frame(int mi, int fw, int fh) {
+    c3_setup(mi);
+    static int last_mi = -1;
+    const char *fix = getenv("NGPLAYER_TEST_CARDANG");
+    if (fix) c3_ang = (float)atof(fix) * 0.017453293f;
+    else if (!g_paused) c3_ang += (float)g_dt * 0.55f;
+    else if (!c3_first && last_mi == mi) return;                                 /* paused: keep the last picture */
+    c3_first = 0; last_mi = mi;
+    c3_render(mi, c3_ang, c3gl[mi].fbo, fw, fh);
+}
+/* the card of the Specs window: it does not turn but swings to and fro and shows only its front */
+static float c3_swing_t;
+#define C3_SWING_AMP 0.50f          /* radians to each side (about 29 degrees) */
+static void card3d_frame_swing(int mi, int fw, int fh) {
+    c3_setup(mi);
+    const char *fix = getenv("NGPLAYER_TEST_SWING");                             /* test: a fixed phase in degrees of the swing */
+    if (fix) c3_swing_t = (float)atof(fix) * 0.017453293f / 1.1f; else c3_swing_t += (float)g_dt;
+    c3_render(mi, C3_SWING_AMP * sinf(c3_swing_t * 1.1f), c3gl[mi].fbo2, fw, fh);
+}
+static GLuint c3_texture_swing(int mi) { return c3gl[mi].color2; }
 static GLuint c3_texture(int mi) { return c3gl[mi].color; }

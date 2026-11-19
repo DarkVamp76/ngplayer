@@ -1324,6 +1324,7 @@ static float chips_width(float h) {                       /* Breite des Chipbere
     if (!g_song) return 0;
     return chips_width_k(chip_kind(), h);
 }
+static int chip_swing;                                  /* set while the Specs window draws its card: the swinging picture instead of the turning one */
 static void draw_chip_k(int k, float x, float y, float h, float beat) {
     float cw = chips_width_k(k, h), sc = 1.0f + 0.07f * beat;
     float gx = x + cw / 2, gy = y + h / 2;
@@ -1335,7 +1336,7 @@ static void draw_chip_k(int k, float x, float y, float h, float beat) {
     float hh = h * sc;                                    /* leicht wachsen, um die Mitte */
     float xx = x - (cw * sc - cw) / 2, yy = y - (hh - h) / 2;
     if (k == 0) chip_dip(xx, yy + hh * 0.25f, hh * 0.5f, beat);            /* the chip is half as high as the slot: centred in it */
-    else { float b = 1.0f + 0.30f * beat; tex_quad(c3_texture(k - 1), xx, yy + hh * 0.57f - hh * 0.56f, cw * sc, hh * 1.12f, C(b, b, b, 1)); }
+    else { float b = 1.0f + 0.30f * beat; tex_quad(chip_swing ? c3_texture_swing(k - 1) : c3_texture(k - 1), xx, yy + hh * 0.57f - hh * 0.56f, cw * sc, hh * 1.12f, C(b, b, b, 1)); }
 }
 static void draw_chips(float x, float y, float h) {
     if (!g_song) return;
@@ -3069,7 +3070,7 @@ static void draw_specs_window(void) {
     rect(0, 0, view_w, view_h, C(0, 0, 0, 0.62f));
     card(x, y, w, h, 0);
     float chh = view_h - 24 < 440 ? 84.0f : 110.0f, cw = chips_width_k(specs_kind, chh);
-    draw_chip_k(specs_kind, x + (w - cw) / 2, y + 14, chh, 0.0f);
+    chip_swing = 1; draw_chip_k(specs_kind, x + (w - cw) / 2, y + 14, chh, 0.0f); chip_swing = 0;
     float cx = x + w - 38, cy = y + 14; int hv = hit(cx, cy, 24, 24);            /* close button */
     rrect(cx, cy, 24, 24, 12, alpha(hv ? WARN : EDGE, hv ? 0.5f : 0.35f));
     text(cx + (24 - text_width("x", 15)) / 2, cy + 3.5f, 15, hv ? TXT : DIM, "x");
@@ -3316,7 +3317,7 @@ static void iter(void) {
         if (!shot) song_end_advance();
 
         if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
-        if (specs_on && specs_kind > 0 && (!g_song || specs_kind != chip_kind())) card3d_frame(specs_kind - 1, dw, dh);      /* the card of the Specs window, if it is another model */
+        if (specs_on && specs_kind > 0) card3d_frame_swing(specs_kind - 1, dw, dh);      /* the card of the Specs window swings to and fro and shows its front only */
         g_vpw = dw; g_vph = dh;
         glViewport(0, 0, dw, dh);
         glClearColor(BG0.r, BG0.g, BG0.b, 1);
