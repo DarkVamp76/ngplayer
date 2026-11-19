@@ -2840,12 +2840,12 @@ EM_JS(void, web_media_setup, (void), {
     window.addEventListener('touchend', kick, true);
     window.addEventListener('click', kick, true);
 });
-EM_JS(void, web_media_update, (const char *title, int playing), {
+EM_JS(void, web_media_update, (const char *title, const char *artist, const char *album, int playing), {
     if (!('mediaSession' in navigator)) return;
     var ms = navigator.mediaSession;
     /* artwork: the site icon as an opaque full-bleed square (/icon-512.png). iOS rounds the artwork itself and paints transparent areas
      * white, so rounded corners in the image itself show up as white slivers. Without any artwork it takes the 180 px apple-touch-icon. */
-    try { ms.metadata = new MediaMetadata({ title: UTF8ToString(title), artist: 'ngPlayer', album: 'ngplayer.org', artwork: [{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }] }); } catch (e) {}
+    try { ms.metadata = new MediaMetadata({ title: UTF8ToString(title), artist: UTF8ToString(artist) || 'ngPlayer', album: UTF8ToString(album) || 'ngplayer.org', artwork: [{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }] }); } catch (e) {}
     ms.playbackState = playing ? 'playing' : 'paused';
     Module.ngMediaWant = !!playing;
     var a = Module.ngMediaEl;
@@ -2969,12 +2969,14 @@ static void probe_start(int idx) {
  * with the screen locked the browser stops requestAnimationFrame (the main loop), only the audio keeps running, so the loop alone would
  * leave the old title on the lock screen. */
 static void media_sync(void) {
-    static char mt[160]; static int mp = -1;
+    static char mt[160], ma[96], mb[96]; static int mp = -1;
     if (g_hold && SDL_GetTicks() - g_hold_t > 700) g_hold = 0;      /* the element never answered: do not keep the song silent */
     const char *t = (cur >= 0 && cur < npl) ? pl[cur].label : "ngPlayer";
     int now = g_song && !g_paused && !g_ended;
-    int changed = now != mp || strcmp(t, mt);
-    if (changed) { mp = now; snprintf(mt, sizeof mt, "%s", t); web_media_update(mt, now); }
+    char artist[96] = "", album[96] = "";          /* the tracker the module was made with, and format and number of channels (CarPlay and the lock screen show these) */
+    if (g_song) { header_sub(artist, sizeof artist); snprintf(album, sizeof album, "%s \xc2\xb7 %d channels", song_format(g_song), song_channels(g_song)); }
+    int changed = now != mp || strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb);
+    if (changed) { mp = now; snprintf(mt, sizeof mt, "%s", t); snprintf(ma, sizeof ma, "%s", artist); snprintf(mb, sizeof mb, "%s", album); web_media_update(mt, ma, mb, now); }
     {   /* progress: push on every change, when the length became known, after a jump (seek) and every 15 s */
         double pos = (double)g_frames / g_rate, rate = now ? 1.0 : 0.0;
         Uint32 tn = SDL_GetTicks();
