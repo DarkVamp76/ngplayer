@@ -2492,6 +2492,10 @@ static void draw_ui_portrait(float W, float H) {
     float botH = BOT + (has_seek ? SEEK_ROW : 0);
     float by = H - M - botH, sh = nosp ? 0 : 96, sy = nosp ? by : by - M - sh, cy0 = hy + hh + M;
     float oh = g_song ? overview_height(song_channels(g_song) > 64 ? 64 : song_channels(g_song)) : 60.0f;
+    if (g_song && nosp && song_channels(g_song) >= 36) {   /* 36 voices or more: only the channels are shown, so spectrum and level may stay when the whole list still fits above them */
+        float sy2 = by - M - 96.0f;
+        if (oh <= sy2 - M - cy0) { nosp = 0; sh = 96; sy = sy2; }
+    }
     float avail = sy - M - cy0;
     int novis = 0;                                    /* many voices and the height runs out: only the channels, no visualisation, the whole room goes to the list */
     if ((g_song && song_channels(g_song) >= 36) || avail - oh - M < 150) { novis = 1; oh = avail; }       /* 36 voices or more: always only the channels */
