@@ -39,6 +39,7 @@
 #endif
 
 #include "gfx.inc"
+static GLuint g_fb0, g_cb0;                  /* the framebuffer of the window: 0, except on iOS where SDL draws into its own framebuffer */
 
 /* ================================================================== Palette */
 static const col BG0 = { 0.035f, 0.043f, 0.078f, 1 };
@@ -133,6 +134,11 @@ static int npl, cur = -1;
 static float list_scroll;
 #if defined(__APPLE__) && TARGET_OS_IPHONE
 int ios_safe_insets(SDL_Window *win, float *l, float *t, float *r, float *b);      /* ios_glue.m */
+void ios_media_setup(void);                                                       /* ios_glue.m: lock screen / CarPlay (Now Playing, remote commands) */
+void ios_media_update(const char *title, const char *artist, const char *album, int playing, double pos, double duration);
+int ios_media_poll(void);
+int ios_gl_buffers(SDL_Window *win, unsigned *fb, unsigned *cb);                   /* ios_glue.m: the window's framebuffer and colour renderbuffer */
+int ios_music_dir(char *out, int outlen);                                          /* ios_glue.m: Documents/Music, with the files bundled with the app copied in */
 #endif
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
 static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes (key V / buttons); the tab order is VIEW_ORDER */
@@ -3060,7 +3066,7 @@ static void cover_render(int dw, int dh) {
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, cv_tex, 0);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, cv_fbo);
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { glBindFramebuffer(GL_FRAMEBUFFER, 0); return; }
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { glBindFramebuffer(GL_FRAMEBUFFER, g_fb0); return; }
     glViewport(0, 0, COVER_PX, COVER_PX);
     glClearColor(BG0.r, BG0.g, BG0.b, 1); glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(prog); glUniform2f(u_res, COVER_PX, COVER_PX); glUniform1f(u_pxs, 1.0f); glUniform1i(u_tex, 0);
@@ -3092,7 +3098,7 @@ static void cover_render(int dw, int dh) {
     text((COVER_PX - text_width("ngPlayer", 26)) / 2, 548, 26, acc, "ngPlayer");
     flush();
     glReadPixels(0, 0, COVER_PX, COVER_PX, GL_RGBA, GL_UNSIGNED_BYTE, cv_buf);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_fb0);
     web_media_set_cover(cv_buf, COVER_PX, COVER_PX, g_cover_gen);
 }
 
@@ -3349,6 +3355,30 @@ static void ipc_poll(void) {
     }
 }
 #endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+/* iOS: the lock screen / CarPlay. Title, artist (the tracker) and position go to Now Playing when something changed (and every 15 s); the remote commands
+ * (0 play, 1 pause, 2 next, 3 previous) are picked up here. While the app is in the background nothing is drawn (iOS does not allow OpenGL there), the
+ * audio, the song change and this sync go on. */
+static int g_bg;
+static void ios_media_sync(void) {
+    int c; while ((c = ios_media_poll()) >= 0) {
+        if (c == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; }
+        else if (c == 1) g_paused = 1;
+        else if (c == 2) next_user(1);
+        else if (c == 3) next_user(-1);
+    }
+    static char mt[160], ma[96], mb[96]; static int mp = -1; static Uint32 mt0;
+    const char *t = (cur >= 0 && cur < npl) ? pl[cur].label : "ngPlayer";
+    int now = g_song && !g_paused && !g_ended;
+    char artist[96] = "", album[96] = "";
+    if (g_song) { header_sub(artist, sizeof artist); snprintf(album, sizeof album, "%s \xc2\xb7 %d channels", song_format(g_song), song_channels(g_song)); }
+    Uint32 tn = SDL_GetTicks();
+    if (now != mp || strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb) || tn - mt0 > 15000) {
+        mp = now; mt0 = tn; snprintf(mt, sizeof mt, "%s", t); snprintf(ma, sizeof ma, "%s", artist); snprintf(mb, sizeof mb, "%s", album);
+        ios_media_update(mt, ma, mb, now, (double)g_frames / g_rate, 0);
+    }
+}
+#endif
 static void iter(void) {
     { static int once; if (!once) { once = 1; if (getenv("NGPLAYER_TEST_MATAB")) g_pltab = 1; } }      /* test hook: the Mod Archive tab of the list */
 #ifndef __EMSCRIPTEN__
@@ -3359,6 +3389,10 @@ static void iter(void) {
         while (SDL_PollEvent(&e)) {
             switch (e.type) {
             case SDL_QUIT: running = 0; break;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+            case SDL_APP_DIDENTERBACKGROUND: g_bg = 1; break;
+            case SDL_APP_WILLENTERFOREGROUND: g_bg = 0; break;
+#endif
             case SDL_MOUSEBUTTONDOWN:
                 if (e.button.button == SDL_BUTTON_RIGHT) { rclick = 1; rclickx = (int)e.button.x; rclicky = (int)e.button.y; }
                 if (e.button.button == SDL_BUTTON_LEFT) {
@@ -3411,6 +3445,10 @@ static void iter(void) {
 #ifdef __EMSCRIPTEN__
         media_sync();       /* keep the lock screen in sync: title of the current entry and playing / paused */
         ma_sync_web(0);     /* save the Mod Archive list when it changed */
+#endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        ios_media_sync();
+        if (g_bg) { if (!shot) song_end_advance(); SDL_Delay(100); return; }      /* in the background: no drawing, the sound goes on */
 #endif
         int ww, wh, dw, dh;
         SDL_GetWindowSize(win, &ww, &wh);
@@ -3496,6 +3534,7 @@ static void iter(void) {
         if (cover_pending && g_song) { cover_pending = 0; cover_render(dw, dh); }      /* the cover of the new song, drawn off screen (after the card of the song was rendered) */
 #endif
         g_vpw = dw; g_vph = dh; g_vpx = vpx; g_vpy = vpy;
+        glBindFramebuffer(GL_FRAMEBUFFER, g_fb0);
         glViewport(0, 0, fdw, fdh);
         glClearColor(BG0.r, BG0.g, BG0.b, 1);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -3516,6 +3555,9 @@ static void iter(void) {
         set_additive(0);
         flush();
         if (shot && ++frame >= shot_frames) { save_screenshot(shot, dw, dh); running = 0; }
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        glBindFramebuffer(GL_FRAMEBUFFER, g_fb0); glBindRenderbuffer(GL_RENDERBUFFER, g_cb0);      /* what SDL expects at the swap */
+#endif
         SDL_GL_SwapWindow(win);
 #ifndef __EMSCRIPTEN__
         double spent = (double)(SDL_GetPerformanceCounter() - now) / freq;
@@ -3523,6 +3565,7 @@ static void iter(void) {
         else if (spent < 0.002) SDL_Delay(1);       /* Schutz, falls der Treiber VSync nicht wirklich abwartet */
 #endif
     }
+
 
 int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--version")) { printf("ngPlayer %s\n", NGPLAYER_VERSION); return 0; }
@@ -3549,6 +3592,9 @@ int main(int argc, char **argv) {
             return 0;
         } else add_path(argv[i], 0);
     }
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    if (!npl) { char dp[1024]; if (!ios_music_dir(dp, sizeof dp)) add_path(dp, 0); }      /* iOS: the music folder of the app */
+#endif
     if (!npl) {   /* ohne Argumente: Musikordner des Benutzers */
         const char *home = getenv("HOME");
         if (home) {
@@ -3569,6 +3615,9 @@ int main(int argc, char **argv) {
     SDL_SetHint(SDL_HINT_IOS_HIDE_HOME_INDICATOR, "1");        /* the home indicator fades out */
 #endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS)) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    ios_media_setup();
+#endif
 #ifdef NG_GLES
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
@@ -3602,6 +3651,9 @@ int main(int argc, char **argv) {
     ctx = SDL_GL_CreateContext(win);
     if (!ctx) { fprintf(stderr, "OpenGL-3.3-Kontext: %s\n", SDL_GetError()); return 1; }
     if (gl_load()) return 1;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    { unsigned fb = 0, cb = 0; if (!ios_gl_buffers(win, &fb, &cb)) { g_fb0 = fb; g_cb0 = cb; } }      /* iOS: the window's framebuffer is not 0 */
+#endif
     { const char *tm = getenv("NGPLAYER_TEST_MA"); if (tm) { snprintf(ma_buf, sizeof ma_buf, "%s", tm); ma_len = (int)strlen(ma_buf); ma_show(1); ma_start(); } }
     vsync_ok = SDL_GL_SetSwapInterval(-1) == 0 || SDL_GL_SetSwapInterval(1) == 0;
 

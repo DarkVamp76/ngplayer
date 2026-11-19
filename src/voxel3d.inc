@@ -90,7 +90,7 @@ static GLuint vx_render(float aw, float ah, float fx, float fy, float horn, floa
     glBindVertexArray(vx_vao);
     glDrawArraysInstanced(GL_TRIANGLES, 0, 36, nseg * 64 * 15);
     glDisable(GL_DEPTH_TEST);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_fb0);
     glBindTexture(GL_TEXTURE_2D, vx_color);
     glGenerateMipmap(GL_TEXTURE_2D);
     glViewport(g_vpx, g_vpy, g_vpw, g_vph);                  /* back to the 2D pass */
