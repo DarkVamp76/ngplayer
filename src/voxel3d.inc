@@ -31,6 +31,7 @@ static GLuint vx_prog, vx_vao, vx_fbo, vx_color, vx_depth;
 static int vx_w, vx_h;
 static GLint vx_cam, vx_geo, vx_ulv, vx_c0, vx_c1, vx_c2, vx_fog, vx_bg0;
 static int g_vpw, g_vph;                                   /* size of the window's framebuffer, set once per frame */
+static int g_vpx, g_vpy;                                   /* its offset in the window (iOS: the safe area, below the notch and the home bar) */
 
 static GLuint vx_shader(GLenum type, const char *src) {
     GLuint s = glCreateShader(type);
@@ -92,7 +93,7 @@ static GLuint vx_render(float aw, float ah, float fx, float fy, float horn, floa
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, vx_color);
     glGenerateMipmap(GL_TEXTURE_2D);
-    glViewport(0, 0, g_vpw, g_vph);                          /* back to the 2D pass */
+    glViewport(g_vpx, g_vpy, g_vpw, g_vph);                  /* back to the 2D pass */
     glUseProgram(prog);
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);

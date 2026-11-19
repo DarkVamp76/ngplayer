@@ -131,6 +131,9 @@ static void ma_sync_web(int force);
 static entry *pl;
 static int npl, cur = -1;
 static float list_scroll;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+int ios_safe_insets(SDL_Window *win, float *l, float *t, float *r, float *b);      /* ios_glue.m */
+#endif
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
 static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes (key V / buttons); the tab order is VIEW_ORDER */
 static const int VIEW_ORDER[4] = { 0, 3, 1, 2 };   /* PATTERN, SCOPES, ORB, VOXEL */
@@ -3412,6 +3415,17 @@ static void iter(void) {
         int ww, wh, dw, dh;
         SDL_GetWindowSize(win, &ww, &wh);
         SDL_GL_GetDrawableSize(win, &dw, &dh);
+        int fdw = dw, fdh = dh, vpx = 0, vpy = 0;      /* the whole framebuffer; dw/dh become the part the UI is laid out in */
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        {   /* iOS: keep the UI out of the notch / Dynamic Island, the home bar and the rounded corners (insets in points, from ios_glue.m: SDL2 has no safe-area API) */
+            float il, it, ir, ib;
+            if (ww > 0 && wh > 0 && !ios_safe_insets(win, &il, &it, &ir, &ib)) {
+                float kx = (float)fdw / ww, ky = (float)fdh / wh;
+                int l = (int)(il * kx), t = (int)(it * ky), r = (int)(ir * kx), b = (int)(ib * ky);
+                if (l + r < fdw / 3 && t + b < fdh / 3) { vpx = l; vpy = b; dw = fdw - l - r; dh = fdh - t - b; }      /* GL counts from below, so the bottom inset is the y offset */
+            }
+        }
+#endif
         /* Hochformat (Seitenverhaeltnis < 0,8) oder zu klein fuer das Querformat: schmales, gestapeltes Layout (virtuell 440 breit) */
         g_portrait = dw * 10 < dh * 12 || dw < 640 || dh < 430;      /* aspect < 1.2: tablets upright, phones */
         if (getenv("NGPLAYER_TEST_MOBILE")) g_portrait = 1;          /* test hook: force the phone layout */
@@ -3429,8 +3443,8 @@ static void iter(void) {
         int mxi, myi;
         Uint32 mb = SDL_GetMouseState(&mxi, &myi);
         mouse_down = (mb & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
-        float k = ww ? (float)dw / (float)ww / view_scale : 1;
-        mx = (float)mxi * k; my = (float)myi * k;
+        float k = ww ? (float)fdw / (float)ww / view_scale : 1;
+        mx = ((float)mxi - (float)vpx / ((float)fdw / (ww ? ww : 1))) * k; my = ((float)myi - (float)(fdh - dh - vpy) / ((float)fdh / (wh ? wh : 1))) * k;
         { static int tm = -1; static float tx, ty; if (tm < 0) { const char *e = getenv("NGPLAYER_TEST_MOUSE"); tm = e && sscanf(e, "%f,%f", &tx, &ty) == 2; } if (tm) { mx = tx; my = ty; } }      /* test hook: the pointer at a fixed place (view units), for screenshots */
         if (lp_on && !mouse_down) lp_on = 0;
         if (lp_on && !lp_fired && SDL_GetTicks() - lp_t >= 500) {      /* held still for half a second: open the menu like a right click */
@@ -3481,10 +3495,11 @@ static void iter(void) {
 #ifdef __EMSCRIPTEN__
         if (cover_pending && g_song) { cover_pending = 0; cover_render(dw, dh); }      /* the cover of the new song, drawn off screen (after the card of the song was rendered) */
 #endif
-        g_vpw = dw; g_vph = dh;
-        glViewport(0, 0, dw, dh);
+        g_vpw = dw; g_vph = dh; g_vpx = vpx; g_vpy = vpy;
+        glViewport(0, 0, fdw, fdh);
         glClearColor(BG0.r, BG0.g, BG0.b, 1);
         glClear(GL_COLOR_BUFFER_BIT);
+        glViewport(vpx, vpy, dw, dh);
         glUseProgram(prog);
         glUniform2f(u_res, view_w, view_h);
         glUniform1f(u_pxs, view_scale);
