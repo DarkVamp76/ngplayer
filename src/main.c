@@ -3492,8 +3492,14 @@ static void iter(void) {
              * turns rclickx/rclicky into view units again. */
             rclick = 1; rclickx = k > 0 ? (int)(mx / k) : lp_x; rclicky = k > 0 ? (int)(my / k) : lp_y;
         }
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        /* iOS: the event coordinates know nothing of the safe area (and are not reliable for touches): the tap is where the pointer is now (mx, my, already in view units) */
+        if (click) { clickx = (int)mx; clicky = (int)my; }
+        if (rclick) { rclickx = (int)mx; rclicky = (int)my; }
+#else
         if (click) { clickx = (int)(clickx * k); clicky = (int)(clicky * k); }
         if (rclick) { rclickx = (int)(rclickx * k); rclicky = (int)(rclicky * k); }
+#endif
         if (ctx_idx >= 0 && click) {                         /* click on the open menu: copy the link; any click closes it */
             float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;     /* touch: current pointer (the event coordinates are not reliable on iOS) */
             if (cmx >= ctx_x && cmx < ctx_x + CTX_W && cmy >= ctx_y && cmy < ctx_y + CTX_H(ctx_idx) && ctx_idx < npl) {
