@@ -94,7 +94,9 @@ int net_get(const char *url, const char *dest, int timeout_s) {
 int ma_download(int id, char *out, size_t cap) {
     char dir[900], url[160];
     if (id <= 0 || net_cache_dir(dir, sizeof dir)) return -1;
-    char sub[1000]; snprintf(sub, sizeof sub, "%s/modarchive", dir);
+    char sub[1000]; const char *own = getenv("NGPLAYER_MA_DIR");     /* iOS: a folder of the app that is kept (not the cache) */
+    snprintf(sub, sizeof sub, "%s", own && *own ? own : "");
+    if (!(own && *own)) snprintf(sub, sizeof sub, "%s/modarchive", dir);
     if (mkdir_p(sub)) return -1;
     snprintf(out, cap, "%s/%d.mod", sub, id);
     struct stat sb;
@@ -127,6 +129,21 @@ int ma_random_id(void) {
 #else
     char dir[900], page[1000];
     if (net_cache_dir(dir, sizeof dir)) return 0;
+    {   /* the random draw of ngplayer.org (ma.php?random=1 answers with a plain ID; the Mod Archive key stays on the server). iOS uses it by default. */
+        const char *u = getenv("NGPLAYER_MA_RANDOM_URL");
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        if (!u || !*u) u = "https://ngplayer.org/player/ma.php?random=1";
+#endif
+        if (u && *u) {
+            char idf[1000]; snprintf(idf, sizeof idf, "%s/random.id", dir);
+            if (!net_get(u, idf, 15)) {
+                FILE *f = fopen(idf, "rb"); char b[32] = {0}; size_t n = f ? fread(b, 1, sizeof b - 1, f) : 0; if (f) fclose(f);
+                unlink(idf); (void)n;
+                long v = strtol(b, NULL, 10);
+                if (v > 0 && v < 100000000) return (int)v;
+            }
+        }
+    }
     snprintf(page, sizeof page, "%s/random.html", dir);
     if (net_get("https://modarchive.org/index.php?request=view_random", page, 15)) return 0;
     FILE *f = fopen(page, "rb");

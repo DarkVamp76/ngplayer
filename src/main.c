@@ -237,6 +237,10 @@ static void add_file(const char *path) {
         else { snprintf(nm, sizeof nm, "%s", fn); if (n > 4) nm[n - 4] = 0; }
         snprintf(pl[npl].label, sizeof pl[npl].label, "%s TFMX", nm);
     } else snprintf(pl[npl].label, sizeof pl[npl].label, "%s", fn);
+    if (strstr(path, "/modarchive/")) {          /* kept download: <id>.mod in the modarchive folder (iOS) is a Mod Archive song again, after a restart too */
+        char *e; long id = strtol(fn, &e, 10);
+        if (e != fn && id > 0 && !strcasecmp(e, ".mod")) { pl[npl].ma_id = (int)id; snprintf(pl[npl].label, sizeof pl[npl].label, "ModArchive #%ld", id); }
+    }
     {   /* Sortierschluessel: Ordner + Anzeigename, damit TFMX-Songs nach ihrem Namen (nicht nach 'mdat.') einsortiert werden */
         size_t dl = b ? (size_t)(b + 1 - path) : 0;
         size_t kl = dl + strlen(pl[npl].label) + 1;
@@ -1424,6 +1428,9 @@ static int pl_count_tab(int tab) { int n = 0; for (int i = 0; i < npl; i++) if (
 static void pl_remove(int i) {
     if (i < 0 || i >= npl) return;
     if (i == cur) { if (pl_count_tab(pl[i].ma_id > 0) > 1) next_prev(1); else { unload(); cur = -1; } }
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    if (pl[i].ma_id > 0 && pl[i].path && strstr(pl[i].path, "/modarchive/")) unlink(pl[i].path);      /* a kept download goes with its entry */
+#endif
     free(pl[i].path); free(pl[i].key);
     memmove(pl + i, pl + i + 1, sizeof(entry) * (size_t)(npl - i - 1));
     npl--;
@@ -3606,7 +3613,14 @@ int main(int argc, char **argv) {
         } else add_path(argv[i], 0);
     }
 #if defined(__APPLE__) && TARGET_OS_IPHONE
-    if (!npl) { char dp[1024]; if (!ios_music_dir(dp, sizeof dp)) add_path(dp, 0); }      /* iOS: the music folder of the app */
+    {   /* iOS: the downloads of the Mod Archive are kept in Documents/Music/modarchive until the user removes them; log and temporary files go to Library/Caches */
+        char dp[1024], ma[1100]; const char *h = getenv("HOME");
+        if (!ios_music_dir(dp, sizeof dp)) {
+            snprintf(ma, sizeof ma, "%s/modarchive", dp); setenv("NGPLAYER_MA_DIR", ma, 1);
+            if (!npl) add_path(dp, 0);                                          /* the music folder of the app (with the kept downloads) */
+        }
+        if (h && *h) { snprintf(ma, sizeof ma, "%s/Library/Caches", h); setenv("XDG_CACHE_HOME", ma, 1); }
+    }
 #endif
     if (!npl) {   /* ohne Argumente: Musikordner des Benutzers */
         const char *home = getenv("HOME");
