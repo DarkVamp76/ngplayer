@@ -12,6 +12,7 @@ typedef struct {
     double pitch;                                 /* Oktaven-Offset durch Slides */
     int nec, nep, vec, vep, tgt, buf, porta_p, vsl_p, pan_p, arp_p;
     double gl, gr, pgl, pgr;
+    double vsacc;                  /* remainder of the volume slide between two ticks */
 } Ch;
 
 struct DMFPlayer {
@@ -142,6 +143,17 @@ static void tick_fx(DMFPlayer *p, int tick){
         if (c->vec == 1 || c->vec == 2 || c->vec == 8 || c->vec == 9) {
             int pr = c->vep ? c->vep : (c->vec <= 2 ? c->vsl_p : c->pan_p);
             if (c->vec <= 2) c->vsl_p = pr; else c->pan_p = pr;
+            if (c->vec <= 2) {
+                /* Volume slide: the parameter is the amount per ROW (on the 0..256 scale), spread over the ticks of the row (the first tick does not slide).
+                 * Fitted to recordings of the original X-PLAY on a GUS (OVN-ANER, CAN-MORA): the former pr/4*4 per tick was up to twice too steep. */
+                int run = ticks < 2 ? tick == 0 : tick > 0;
+                if (run) {
+                    double a = c->vsacc + (double)pr / (ticks >= 2 ? ticks - 1 : 1); int d = (int)a; c->vsacc = a - d;
+                    if (c->vec == 1) { c->vol += d; if (c->vol > 256) c->vol = 256; } else { c->vol -= d; if (c->vol < 0) c->vol = 0; }
+                }
+                c->step = step_of(c, p->rate, semi);
+                continue;
+            }
             int v = pr / 4; if (v < 1) v = 1;
             if (v >= 15 && ticks >= 2) { v = (v + ticks - 2) / (ticks - 1); if (v < 1) v = 1; }
             if (v > 15) v = 15;
