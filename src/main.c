@@ -2815,7 +2815,23 @@ EM_JS(void, web_media_setup, (void), {
     /* Heartbeat for the locked screen: the browser stops requestAnimationFrame and throttles timers, but the media element keeps playing and
      * keeps firing timeupdate (a few times per second). Each one lets the app finish a download, move on at the end of a song and refresh the
      * lock screen (ng_web_media 4). */
-    a.addEventListener('timeupdate', function () { Module._ng_web_media(4); });
+    /* The position of the lock screen / CarPlay is read from this element's currentTime. iOS sometimes sets it back (to 0) on its own, e.g. after an
+     * interruption by a navigation announcement. Every timeupdate: when the element is playing the song's silent track and its time is more than
+     * 1.5 s away from the song position (extrapolated from the last position push), it is put back at once. */
+    a.addEventListener('timeupdate', function () {
+        Module._ng_web_media(4);
+        if (Module.ngTl && Module.ngPosT !== undefined && Module.ngPosRate > 0 && !a.paused && !a.seeking) {
+            var exp = Module.ngPosBase + (performance.now() - Module.ngPosT) / 1000;
+            if (exp < Module.ngTl + 2 && Math.abs(a.currentTime - exp) > 1.5) a.currentTime = exp;
+        }
+    });
+    /* the silent track ended while the song still plays (an interruption, a late measurement): back to the song position and go on */
+    a.addEventListener('ended', function () {
+        if (Module.ngTl && Module.ngMediaWant && Module.ngPosT !== undefined) {
+            var exp = Module.ngPosBase + (Module.ngPosRate > 0 ? (performance.now() - Module.ngPosT) / 1000 : 0);
+            if (exp < Module.ngTl) { a.currentTime = exp; var q = a.play(); if (q && q.catch) q.catch(function () {}); }
+        }
+    });
     Module.ngLoopUrl = a.src;
     /* when the page goes to the background (screen lock) put the element where the song is now */
     var park = function () {
