@@ -3587,6 +3587,17 @@ static void ios_media_sync(void) {
     }
 }
 #endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+/* The Mod Archive ID in a link: .../player/#160140 (also #ma=160140 / #id=160140), .../m/160140 or ngplayer://160140. 0 = not a link of ours. */
+static int url_ma_id(const char *u) {
+    if (!u || (strncmp(u, "ngplayer:", 9) && !(!strncmp(u, "http", 4) && strstr(u, "://ngplayer.org/")))) return 0;       /* only the links of our own site and scheme */
+    const char *h = strchr(u, '#');
+    if (h) { h++; if (!strncmp(h, "ma=", 3) || !strncmp(h, "id=", 3)) h += 3; char *e; long v = strtol(h, &e, 10); if (e != h && v > 0 && v < 100000000 && (*e == 0 || *e == '&' || *e == '/')) return (int)v; }
+    const char *m = strstr(u, "/m/"); if (m) { long v = strtol(m + 3, NULL, 10); if (v > 0 && v < 100000000) return (int)v; }
+    if (!strncmp(u, "ngplayer://", 11)) { long v = strtol(u + 11, NULL, 10); if (v > 0 && v < 100000000) return (int)v; }
+    return 0;
+}
+#endif
 static void iter(void) {
     { static int once; if (!once) { once = 1; if (getenv("NGPLAYER_TEST_MATAB")) g_pltab = 1; } }      /* test hook: the Mod Archive tab of the list */
 #ifndef __EMSCRIPTEN__
@@ -3615,6 +3626,12 @@ static void iter(void) {
                 else if (SDL_GetModState() & KMOD_SHIFT) pat_ch0 -= e.wheel.y;
                 break;
             case SDL_DROPFILE: {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+                {   /* iOS: a link that opened the app (Universal Link https://ngplayer.org/player/#160140, or ngplayer://160140): the Mod Archive module of the link */
+                    int lid = url_ma_id(e.drop.file);
+                    if (lid) { snprintf(ma_buf, sizeof ma_buf, "%d", lid); ma_len = (int)strlen(ma_buf); SDL_free(e.drop.file); ma_start(); break; }
+                }
+#endif
                 int was = npl;
                 add_path(e.drop.file, 0);
                 SDL_free(e.drop.file);
