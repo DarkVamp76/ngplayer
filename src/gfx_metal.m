@@ -532,9 +532,11 @@ gfx_tex *gfx_voxel_render(int w, int h, const float *cam, const float *geo, cons
 gfx_mesh *gfx_mesh_create(const void *verts, int nverts, const uint16_t *idx, int nidx) {
     gfx_mesh *m = (gfx_mesh *)calloc(1, sizeof *m);
     if (!m) return NULL;
+    if (nverts <= 0 || nidx <= 0) return m;                            /* an empty part (a model without a back picture): no buffers, nothing to draw (Metal gives nil for a zero length) */
     m->n = nidx;
     m->vb = [dev newBufferWithBytes:verts length:(NSUInteger)(24 * nverts) options:MTLResourceStorageModeShared];
     m->ib = [dev newBufferWithBytes:idx length:(NSUInteger)(sizeof(uint16_t) * (size_t)nidx) options:MTLResourceStorageModeShared];
+    if (!m->vb || !m->ib) { m->vb = nil; m->ib = nil; m->n = 0; }
     return m;
 }
 void gfx_card_render(gfx_tex *target, const float *mvp, const float *mv, gfx_mesh *board, gfx_mesh *front, gfx_tex *front_tex, gfx_mesh *back, gfx_tex *back_tex) {
@@ -543,9 +545,10 @@ void gfx_card_render(gfx_tex *target, const float *mvp, const float *mv, gfx_mes
     offscreen_begin(target, 0, 0, 0, 0);
     [enc setRenderPipelineState:pso_c3];
     [enc setDepthStencilState:dss_less];
-    [enc setFragmentTexture:front_tex->tex atIndex:0];                 /* the board pass does not sample, but a texture has to be bound */
+    if (front_tex) [enc setFragmentTexture:front_tex->tex atIndex:0];                 /* the board pass does not sample, but a texture has to be bound */
     gfx_mesh *ms[3] = { board, front, back }; gfx_tex *ts[3] = { front_tex, front_tex, back_tex };
     for (int i = 0; i < 3; i++) {
+        if (!ms[i] || ms[i]->n <= 0 || !ms[i]->ib || !ms[i]->vb || !ts[i]) continue;      /* nothing to draw: an indexed draw without an index buffer crashes the GPU driver */
         p.umode = i ? 1 : 0;
         [enc setVertexBuffer:ms[i]->vb offset:0 atIndex:0];
         [enc setVertexBytes:&p length:sizeof p atIndex:1];
