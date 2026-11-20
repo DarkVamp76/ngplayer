@@ -532,7 +532,7 @@ static void draw_info_sign(float cx, float cy, float r, int hover) {
  * desktop player has an I button next to the x of each row instead), Remove for all. Items are numbered 0 Share, 1 Info, 2 Specs, 3 Remove. */
 static int ctx_acts(int idx, int *act) {
     int n = 0, ma = idx >= 0 && idx < npl && pl[idx].ma_id;
-    if (ma) { act[n++] = 0; act[n++] = 1; }
+    if (ma) act[n++] = 0;                                     /* Share; the Mod Archive page is a link in the Info window now */
 #ifdef __EMSCRIPTEN__
     act[n++] = 2;
 #else
@@ -2194,7 +2194,7 @@ static int sw_buttons(int i, float rx, float rw, float *bx, float *bw, int *act)
 static void sw_draw(int i, float rx, float rw, float yy, float bh) {      /* behind the row: the revealed buttons */
     if (i != sw_idx) return;
     float bx[2], bw[2]; int act[2], n = sw_buttons(i, rx, rw, bx, bw, act);
-    static const char *const nm[4] = { "Share", "", "Specs", "Remove" };
+    static const char *const nm[4] = { "Share", "", "Info", "Remove" };
     for (int k = 0; k < n; k++) {
         col c = act[k] == 3 ? WARN : (act[k] == 0 ? VC[2] : VC[0]);
         rrect(bx[k], yy, bw[k], bh, 8, alpha(c, 0.80f));
@@ -3441,7 +3441,7 @@ static void specs_show_entry(int idx) {                  /* any entry of the lis
     specs_idx = idx;
     if (idx == cur && g_song) { specs_fill(g_song, pl[idx].label); return; }
     char err[160]; Song *t = song_open(pl[idx].path, 44100, err, sizeof err);
-    if (!t) { snprintf(toast_txt, sizeof toast_txt, "Specs not available"); toast_t = 2.0f; return; }
+    if (!t) { snprintf(toast_txt, sizeof toast_txt, "Info not available"); toast_t = 2.0f; return; }
     specs_fill(t, pl[idx].label); song_close(t);
 }
 static void specs_open_entry(int idx) { specs_show_entry(idx); specs_just = 1; }
@@ -3492,7 +3492,7 @@ static void draw_specs_window(void) {
 }
 static void draw_ctx_menu(void) {
     if (ctx_idx >= 0 && ctx_idx < npl) {
-        static const char *const item[4] = { "Share", "Info", "Specs", "Remove" };
+        static const char *const item[4] = { "Share", "", "Info", "Remove" };
         int act[4], n = ctx_acts(ctx_idx, act);
         rrect(ctx_x - 1, ctx_y - 1, CTX_W + 2, CTX_H(ctx_idx) + 2, 9, alpha(EDGE, 0.9f));
         rrect(ctx_x, ctx_y, CTX_W, CTX_H(ctx_idx), 8, CARDHI);
@@ -3883,7 +3883,7 @@ static void iter(void) {
             if (cmx >= ctx_x && cmx < ctx_x + CTX_W && cmy >= ctx_y && cmy < ctx_y + CTX_H(ctx_idx) && ctx_idx < npl) {
                 int act[4], na = ctx_acts(ctx_idx, act), jj = (int)((cmy - ctx_y - 1) / CTX_ROW);
                 int j = jj >= 0 && jj < na ? act[jj] : -1;                                 /* 0 Share, 1 Info, 2 Specs, 3 Remove */
-                if (j == 0) share_link(ctx_idx); else if (j == 1) info_open(ctx_idx); else if (j == 2) specs_show_entry(ctx_idx); else if (j == 3) pl_remove(ctx_idx);
+                if (j == 0) share_link(ctx_idx); else if (j == 2) specs_show_entry(ctx_idx); else if (j == 3) pl_remove(ctx_idx);
             }
             ctx_idx = -1; click = 0; lp_swallow = 1;
         }
