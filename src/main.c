@@ -3119,6 +3119,45 @@ static const char *ma_artist_of(int id) {            /* NULL = not answered yet 
     for (int i = 0; i < 32; i++) if (ma_art[i].id == id) return ma_art[i].name;
     return NULL;
 }
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+/* iOS: the artist of a Mod Archive module from ma.php?info=<id> (JSON, the key stays on the server): one small request per ID in a short-lived thread. */
+static int ma_info_asked[256], ma_info_asked_n;
+static int ma_info_thread(void *p) {
+    int id = (int)(intptr_t)p; char dir[900], path[1000], url[160], b[2048], name[64] = "";
+    if (net_cache_dir(dir, sizeof dir)) return 0;
+    snprintf(path, sizeof path, "%s/info-%d.json", dir, id);
+    snprintf(url, sizeof url, "https://ngplayer.org/player/ma.php?info=%d", id);
+    if (!net_get(url, path, 15)) {
+        FILE *f = fopen(path, "rb"); size_t n = f ? fread(b, 1, sizeof b - 1, f) : 0; if (f) fclose(f); b[n] = 0; unlink(path);
+        const char *q = strstr(b, "\"artist\":\"");
+        if (q) {   /* the JSON string up to the closing quote: \" \\ \/ and \uXXXX are decoded */
+            q += 10; int o = 0;
+            while (*q && *q != '"' && o < (int)sizeof name - 5) {
+                if (*q == '\\' && q[1] == 'u' && q[2] && q[3] && q[4] && q[5]) {
+                    unsigned u = (unsigned)strtoul((char[]){ q[2], q[3], q[4], q[5], 0 }, NULL, 16); q += 6;
+                    if (u < 0x80) name[o++] = (char)u;
+                    else if (u < 0x800) { name[o++] = (char)(0xC0 | (u >> 6)); name[o++] = (char)(0x80 | (u & 0x3F)); }
+                    else { name[o++] = (char)(0xE0 | (u >> 12)); name[o++] = (char)(0x80 | ((u >> 6) & 0x3F)); name[o++] = (char)(0x80 | (u & 0x3F)); }
+                } else if (*q == '\\' && q[1]) { name[o++] = q[1]; q += 2; }
+                else name[o++] = *q++;
+            }
+            name[o] = 0;
+        }
+    }
+    net_log("artist of #%d: '%s'", id, name);
+    int k = __sync_fetch_and_add(&ma_art_n, 1) & 31;      /* an empty name: no artist known */
+    ma_art[k].id = id; snprintf(ma_art[k].name, sizeof ma_art[k].name, "%s", name);
+    return 0;
+}
+static const char *ma_artist_of(int id) {            /* NULL = not answered yet */
+    for (int i = 0; i < 32; i++) if (ma_art[i].id == id) return ma_art[i].name;
+    return NULL;
+}
+static void ma_info_ask(int id) {                     /* once per ID */
+    for (int i = 0; i < ma_info_asked_n && i < 256; i++) if (ma_info_asked[i] == id) return;
+    ma_info_asked[ma_info_asked_n++ & 255] = id;
+    SDL_Thread *t = SDL_CreateThread(ma_info_thread, "mainfo", (void *)(intptr_t)id); if (t) SDL_DetachThread(t);
+}
 #endif
 static char g_cover_by[64];                          /* the artist shown on the cover ("by ...") */
 
@@ -3494,10 +3533,23 @@ static void ios_media_sync(void) {
     }
     if (g_probe) probe_run(2);                                  /* a few ms of the length measurement per frame */
     static char mt[160], ma[96], mb[96]; static int mp = -1; static Uint32 mt0; static double mlen = -2;
+    if (g_song && cur >= 0 && cur < npl && pl[cur].ma_id > 0) {      /* a Mod Archive song: the list shows its title, not "ModArchive #id" (also after a restart) */
+        const char *tt = song_title(g_song); if (tt && tt[0] && strcmp(pl[cur].label, tt)) snprintf(pl[cur].label, sizeof pl[cur].label, "%s", tt);
+    }
     const char *t = (cur >= 0 && cur < npl) ? pl[cur].label : "ngPlayer";
     int now = g_song && !g_paused && !g_ended;
     char artist[96] = "", album[96] = "";
-    if (g_song) { header_sub(artist, sizeof artist); snprintf(album, sizeof album, "%s \xc2\xb7 %d channels", song_format(g_song), song_channels(g_song)); }
+    char by[64] = "";
+    if (g_song) {
+        header_sub(artist, sizeof artist); snprintf(album, sizeof album, "%s \xc2\xb7 %d channels", song_format(g_song), song_channels(g_song));
+        int mid = (cur >= 0 && cur < npl) ? pl[cur].ma_id : 0;
+        if (mid > 0) {                                  /* a Mod Archive song: its artist (once the answer is there) instead of the tracker */
+            ma_info_ask(mid);
+            const char *ar = ma_artist_of(mid);
+            if (ar && ar[0]) { snprintf(artist, sizeof artist, "%s", ar); snprintf(by, sizeof by, "%s", ar); }
+        }
+    }
+    snprintf(g_cover_by, sizeof g_cover_by, "%s", by);
     Uint32 tn = SDL_GetTicks();
     int newsong = strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb);
     if (newsong) { ios_media_set_cover(NULL, 0, 0); g_cover_gen++; cover_pending = g_song != NULL; }      /* the cover of the previous song goes, the new one is drawn in the next frame */
