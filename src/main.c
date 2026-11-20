@@ -3570,7 +3570,37 @@ static void audio_watch(void) {
     if (!should || g_cb_seq != last_seq) { last_seq = g_cb_seq; last_t = tn; return; }
     if (tn - last_t > 2000 && tn - last_try > 5000) { last_try = tn; last_t = tn; net_log("audio callback stands still, reopening the output"); audio_recover(); }
 }
+/* The titles of the kept Mod Archive modules (the entries of the list read from Documents/Music/modarchive at the start are only called "ModArchive #id"): a worker thread opens one
+ * module after the other and reads its title; the main loop puts the titles into the labels. The thread works on its own copy of the paths and IDs. */
+#define TQN 256
+static struct { int id; char t[128]; } tq[TQN];
+static volatile int tq_n;
+static struct { int id; char *path; } tw[TQN]; static int tw_n;
+static int titles_thread(void *p) {
+    (void)p;
+    for (int i = 0; i < tw_n; i++) {
+        char err[64] = ""; Song *s = song_open(tw[i].path, g_rate, err, sizeof err);
+        if (!s) continue;
+        const char *t = song_title(s);
+        net_log("title of #%d: '%s'", tw[i].id, t ? t : "");
+        if (t && t[0] && tq_n < TQN) { tq[tq_n].id = tw[i].id; snprintf(tq[tq_n].t, sizeof tq[tq_n].t, "%s", t); __sync_synchronize(); tq_n++; }
+        song_close(s);
+    }
+    return 0;
+}
+static void ma_titles_start(void) {
+    for (int i = 0; i < npl && tw_n < TQN; i++)
+        if (pl[i].ma_id > 0 && pl[i].path && !strncmp(pl[i].label, "ModArchive #", 12)) { tw[tw_n].id = pl[i].ma_id; tw[tw_n].path = strdup(pl[i].path); tw_n++; }
+    if (tw_n) { SDL_Thread *t = SDL_CreateThread(titles_thread, "titles", NULL); if (t) SDL_DetachThread(t); }
+}
+static void ma_titles_apply(void) {
+    static int done;
+    for (; done < tq_n; done++)
+        for (int i = 0; i < npl; i++)
+            if (pl[i].ma_id == tq[done].id && !strncmp(pl[i].label, "ModArchive #", 12)) snprintf(pl[i].label, sizeof pl[i].label, "%s", tq[done].t);
+}
 static void ios_media_sync(void) {
+    ma_titles_apply();
     audio_watch();
     int c; while ((c = ios_media_poll()) >= 0) {
         if (c == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; if (!g_dev || SDL_GetAudioDeviceStatus(g_dev) != SDL_AUDIO_PLAYING) audio_recover(); }
@@ -3868,6 +3898,7 @@ int main(int argc, char **argv) {
         if (!ios_music_dir(dp, sizeof dp)) {
             snprintf(ma, sizeof ma, "%s/modarchive", dp); setenv("NGPLAYER_MA_DIR", ma, 1);
             if (!npl) add_path(dp, 0);                                          /* the music folder of the app (with the kept downloads) */
+            ma_titles_start();                                                   /* their titles are read in the background */
         }
         if (h && *h) { snprintf(ma, sizeof ma, "%s/Library/Caches", h); setenv("XDG_CACHE_HOME", ma, 1); }
     }
