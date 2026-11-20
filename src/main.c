@@ -2705,6 +2705,7 @@ static void draw_ui_portrait(float W, float H) {
         if (oh <= sy2 - M - cy0) { nosp = 0; sh = 96; sy = sy2; }
     }
     float avail = sy - M - cy0;
+    if (g_song && !nosp && avail - oh - M < 150) { nosp = 1; sh = 0; sy = by; avail = sy - M - cy0; }      /* a short screen (iPad upright): the room is not enough for channels + visualisation + spectrum: the spectrum and level go first (as with many voices), not the visualisation */
     int novis = 0;                                    /* many voices and the height runs out: only the channels, no visualisation, the whole room goes to the list */
     if ((g_song && song_channels(g_song) >= 36) || avail - oh - M < 150) { novis = 1; oh = avail; }       /* 36 voices or more: always only the channels */
     if (oh < 40) oh = 40;
