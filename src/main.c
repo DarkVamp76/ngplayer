@@ -67,6 +67,7 @@ static SDL_AudioDeviceID g_dev;
 static Song *g_song;
 static int g_paused, g_ended;
 static float g_vol = 0.8f;
+static int vol_drag;                 /* a finger / the pointer holds the volume slider */
 static volatile unsigned long long g_frames;
 static float g_lag_ms = 46.0f;                 /* A/V sync: how long the picture is held back behind the rendered sound (iOS: the latency of the output route) */
 static float ringL[RING], ringR[RING];
@@ -1325,6 +1326,7 @@ static void seal_drop(float cx, float cy, float r, float t, float off, float per
     }
 }
 static void draw_seal(float cx, float cy, float r, const char *label) {
+    { static int off = -1; if (off < 0) off = getenv("NGPLAYER_TEST_NOSEAL") != NULL; if (off) return; }      /* test hook: no seal (the Apple apps have none; for store screenshots made on Linux) */
     static float age;                                                              /* Sekunden seit Programmstart */
     age += (float)g_dt;
     const float T1 = 0.30f;                                                        /* Dauer des Falls bis zum Aufschlag */
@@ -2485,7 +2487,9 @@ static void draw_ui(double t) {
         rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
         float kx = vx + 3 + (vw - 6) * g_vol;
         rrect(kx - 8, cy - 8, 16, 16, 8, TXT);
-        if (mouse_down && (hit(vx - 10, cy - 14, vw + 20, 28) || (click && clicked(vx - 10, cy - 14, vw + 20, 28)))) {
+        if (!mouse_down) vol_drag = 0;
+        else if (hit(vx - 10, cy - 14, vw + 20, 28) || (click && clicked(vx - 10, cy - 14, vw + 20, 28))) vol_drag = 1;
+        if (vol_drag) {                                   /* once on the slider, the finger stays on it, also far above or below, until it is lifted */
             g_vol = (mx - vx - 3) / (vw - 6);
             if (g_vol < 0) g_vol = 0;
             if (g_vol > 1) g_vol = 1;
@@ -2569,7 +2573,7 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
 /* ---- Order slider (phone layout): drag the knob to choose an order, the jump happens when the finger lifts (seek_order re-renders the
  * song up to the target, too slow to do on every move); the small buttons at both ends step one order back / forward. ---- */
 #define SEEK_ROW 36.0f
-static int seek_drag; static int seek_target;
+static int seek_drag; static int seek_target; static float seek_f;
 static void draw_seek_row(float bx, float ty, float bw) {
     int n = song_norders(g_song), curo = g_view_valid ? g_view.order : song_order(g_song);
     if (curo < 0) curo = 0;
@@ -2588,11 +2592,13 @@ static void draw_seek_row(float bx, float ty, float bw) {
     if (seek_drag) {
         if (mouse_down) {
             float f = (mx - x0) / tw; if (f < 0) f = 0; if (f > 1) f = 1;
-            seek_target = (int)(f * (float)(n - 1) + 0.5f);
+            seek_f = f; seek_target = (int)(f * (float)n); if (seek_target > n - 1) seek_target = n - 1;
         } else { seek_drag = 0; if (seek_target != curo) seek_order(seek_target); }
     }
     int shown = seek_drag ? seek_target : curo;
-    float f = n > 1 ? (float)shown / (float)(n - 1) : 0, kx = x0 + tw * f;
+    float rf = (g_view_valid && g_view.nrows > 0) ? g_pos / (float)g_view.nrows : 0; if (rf < 0) rf = 0; if (rf > 1) rf = 1;      /* the row in the order: the bar moves smoothly, not order by order */
+    float f = seek_drag ? seek_f : (n > 0 ? ((float)curo + rf) / (float)n : 0); if (f > 1) f = 1;
+    float kx = x0 + tw * f;
     rrect(x0, cy - 3, tw, 6, 3, alpha(FAINT, 0.35f));
     rrect(x0, cy - 3, 6 + (tw - 6) * f, 6, 3, VC[1]);
     rrect(kx - 10, cy - 10, 20, 20, 10, (seek_drag || over) ? TXT : DIM);
@@ -2765,7 +2771,9 @@ static void draw_ui_portrait(float W, float H) {
         rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
         float kx = vx + 3 + (vw - 6) * g_vol;
         rrect(kx - 9, cy - 9, 18, 18, 9, TXT);
-        if (mouse_down && (hit(vx - 12, cy - 18, vw + 24, 36) || (click && clicked(vx - 12, cy - 18, vw + 24, 36)))) {
+        if (!mouse_down) vol_drag = 0;
+        else if (hit(vx - 12, cy - 18, vw + 24, 36) || (click && clicked(vx - 12, cy - 18, vw + 24, 36))) vol_drag = 1;
+        if (vol_drag) {                                   /* once on the slider, the finger stays on it, also far above or below, until it is lifted */
             g_vol = (mx - vx - 3) / (vw - 6);
             if (g_vol < 0) g_vol = 0;
             if (g_vol > 1) g_vol = 1;
