@@ -513,6 +513,7 @@ static int click, clickx, clicky, mouse_down, click_ctrl;
 static int rclick, rclickx, rclicky;                       /* right mouse button */
 static int lp_on, lp_fired, lp_swallow, lp_x, lp_y;        /* long press on a touch screen = right click */
 static Uint32 lp_t;
+static int sw_idx = -1; static float sw_off, sw_tgt;       /* swipe actions of a list row (touch): the entry and how far its row is shifted (< 0 left, > 0 right) */
 static int ctx_idx = -1; static float ctx_x, ctx_y;        /* context menu ("Share") of a Mod Archive entry in the list */
 static float toast_t; static char toast_txt[48];
 #define CTX_W 120.0f
@@ -1494,6 +1495,7 @@ static int pl_count_tab(int tab) { int n = 0; for (int i = 0; i < npl; i++) if (
 /* Remove an entry from the list (the file itself stays untouched). The playing song moves on to the next one of its group, or stops. */
 static void pl_remove(int i) {
     if (i < 0 || i >= npl) return;
+    sw_idx = -1; sw_off = sw_tgt = 0;
     if (i == cur) { if (pl_count_tab(pl[i].ma_id > 0) > 1) next_prev(1); else { unload(); cur = -1; } }
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     if (pl[i].ma_id > 0 && pl[i].path && strstr(pl[i].path, "/modarchive/")) unlink(pl[i].path);      /* a kept download goes with its entry */
@@ -2142,6 +2144,78 @@ static void header_sub(char *out, size_t n) {
 static void draw_ui_portrait(float W, float H);
 static void draw_specs_chip(float x, float y);
 static void specs_open_entry(int idx);
+/* ---- Swipe actions of a list row on touch devices, like Mail: swipe left = Share (Mod Archive entries) and Remove (a long swipe removes), swipe right = Specs
+ * (a long swipe opens it). The row slides, the buttons are revealed behind it; a tap on a button runs it, a tap elsewhere closes the row again. ---- */
+#define SW_W 76.0f
+static int sw_drag, sw_nl = 1, sw_axis;                  /* a finger moves the row / its number of left buttons / the direction of the current touch: 0 undecided, 1 horizontal, 2 vertical */
+static float sw_base, sw_rw = 272, sw_px0, sw_apy0;
+static void share_link(int idx);
+static void sw_close(void) { sw_tgt = 0; sw_drag = 0; if (sw_off == 0) sw_idx = -1; }
+static void sw_step(void) {                              /* once per frame: the row slides to where it settles */
+    if (sw_idx < 0 || sw_drag) return;
+    float k = (float)g_dt * 18; if (k > 1) k = 1;
+    sw_off += (sw_tgt - sw_off) * k;
+    if (fabsf(sw_tgt - sw_off) < 0.5f) { sw_off = sw_tgt; if (sw_tgt == 0) sw_idx = -1; }
+}
+static void sw_drag_row(int i, float rw, int nl) {       /* the finger moves the row i horizontally */
+    if (!sw_drag) { sw_drag = 1; if (sw_idx != i) { sw_idx = i; sw_off = 0; } sw_base = sw_off; }
+    sw_rw = rw; sw_nl = nl;
+    float o = sw_base + (mx - sw_px0);
+    if (o < -rw) o = -rw;
+    if (o > rw) o = rw;
+    sw_off = sw_tgt = o;
+}
+static void sw_release(void) {                           /* the finger is lifted after a horizontal move: run, settle open or close */
+    if (!sw_drag || sw_idx < 0) { sw_drag = 0; return; }
+    sw_drag = 0;
+    int i = sw_idx;
+    if (sw_off < 0) {
+        float R = -sw_off;
+        if (R > 0.62f * sw_rw) { sw_idx = -1; sw_off = sw_tgt = 0; pl_remove(i); return; }          /* a long swipe: remove */
+        sw_tgt = R > 0.45f * sw_nl * SW_W ? -(float)sw_nl * SW_W : 0;
+    } else {
+        if (sw_off > 0.5f * sw_rw) { sw_idx = -1; sw_off = sw_tgt = 0; specs_open_entry(i); return; }   /* a long swipe: Specs */
+        sw_tgt = sw_off > 0.4f * SW_W ? SW_W : 0;
+    }
+}
+/* the buttons that the shift of row i reveals: x and width of each, and what it does (0 Share, 2 Specs, 3 Remove) */
+static int sw_buttons(int i, float rx, float rw, float *bx, float *bw, int *act) {
+    float o = i == sw_idx ? sw_off : 0; int n = 0;
+    if (o < -0.5f) {
+        float R = -o, right = rx + rw;
+        if (pl[i].ma_id) {
+            float sh = R <= 2 * SW_W ? R / 2 : SW_W, rm = R - sh;
+            bx[n] = right - R; bw[n] = sh; act[n++] = 0;
+            bx[n] = right - rm; bw[n] = rm; act[n++] = 3;
+        } else { bx[n] = right - R; bw[n] = R; act[n++] = 3; }
+    } else if (o > 0.5f) { bx[n] = rx; bw[n] = o; act[n++] = 2; }
+    return n;
+}
+static void sw_draw(int i, float rx, float rw, float yy, float bh) {      /* behind the row: the revealed buttons */
+    if (i != sw_idx) return;
+    float bx[2], bw[2]; int act[2], n = sw_buttons(i, rx, rw, bx, bw, act);
+    static const char *const nm[4] = { "Share", "", "Specs", "Remove" };
+    for (int k = 0; k < n; k++) {
+        col c = act[k] == 3 ? WARN : (act[k] == 0 ? VC[2] : VC[0]);
+        rrect(bx[k], yy, bw[k], bh, 8, alpha(c, 0.80f));
+        float tw = text_width(nm[act[k]], 13);
+        if (bw[k] >= tw + 12) text(bx[k] + (bw[k] - tw) / 2, yy + (bh - 13) / 2 - 1, 13, C(0.02f, 0.05f, 0.1f, 1), nm[act[k]]);
+    }
+}
+/* a tap on row i while a row is open: runs the button that was hit, or just closes; 1 = the tap is used up */
+static int sw_tap(int i, float rx, float rw) {
+    if (sw_idx < 0 || sw_tgt == 0) return 0;
+    if (i == sw_idx) {
+        float bx[2], bw[2]; int act[2], n = sw_buttons(i, rx, rw, bx, bw, act);
+        for (int k = 0; k < n; k++) if (mx >= bx[k] && mx < bx[k] + bw[k]) {
+            int a = act[k]; sw_close();
+            if (a == 0) share_link(i); else if (a == 3) pl_remove(i); else specs_open_entry(i);
+            return 1;
+        }
+    }
+    sw_close();
+    return 1;
+}
 static void draw_ui(double t) {
     (void)t;
     float W = view_w, H = view_h;
@@ -2169,6 +2243,17 @@ static void draw_ui(double t) {
         pl_build_vis();
         if (npl) pl_tabs(x, y + 40, w, 0, 0);
         float ry = y + (npl ? 76 : 44), rh = 28, area = h - (npl ? 76 : 44) - 66;
+        int tapA = 0;
+        if (g_mobile) {                      /* touch: the same swipe and drag as in the phone list; a tap is the lifted finger */
+            static int apd, amoved; static float apy0, als0;
+            if (mouse_down && mx >= x && mx < x + w && my >= ry - 4 && my < y + h || apd && mouse_down) {
+                if (!apd) { apd = 1; apy0 = my; sw_px0 = mx; als0 = list_scroll; amoved = 0; sw_axis = 0; }
+                if (sw_axis == 0) { float ddx = mx - sw_px0, ddy = my - apy0; if (fabsf(ddx) > 8 && fabsf(ddx) > fabsf(ddy)) sw_axis = 1; else if (fabsf(ddy) > 8) sw_axis = 2; }
+                if (sw_axis) amoved = 1;
+                if (sw_axis == 2) { list_scroll = als0 + (apy0 - my) / rh; if (sw_idx >= 0) sw_close(); }
+            } else if (apd) { apd = 0; if (sw_axis == 1) sw_release(); else if (!amoved && !lp_swallow) tapA = 1; lp_swallow = 0; sw_axis = 0; }
+            sw_apy0 = apy0;
+        }
         int vis_rows = (int)(area / rh), maxscroll = nvis > vis_rows ? nvis - vis_rows : 0;
         if (list_follow && cvis >= 0) {
             if (cvis < list_scroll) list_scroll = (float)cvis;
@@ -2178,36 +2263,33 @@ static void draw_ui(double t) {
         if (list_scroll > maxscroll) list_scroll = (float)maxscroll;
         if (list_scroll < 0) list_scroll = 0;
         int first = (int)list_scroll;
+        sw_step();
         for (int r = 0; r < vis_rows + 1 && first + r < nvis; r++) {
             int i = pl_vis[first + r];
             float yy = ry + r * rh;
             if (yy + rh > y + h - 62) break;
-            int isc = i == cur, hv = hit(x + 8, yy, w - 16, rh);
+            int isc = i == cur, hv = !g_mobile && hit(x + 8, yy, w - 16, rh);
+            float ox = 0;
+            if (g_mobile) {
+                if (sw_axis == 1 && sw_px0 >= x + 8 && sw_px0 < x + w - 8 && sw_apy0 >= yy && sw_apy0 < yy + rh) sw_drag_row(i, w - 16, pl[i].ma_id ? 2 : 1);
+                sw_draw(i, x + 8, w - 16, yy, rh - 2);
+                ox = i == sw_idx ? sw_off : 0;
+            }
+            float ol = ox < 0 ? ox : 0, orr = ox > 0 ? ox : 0;      /* swiped left: the row gets shorter, swiped right: it slides */
             if (isc) {
-                rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(VC[0], 0.16f));
-                rrect(x + 8, yy + 5, 3, rh - 12, 1.5f, VC[0]);
+                rrect(x + 8 + orr, yy, w - 16 + ol, rh - 2, 8, alpha(VC[0], 0.16f));
+                rrect(x + 8 + orr, yy + 5, 3, rh - 12, 1.5f, VC[0]);
             } else if (hv) rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(EDGE, 0.25f));
             char lab[160], tg[24]; list_label(lab, sizeof lab, tg, sizeof tg, &pl[i]);
-            float tx = x + 20;
+            float tx = x + 20 + orr;
             tx += draw_fmt_badge(tx, yy + 6, &pl[i], isc);      /* file format in its own colour */
             float tgw = tg[0] ? text_width(tg, 14) : 0;
-            float mob = g_mobile ? MOB_BTN_W - 18 : 0, bx = x + w - 8 - MOB_BTN_W;       /* touch devices: the menu button of the phone list instead of the hover x */
-            /* the title gets all the room: the #ID is flush right, and while the pointer is over a desktop row the I and x take the place of the ID */
-            fit_text(lab, (g_mobile ? w - 74 - mob : w - 36 - (tg[0] ? 10 : 0)) - (tx - (x + 20)) - tgw, 14);
+            /* the title gets all the room: the #ID is flush right, and while the pointer is over a desktop row the I and x take the place of the ID (touch: swipe the row instead) */
+            fit_text(lab, w - 36 + ol - (tg[0] ? 10 : 0) - (tx - (x + 20 + orr)) - tgw, 14);
             text(tx, yy + 5, 14, isc ? TXT : DIM, lab);
-            if (tg[0] && (g_mobile || !hv)) text_right(g_mobile ? x + w - 44 - mob : x + w - 16, yy + 5, 14, VC[1], tg);      /* #ID */
+            if (tg[0] && !hv) text_right(x + w - 16 + ox, yy + 5, 14, VC[1], tg);      /* #ID */
             int xhv = hit(x + w - 38, yy + 2, 26, rh - 6);
-            if (g_mobile) {
-                rrect(bx, yy + 2, MOB_BTN_W, rh - 8, 8, alpha(EDGE, 0.40f));
-                for (int d = -1; d <= 1; d++) rrect(bx + MOB_BTN_W * 0.5f - 2 + d * 8, yy + 2 + (rh - 8) * 0.5f - 2, 4, 4, 2, isc ? TXT : DIM);   /* three dots */
-                if (click && clickx >= bx - 4 && clickx < x + w - 4 && clicky >= yy && clicky < yy + rh) {      /* tap on the button: open the menu of this entry, do not play it */
-                    ctx_idx = i; click = 0;
-                    ctx_x = bx + MOB_BTN_W - CTX_W; ctx_y = yy + (rh - 8) * 0.5f;
-                    if (ctx_x < 4) ctx_x = 4;
-                    if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
-                    if (ctx_y + CTX_H(i) > view_h - 4) ctx_y = view_h - 4 - CTX_H(i);
-                }
-            } else {
+            if (!g_mobile) {
                 if (hv) {               /* the buttons sit on their own background (the title may reach under them) */
                     rrect(x + w - 72, yy + 1, 62, rh - 4, 8, CARD); rrect(x + w - 72, yy + 1, 62, rh - 4, 8, isc ? alpha(VC[0], 0.16f) : alpha(EDGE, 0.25f));
                     if (xhv) rrect(x + w - 38, yy + 3, 26, rh - 8, 6, alpha(WARN, 0.22f));
@@ -2228,7 +2310,9 @@ static void draw_ui(double t) {
                 if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
                 if (ctx_y + CTX_H(i) > view_h - 4) ctx_y = view_h - 4 - CTX_H(i);
             }
-            if (clicked(x + 8, yy, w - 16, rh)) { play_index(i); click = 0; }
+            if (g_mobile) {
+                if (tapA && mx >= x + 8 && mx < x + w - 8 && my >= yy && my < yy + rh) { if (sw_tap(i, x + 8, w - 16)) tapA = 0; else { play_index(i); tapA = 0; } }
+            } else if (clicked(x + 8, yy, w - 16, rh)) { play_index(i); click = 0; }
         }
         draw_rpt_chip(x + 18, y + h - 44, 38);                       /* RPT and RND flush left, the bigger dice on the right */
         draw_rand_chip(x + 18 + 38 + 6, y + h - 44, 38);
@@ -2420,10 +2504,11 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
     text(x + 16 + text_width("PLAYLIST", 13) + 12, y + 14, 13, DIM, cnt);
     int tap = 0;
     if (mouse_down) {
-        if (!pd) { pd = 1; py0 = my; ls0 = list_scroll; moved = 0; }
-        if (fabsf(my - py0) > 8) moved = 1;
-        if (moved) list_scroll = ls0 + (py0 - my) / rh;
-    } else if (pd) { pd = 0; if (!moved && !lp_swallow) tap = 1; lp_swallow = 0; }
+        if (!pd) { pd = 1; py0 = my; sw_px0 = mx; ls0 = list_scroll; moved = 0; sw_axis = 0; }
+        if (sw_axis == 0) { float ddx = mx - sw_px0, ddy = my - py0; if (fabsf(ddx) > 8 && fabsf(ddx) > fabsf(ddy)) sw_axis = 1; else if (fabsf(ddy) > 8) sw_axis = 2; }
+        if (sw_axis) moved = 1;
+        if (sw_axis == 2) { list_scroll = ls0 + (py0 - my) / rh; if (sw_idx >= 0) sw_close(); }
+    } else if (pd) { pd = 0; if (sw_axis == 1) sw_release(); else if (!moved && !lp_swallow) tap = 1; lp_swallow = 0; sw_axis = 0; }
     float cbx = x + w - 92, cby = y + 8;
     int hvc = hit(cbx, cby, 78, 28);
     rrect(cbx, cby, 78, 28, 8, alpha(hvc ? VC[0] : EDGE, 0.35f));
@@ -2441,40 +2526,36 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
     if (list_scroll > maxscroll) list_scroll = (float)maxscroll;
     if (list_scroll < 0) list_scroll = 0;
     int first = (int)list_scroll;
+    sw_step();
     for (int r = 0; r < vis_rows && first + r < nvis; r++) {
         int i = pl_vis[first + r];
         float yy = ry + r * rh;
         int isc = i == cur;
+        float rx = x + 8, rw = w - 16;
+        if (pd && sw_axis == 1 && sw_px0 >= rx && sw_px0 < rx + rw && py0 >= yy && py0 < yy + rh) sw_drag_row(i, rw, pl[i].ma_id ? 2 : 1);
+        sw_draw(i, rx, rw, yy, rh - 3);
+        float ox = i == sw_idx ? sw_off : 0, ol = ox < 0 ? ox : 0, orr = ox > 0 ? ox : 0;      /* swiped left: the row gets shorter, swiped right: it slides */
         if (isc) {
-            rrect(x + 8, yy, w - 16, rh - 3, 8, alpha(VC[0], 0.16f));
-            rrect(x + 8, yy + 6, 3, rh - 15, 1.5f, VC[0]);
+            rrect(rx + orr, yy, rw + ol, rh - 3, 8, alpha(VC[0], 0.16f));
+            rrect(rx + orr, yy + 6, 3, rh - 15, 1.5f, VC[0]);
         }
         char lab[160], tg[24]; list_label(lab, sizeof lab, tg, sizeof tg, &pl[i]);
-        float tx = x + 20;
+        float tx = x + 20 + orr;
         tx += draw_fmt_badge(tx, yy + 8, &pl[i], isc);          /* file format in its own colour */
         float tgw = tg[0] ? text_width(tg, 14) : 0;
-        float mob = g_mobile ? MOB_BTN_W + 6 : 0, bx = x + w - 8 - MOB_BTN_W;       /* touch devices: a menu button at the right of every row */
-        fit_text(lab, w - 40 - mob - (tx - (x + 20)) - tgw, 14);
+        fit_text(lab, w - 40 + ol - (tx - (x + 20 + orr)) - tgw, 14);
         text(tx, yy + 8, 14, isc ? TXT : DIM, lab);
-        if (tg[0]) text_right(x + w - 20 - mob, yy + 8, 14, VC[1], tg);      /* #ID flush right (left of the button) */
-        if (g_mobile) {
-            rrect(bx, yy + 3, MOB_BTN_W, rh - 9, 8, alpha(EDGE, 0.40f));
-            for (int d = -1; d <= 1; d++) rrect(bx + MOB_BTN_W * 0.5f - 2 + d * 8, yy + 3 + (rh - 9) * 0.5f - 2, 4, 4, 2, isc ? TXT : DIM);   /* three dots */
-            if (tap && !moved && mx >= bx - 4 && mx < x + w && my >= yy && my < yy + rh) {      /* tap on the button: open the menu of this entry, do not play it */
-                ctx_idx = i; tap = 0;
-                ctx_x = bx + MOB_BTN_W - CTX_W; ctx_y = yy + (rh - 9) * 0.5f;
-                if (ctx_x < 4) ctx_x = 4;
-                if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
-                if (ctx_y + CTX_H(i) > view_h - 4) ctx_y = view_h - 4 - CTX_H(i);
-            }
-        }
+        if (tg[0]) text_right(x + w - 20 + ox, yy + 8, 14, VC[1], tg);      /* #ID flush right */
         if (rclick && !moved && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {       /* long press: Share/Info (Mod Archive) and Remove (every entry); not while dragging */
             ctx_idx = i; rclick = 0;
             ctx_x = (float)rclickx; ctx_y = (float)rclicky;
             if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
             if (ctx_y + CTX_H(i) > view_h - 4) ctx_y = view_h - 4 - CTX_H(i);
         }
-        if (tap && !moved && mx >= x + 8 && mx < x + w - 8 && my >= yy && my < yy + rh) { play_index(i); g_plopen = 0; was_open = 0; return; }
+        if (tap && !moved && mx >= rx && mx < rx + rw && my >= yy && my < yy + rh) {
+            if (sw_tap(i, rx, rw)) { tap = 0; continue; }
+            play_index(i); g_plopen = 0; was_open = 0; return;
+        }
     }
     if (!npl) text(x + 16, y + 64, 14, DIM, "No files.");
     else if (!nvis) text(x + 16, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
@@ -3348,6 +3429,7 @@ static void info_open(int idx) {
 }
 
 /* ---- Specs window: the 3D sound card as the head, then title, tracker, voices and the technical details of the file ---- */
+static int specs_idx = -1;                               /* the list entry the Specs window shows (for its Mod Archive link) */
 static int specs_just, specs_test; static int specs_on, specs_kind = -1; static SongInfo specs_info; static char specs_label[128];
 static void specs_fill(const Song *s, const char *label) {
     song_info(s, &specs_info);
@@ -3356,6 +3438,7 @@ static void specs_fill(const Song *s, const char *label) {
 }
 static void specs_show_entry(int idx) {                  /* any entry of the list: the playing one, else the file is opened just for its header */
     if (idx < 0 || idx >= npl) return;
+    specs_idx = idx;
     if (idx == cur && g_song) { specs_fill(g_song, pl[idx].label); return; }
     char err[160]; Song *t = song_open(pl[idx].path, 44100, err, sizeof err);
     if (!t) { snprintf(toast_txt, sizeof toast_txt, "Specs not available"); toast_t = 2.0f; return; }
@@ -3373,7 +3456,7 @@ static void draw_specs_chip(float x, float y) {
     const float d = 22;
     int hv = hit(x, y, d, d);
     draw_info_sign(x + d / 2, y + d / 2, 10.0f, hv || specs_on);
-    if (clicked(x, y, d, d)) { if (specs_on) specs_on = 0; else if (g_song && cur >= 0) { specs_fill(g_song, pl[cur].label); specs_just = 1; } click = 0; }
+    if (clicked(x, y, d, d)) { if (specs_on) specs_on = 0; else if (g_song && cur >= 0) { specs_idx = cur; specs_fill(g_song, pl[cur].label); specs_just = 1; } click = 0; }
 }
 static void draw_specs_window(void) {
     if (!specs_on) return;
@@ -3402,6 +3485,10 @@ static void draw_specs_window(void) {
         text(x + 28, ty, 13, i == 0 ? VC[0] : DIM, v); ty += 22;
     }
     text(x + 28, y + h - 28, 11, FAINT, "Esc or a click outside closes");
+    if (specs_idx >= 0 && specs_idx < npl && pl[specs_idx].ma_id) {                 /* a Mod Archive entry: the link to its page there */
+        float lw = text_width("Mod Archive page", 12); int lh = hit(x + w - 28 - lw - 8, y + h - 34, lw + 16, 26);
+        text(x + w - 28 - lw, y + h - 29, 12, lh ? TXT : VC[0], "Mod Archive page");
+    }
 }
 static void draw_ctx_menu(void) {
     if (ctx_idx >= 0 && ctx_idx < npl) {
@@ -3687,7 +3774,7 @@ static void iter(void) {
                 case SDLK_o: ma_show(1); break;
                 case SDLK_v: { int t = 0; for (int k = 0; k < 4; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % 4]; view_persist(); } break;
                 case SDLK_ESCAPE: if (specs_on) specs_on = 0; else running = 0; break;
-                case SDLK_i: if (specs_on) specs_on = 0; else if (g_song && cur >= 0) { specs_fill(g_song, pl[cur].label); specs_just = 1; } break;
+                case SDLK_i: if (specs_on) specs_on = 0; else if (g_song && cur >= 0) { specs_idx = cur; specs_fill(g_song, pl[cur].label); specs_just = 1; } break;
                 case SDLK_SPACE: g_paused = !g_paused; break;
                 case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) > 0) play_index_sub(cur, song_subsong(g_song) - 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
                 case SDLK_RIGHT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0++; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) + 1 < song_subsongs(g_song)) play_index_sub(cur, song_subsong(g_song) + 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) + 1); break;
@@ -3765,6 +3852,16 @@ static void iter(void) {
         float k = ww ? (float)fdw / (float)ww / view_scale : 1;
         mx = ((float)mxi - (float)vpx / ((float)fdw / (ww ? ww : 1))) * k; my = ((float)myi - (float)(fdh - dh - vpy) / ((float)fdh / (wh ? wh : 1))) * k;
         { static int tm = -1; static float tx, ty; if (tm < 0) { const char *e = getenv("NGPLAYER_TEST_MOUSE"); tm = e && sscanf(e, "%f,%f", &tx, &ty) == 2; } if (tm) { mx = tx; my = ty; } }      /* test hook: the pointer at a fixed place (view units), for screenshots */
+        {   /* test hook: a scripted drag "x0,y0,x1,y1" (press at frame 10, move until frame 20, hold; NGPLAYER_TEST_DRAGUP=1 lifts the finger at frame 22) */
+            static int init, tf; static float d[4]; static int on;
+            if (!init) { init = 1; const char *e = getenv("NGPLAYER_TEST_DRAG"); on = e && sscanf(e, "%f,%f,%f,%f", &d[0], &d[1], &d[2], &d[3]) == 4; }
+            if (on) {
+                tf++;
+                float f = tf < 10 ? 0 : (tf > 20 ? 1 : (tf - 10) / 10.0f);
+                mx = d[0] + (d[2] - d[0]) * f; my = d[1] + (d[3] - d[1]) * f;
+                mouse_down = tf >= 10 && !(tf >= 22 && getenv("NGPLAYER_TEST_DRAGUP"));
+            }
+        }
         if (lp_on && !mouse_down) lp_on = 0;
         if (lp_on && !lp_fired && SDL_GetTicks() - lp_t >= 500) {      /* held still for half a second: open the menu like a right click */
             lp_fired = 1; lp_on = 0; lp_swallow = 1;
@@ -3797,7 +3894,10 @@ static void iter(void) {
                 float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;
                 int inside = cmx >= sx && cmx < sx + sw && cmy >= sy && cmy < sy + sh;
                 int on_x = cmx >= sx + sw - 38 && cmx < sx + sw - 14 && cmy >= sy + 14 && cmy < sy + 38;
-                if (!inside || on_x) specs_on = 0;
+                float llw = text_width("Mod Archive page", 12);
+                int on_link = specs_idx >= 0 && specs_idx < npl && pl[specs_idx].ma_id && cmx >= sx + sw - 28 - llw - 8 && cmx < sx + sw - 12 && cmy >= sy + sh - 34 && cmy < sy + sh - 8;
+                if (on_link) info_open(specs_idx);
+                else if (!inside || on_x) specs_on = 0;
                 click = 0; lp_swallow = 1;
             }
             rclick = 0;
@@ -3826,7 +3926,7 @@ static void iter(void) {
         gfx_set_texture(fonttex);
         ma_poll();
         draw_ui((double)(now - t0) / freq);
-        if (specs_test && g_song && cur >= 0 && frame > 20) { specs_fill(g_song, pl[cur].label); specs_test = 0; }
+        if (specs_test && g_song && cur >= 0 && frame > 20) { specs_idx = cur; specs_fill(g_song, pl[cur].label); specs_test = 0; }
         draw_ma_dialog((double)(now - t0) / freq);
         draw_specs_window();
         draw_dice_big(view_w, view_h);
