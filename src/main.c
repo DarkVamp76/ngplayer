@@ -3540,6 +3540,11 @@ static void iter(void) {
                 g_lag_ms += (L - g_lag_ms) * (g_lag_ms == 46.0f ? 1.0f : 0.5f);
             }
         }
+        {   /* iOS: nothing to play (no bundled songs, no files yet): draw a random module of The Mod Archive right at the start, once, so that there is a song */
+            static int first_shuffle;
+            if (!first_shuffle && !g_bg && npl == 0 && !g_song && !ma_busy() && SDL_GetTicks() > 800) { first_shuffle = 1; ma_random(); }
+            else if (!first_shuffle && npl > 0) first_shuffle = 1;
+        }
         ios_media_sync();
         if (g_bg) { if (!shot) song_end_advance(); SDL_Delay(100); return; }      /* in the background: no drawing, the sound goes on */
 #endif
