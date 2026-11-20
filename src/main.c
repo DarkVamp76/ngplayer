@@ -55,6 +55,13 @@ static const col OKC = { 0.35f, 0.95f, 0.55f, 1 };
 static const col WARN = { 1.0f, 0.45f, 0.35f, 1 };
 
 /* ================================================================== Audio / Zustand */
+#ifdef __EMSCRIPTEN__
+#define AUDIO_SAMPLES 2048
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+#define AUDIO_SAMPLES 4096                         /* iOS: AirPlay and Bluetooth need larger buffers, small ones crackle */
+#else
+#define AUDIO_SAMPLES 1024
+#endif
 #define RING 8192
 static int g_rate = 44100;
 static SDL_AudioDeviceID g_dev;
@@ -82,6 +89,15 @@ static int g_lastord = -1, g_lastrow = -1;
 static unsigned g_cb_seq;                     /* zaehlt Callbacks */
 static unsigned long long g_cb_rendered;      /* g_rendered am Ende des letzten Callbacks */
 static Uint64 g_cb_time;                      /* Zeitstempel des letzten Callbacks */
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+static unsigned scope_wp(unsigned wp) {
+    double el = (double)(SDL_GetPerformanceCounter() - g_cb_time) / (double)SDL_GetPerformanceFrequency() * (double)g_rate;
+    if (el < 0) el = 0; if (el > AUDIO_SAMPLES) el = AUDIO_SAMPLES;
+    return wp - (unsigned)AUDIO_SAMPLES + (unsigned)el;
+}
+#else
+static unsigned scope_wp(unsigned wp) { return wp; }
+#endif
 static int g_resync = 1;
 #ifdef __EMSCRIPTEN__
 /* Web: while a new song starts, the sound is held back until the silent media element of the lock screen has its track for the song (see probe_start).
@@ -301,8 +317,15 @@ static int ov_reset, view_reset = 1;
 static float pat_disp;
 static int pat_last_order = -1, pat_last_nrows = 64, pat_ch0;
 
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+#define SCOPE_LEN 8192                              /* iOS: more than one audio buffer (4096) plus the window of a scope */
+#else
 #define SCOPE_LEN 2048
+#endif
 static float g_scope[64 * SCOPE_LEN];
+/* The write position of the scope buffers jumps by one audio buffer per callback (iOS: 4096 samples = about 11 times a second), the picture would too. The window
+ * follows the time instead: it is one buffer behind the newest sample right after a callback and slides up to it until the next one. */
+static unsigned scope_wp(unsigned wp);
 
 static int g_open_sub;   /* gewaehlter Subsong (TFMX), bleibt bei R/Spulen erhalten */
 
@@ -650,7 +673,7 @@ static int resolve_row(const SongPos *sp, int vr, int *pat, int *row, int *other
 /* Scope of one voice: rising zero crossing as trigger; drawing area bx..bx+bw, centre line mid, height sh. The curve values go to the GPU pass. */
 static void chan_scope(int c, float bx2, float mid2, float bw2, float sh2, float lw, int vis) {
     (void)lw;
-    unsigned wp = song_scope_pos(g_song);
+    unsigned wp = scope_wp(song_scope_pos(g_song));
     const float *sb = g_scope + (size_t)c * SCOPE_LEN;
     enum { SPAN = 360 };
     int start = SPAN;
@@ -748,7 +771,12 @@ static void draw_pattern(float x, float y, float w, float h) {
     int nch = song_channels(g_song);
     char hb[64];
     snprintf(hb, sizeof hb, "ORD %02d  PAT %02d  ROW %02d/%02d", sp.order + 1, sp.pattern, sp.row, sp.nrows);
-    if (g_portrait) text(x + 18, y + 12, 12, DIM, hb);   /* Platz: Info links, Umschalter rechts */
+    if (g_portrait) {   /* room: info on the left, the switch on the right: the text gets shorter until it fits left of the tabs (they start 258 from the right edge) */
+        float room = w - 258 - 18 - 8;
+        if (text_width(hb, 12) > room) snprintf(hb, sizeof hb, "ORD %02d  ROW %02d/%02d", sp.order + 1, sp.row, sp.nrows);
+        if (text_width(hb, 12) > room) snprintf(hb, sizeof hb, "ROW %02d/%02d", sp.row, sp.nrows);
+        text(x + 18, y + 12, 12, DIM, hb);
+    }
     else text_right(x + w - 18, y + 12, 12, DIM, hb);
 
     pat_disp = g_pos;
@@ -799,7 +827,7 @@ static void draw_pattern(float x, float y, float w, float h) {
     }
     (void)strip;
     /* Zeilenbereich */
-    float ry0 = hy + hh + 8 + labh, ry1 = y + h - 10;
+    float ry0 = hy + hh + 8 + labh, ry1 = y + h - 10 - (g_portrait ? 28 : 0);      /* portrait: RPT / RND sit in the lower right corner of the card, the rows end above them */
     int nrows_vis = (int)((ry1 - ry0) / rowh);
     float mid = (ry0 + ry1) / 2 - rowh / 2;
     /* Playhead */
@@ -1056,7 +1084,7 @@ static void overview_update(float dt) {
     int nch = song_channels(g_song);
     if (nch > 64) nch = 64;
     /* Pegel je Kanal aus dem Scope-Puffer: Spitzenwert der letzten ~600 Frames */
-    unsigned wp = song_scope_pos(g_song);
+    unsigned wp = scope_wp(song_scope_pos(g_song));
     for (int c = 0; c < nch; c++) {
         const float *sb = g_scope + (size_t)c * SCOPE_LEN;
         float pk = 0;
@@ -2652,13 +2680,6 @@ static int gl_compile(GLenum type, const char *src) {
 }
 
 /* ---------------------------------------------------------------- Hauptschleife (als Funktion, damit sie auch im Browser laeuft) */
-#ifdef __EMSCRIPTEN__
-#define AUDIO_SAMPLES 2048
-#elif defined(__APPLE__) && TARGET_OS_IPHONE
-#define AUDIO_SAMPLES 4096                         /* iOS: AirPlay and Bluetooth need larger buffers, small ones crackle */
-#else
-#define AUDIO_SAMPLES 1024
-#endif
 static SDL_Window *win;
 static SDL_GLContext ctx;
 static const char *shot;
