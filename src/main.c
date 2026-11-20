@@ -162,6 +162,7 @@ int ios_safe_insets(SDL_Window *win, float *l, float *t, float *r, float *b);   
 void ios_media_setup(void);                                                       /* ios_glue.m: lock screen / CarPlay (Now Playing, remote commands) */
 void ios_media_update(const char *title, const char *artist, const char *album, int playing, double pos, double duration);
 int ios_media_poll(void);
+int ios_audio_event_poll(void);                                                    /* ios_glue.m: 1 = the route changed / an interruption ended (reopen the output), 2 = pause (the route fell back to the built-in speaker) */
 int ios_gl_buffers(SDL_Window *win, unsigned *fb, unsigned *cb);                   /* ios_glue.m: the window's framebuffer and colour renderbuffer */
 void ios_media_set_cover(const unsigned char *px, int w, int h);                    /* ios_glue.m: the cover of the song (RGBA, bottom row first, as glReadPixels gives it); NULL = none */
 float ios_output_latency_ms(void);                                               /* ios_glue.m: latency of the current output route in ms (AirPlay: ~2000) */
@@ -3524,9 +3525,34 @@ static void probe_start(int idx) {
     g_probe = song_open_sub(pl[idx].path, g_rate, g_open_sub, err, sizeof err);
     if (!g_probe) g_len_s = -1;
 }
+/* The audio output after a change of the route (CarPlay cable out, Bluetooth in ...) or an interruption (call, Siri): the output of SDL does not come back by itself, the
+ * sound stayed away until the app was closed. It is opened again (the song goes on where it is); if the route fell back to the built-in speaker the player pauses first
+ * (headphones / car gone: do not start to play loudly from the phone). A watchdog does the same when a song should be playing but the audio callback stands still. */
+static void audio_recover(void) {
+    ios_audio_longform();
+    if (g_dev) { SDL_CloseAudioDevice(g_dev); g_dev = 0; }
+    SDL_AudioSpec want, have; SDL_zero(want); SDL_zero(have);
+    want.freq = g_rate; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = AUDIO_SAMPLES; want.callback = audio_cb;
+    g_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    ios_audio_longform();
+    if (g_dev) SDL_PauseAudioDevice(g_dev, 0);
+    net_log("audio output opened again (%s)", g_dev ? "ok" : SDL_GetError());
+}
+static void audio_watch(void) {
+    static Uint32 recover_at, last_t, last_try; static unsigned last_seq;
+    Uint32 tn = SDL_GetTicks();
+    int ev = ios_audio_event_poll();
+    if (ev && tn - last_try < 1500) ev = 0;                                 /* the notifications that our own reopening causes */
+    if (ev) { if (ev & 2) g_paused = 1; recover_at = tn + 400; }          /* a moment for the new route to settle */
+    if (recover_at && (int)(tn - recover_at) >= 0) { recover_at = 0; audio_recover(); last_try = tn; last_t = tn; }
+    int should = g_song && !g_paused && !g_ended;
+    if (!should || g_cb_seq != last_seq) { last_seq = g_cb_seq; last_t = tn; return; }
+    if (tn - last_t > 2000 && tn - last_try > 5000) { last_try = tn; last_t = tn; net_log("audio callback stands still, reopening the output"); audio_recover(); }
+}
 static void ios_media_sync(void) {
+    audio_watch();
     int c; while ((c = ios_media_poll()) >= 0) {
-        if (c == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; }
+        if (c == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; if (!g_dev || SDL_GetAudioDeviceStatus(g_dev) != SDL_AUDIO_PLAYING) audio_recover(); }
         else if (c == 1) g_paused = 1;
         else if (c == 2) next_user(1);
         else if (c == 3) next_user(-1);
