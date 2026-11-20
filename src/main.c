@@ -39,7 +39,6 @@
 #endif
 
 #include "gfx.inc"
-static GLuint g_fb0, g_cb0;                  /* the framebuffer of the window: 0, except on iOS where SDL draws into its own framebuffer */
 
 /* ================================================================== Palette */
 static const col BG0 = { 0.035f, 0.043f, 0.078f, 1 };
@@ -163,7 +162,6 @@ void ios_media_setup(void);                                                     
 void ios_media_update(const char *title, const char *artist, const char *album, int playing, double pos, double duration);
 int ios_media_poll(void);
 int ios_audio_event_poll(void);                                                    /* ios_glue.m: 1 = the route changed / an interruption ended (reopen the output), 2 = pause (the route fell back to the built-in speaker) */
-int ios_gl_buffers(SDL_Window *win, unsigned *fb, unsigned *cb);                   /* ios_glue.m: the window's framebuffer and colour renderbuffer */
 void ios_media_set_cover(const unsigned char *px, int w, int h);                    /* ios_glue.m: the cover of the song (RGBA, bottom row first, as glReadPixels gives it); NULL = none */
 float ios_output_latency_ms(void);                                               /* ios_glue.m: latency of the current output route in ms (AirPlay: ~2000) */
 void ios_audio_longform(void);                                                    /* ios_glue.m: AirPlay 2 (HomePod) needs the long-form route sharing policy */
@@ -1034,7 +1032,7 @@ static void draw_voxel(float x, float y, float w, float h) {
             polyline(xy, 2, 0.5f, 3.0f, alpha(FAINT, 0.18f));
         }
     }
-    GLuint vt = vx_render(aw, ah, fx, fy, 2.0f * (hor - ay) / ah - 1.0f, CAMY, Z0, NSEG, CUBE, SEAM, vx_lv, VC[0], VC[1], VC[2], fogc, BG0);
+    gfx_tex *vt = vx_render(aw, ah, fx, fy, 2.0f * (hor - ay) / ah - 1.0f, CAMY, Z0, NSEG, CUBE, SEAM, vx_lv, VC[0], VC[1], VC[2], fogc, BG0);
     tex_quad(vt, ax, ay, aw, ah, C(1, 1, 1, 1));
     view_switch(x, y, w);
 }
@@ -2690,27 +2688,15 @@ static void draw_ui_portrait(float W, float H) {
 /* ================================================================== Start */
 static void save_screenshot(const char *file, int w, int h) {
     uint8_t *px = (uint8_t *)malloc((size_t)w * (size_t)h * 4), *fl = (uint8_t *)malloc((size_t)w * (size_t)h * 4);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    gfx_read_pixels(w, h, px);
     for (int y = 0; y < h; y++) memcpy(fl + (size_t)y * (size_t)w * 4, px + (size_t)(h - 1 - y) * (size_t)w * 4, (size_t)w * 4);
     SDL_Surface *sf = SDL_CreateRGBSurfaceFrom(fl, w, h, 32, w * 4, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
     if (sf) { SDL_SaveBMP(sf, file); SDL_FreeSurface(sf); }
     free(px); free(fl);
 }
 
-static int gl_compile(GLenum type, const char *src) {
-    GLuint sh = glCreateShader(type);
-    glShaderSource(sh, 1, &src, NULL);
-    glCompileShader(sh);
-    GLint ok = 0;
-    glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
-    if (!ok) { char log[1024]; glGetShaderInfoLog(sh, sizeof log, NULL, log); fprintf(stderr, "Shader error: %s\n", log); return 0; }
-    return (int)sh;
-}
-
 /* ---------------------------------------------------------------- Hauptschleife (als Funktion, damit sie auch im Browser laeuft) */
 static SDL_Window *win;
-static SDL_GLContext ctx;
 static const char *shot;
 static int shot_frames, vsync_ok, running, frame, fullscreen;
 static Uint64 t0, tlast;
@@ -3190,7 +3176,7 @@ static void ma_info_ask(int id) {                     /* once per ID */
 static char g_cover_by[64];                          /* the artist shown on the cover ("by ...") */
 
 #define COVER_PX 600
-static GLuint cv_fbo, cv_tex;
+static gfx_tex *cv_tex;
 static unsigned char cv_buf[COVER_PX * COVER_PX * 4];
 static int cover_pending, g_cover_gen;
 static col hue_col(float h) {                         /* hue 0..1 at full saturation, brightness 0.95 */
@@ -3206,20 +3192,10 @@ static void cover_render(int dw, int dh) {
     snprintf(title, sizeof title, "%s", tt[0] ? tt : (cur >= 0 && cur < npl ? pl[cur].label : "ngPlayer"));
     unsigned hs = 2166136261u; for (const char *q = title; *q; q++) hs = (hs ^ (unsigned char)*q) * 16777619u;
     col acc = hue_col((float)(hs % 360) / 360.0f);
-    if (kind > 0) { c3_setup(kind - 1); c3_render(kind - 1, 0.0f, c3gl[kind - 1].fbo2, dw, dh); }       /* the card, front on, into the picture the Specs window uses too */
-    if (!cv_fbo) {
-        glGenTextures(1, &cv_tex); glBindTexture(GL_TEXTURE_2D, cv_tex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, COVER_PX, COVER_PX, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glGenFramebuffers(1, &cv_fbo); glBindFramebuffer(GL_FRAMEBUFFER, cv_fbo);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, cv_tex, 0);
-    }
-    glBindFramebuffer(GL_FRAMEBUFFER, cv_fbo);
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { glBindFramebuffer(GL_FRAMEBUFFER, g_fb0); return; }
-    glViewport(0, 0, COVER_PX, COVER_PX);
-    glClearColor(BG0.r, BG0.g, BG0.b, 1); glClear(GL_COLOR_BUFFER_BIT);
-    glUseProgram(prog); glUniform2f(u_res, COVER_PX, COVER_PX); glUniform1f(u_pxs, 1.0f); glUniform1i(u_tex, 0);
-    glBindVertexArray(vao); glBindTexture(GL_TEXTURE_2D, fonttex);
+    if (kind > 0) { c3_setup(kind - 1); c3_render(kind - 1, 0.0f, c3gl[kind - 1].color2, dw, dh); }       /* the card, front on, into the picture the Specs window uses too */
+    if (!cv_tex) cv_tex = gfx_tex_create(COVER_PX, COVER_PX, GFX_RGBA8, NULL, GFX_TARGET);
+    if (!gfx_target_begin(cv_tex, BG0.r, BG0.g, BG0.b, 1)) return;
+    gfx_set_params(COVER_PX, COVER_PX, 1.0f); gfx_set_texture(fonttex);
     set_additive(0);
     rect_grad(0, 0, COVER_PX, COVER_PX, mix(BG0, acc, 0.32f), BG0);
     const float fs = 50, maxw = 520;
@@ -3248,8 +3224,8 @@ static void cover_render(int dw, int dh) {
     rect(250, 530, 100, 4, alpha(acc, 0.9f));
     text((COVER_PX - text_width("ngPlayer", 26)) / 2, 548, 26, acc, "ngPlayer");
     flush();
-    glReadPixels(0, 0, COVER_PX, COVER_PX, GL_RGBA, GL_UNSIGNED_BYTE, cv_buf);
-    glBindFramebuffer(GL_FRAMEBUFFER, g_fb0);
+    gfx_read_pixels(COVER_PX, COVER_PX, cv_buf);
+    gfx_target_end(cv_tex);
 #ifdef __EMSCRIPTEN__
     web_media_set_cover(cv_buf, COVER_PX, COVER_PX, g_cover_gen);
 #else
@@ -3748,7 +3724,7 @@ static void iter(void) {
 #endif
         int ww, wh, dw, dh;
         SDL_GetWindowSize(win, &ww, &wh);
-        SDL_GL_GetDrawableSize(win, &dw, &dh);
+        gfx_drawable_size(win, &dw, &dh);
         int fdw = dw, fdh = dh, vpx = 0, vpy = 0;      /* the whole framebuffer; dw/dh become the part the UI is laid out in */
 #if defined(__APPLE__) && TARGET_OS_IPHONE
         {   /* iOS: keep the UI out of the notch / Dynamic Island, the home bar and the rounded corners (insets in points, from ios_glue.m: SDL2 has no safe-area API) */
@@ -3823,6 +3799,7 @@ static void iter(void) {
         double dt = (double)(now - tlast) / freq;
         tlast = now;
         if (dt > 0.1) dt = 0.1;
+        { static int fx = -1; if (fx < 0) fx = getenv("NGPLAYER_TEST_FIXDT") != NULL; if (fx) dt = 1.0 / 60; }      /* test hook: fixed time step, so that screenshots repeat exactly */
         g_dt = dt;
         g_fid++;
         analyse((float)dt);
@@ -3835,18 +3812,9 @@ static void iter(void) {
 #if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
         if (cover_pending && g_song) { cover_pending = 0; cover_render(dw, dh); }      /* the cover of the new song, drawn off screen (after the card of the song was rendered) */
 #endif
-        g_vpw = dw; g_vph = dh; g_vpx = vpx; g_vpy = vpy;
-        glBindFramebuffer(GL_FRAMEBUFFER, g_fb0);
-        glViewport(0, 0, fdw, fdh);
-        glClearColor(BG0.r, BG0.g, BG0.b, 1);
-        glClear(GL_COLOR_BUFFER_BIT);
-        glViewport(vpx, vpy, dw, dh);
-        glUseProgram(prog);
-        glUniform2f(u_res, view_w, view_h);
-        glUniform1f(u_pxs, view_scale);
-        glUniform1i(u_tex, 0);
-        glBindVertexArray(vao);
-        glBindTexture(GL_TEXTURE_2D, fonttex);
+        gfx_frame_begin(fdw, fdh, vpx, vpy, dw, dh, BG0.r, BG0.g, BG0.b);
+        gfx_set_params(view_w, view_h, view_scale);
+        gfx_set_texture(fonttex);
         ma_poll();
         draw_ui((double)(now - t0) / freq);
         if (specs_test && g_song && cur >= 0 && frame > 20) { specs_fill(g_song, pl[cur].label); specs_test = 0; }
@@ -3864,9 +3832,8 @@ static void iter(void) {
             else ios_airplay_place(win, 0, 0, 0, 0);
             g_ap_seen = 0;
         }
-        glBindFramebuffer(GL_FRAMEBUFFER, g_fb0); glBindRenderbuffer(GL_RENDERBUFFER, g_cb0);      /* what SDL expects at the swap */
 #endif
-        SDL_GL_SwapWindow(win);
+        gfx_frame_end(win);
 #ifndef __EMSCRIPTEN__
         double spent = (double)(SDL_GetPerformanceCounter() - now) / freq;
         if (!vsync_ok || shot) { if (spent < 0.012) SDL_Delay((Uint32)((0.0167 - spent) * 1000)); }
@@ -3935,15 +3902,7 @@ int main(int argc, char **argv) {
     ios_media_setup();
     SDL_AddEventWatch(ios_bg_watch, NULL);
 #endif
-#ifdef NG_GLES
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-#else
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-#endif
+    gfx_window_attrs();
 #ifndef __EMSCRIPTEN__
     if (!shot) { settings_load(); ma_list_load(); }
 #define WIN_X0 g_win_x
@@ -3957,7 +3916,7 @@ int main(int argc, char **argv) {
 #define WIN_H0 860
 #endif
     win = SDL_CreateWindow("ngPlayer", WIN_X0, WIN_Y0, WIN_W0, WIN_H0,
-                                       SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+                                       gfx_window_flags() | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!win) { fprintf(stderr, "Fenster: %s\n", SDL_GetError()); return 1; }
     SDL_SetWindowMinimumSize(win, 360, 480);
     { const char *ts = getenv("NGPLAYER_TEST_SIZE"); int tw, th; if (ts && sscanf(ts, "%dx%d", &tw, &th) == 2) SDL_SetWindowSize(win, tw, th); }   /* test hook: fixed window size for screenshots */      /* schmal erlaubt: dann greift das Hochformat-Layout */
@@ -3965,54 +3924,15 @@ int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
     EM_ASM({ if (window.ngFit) window.ngFit(); });
 #endif
-    ctx = SDL_GL_CreateContext(win);
-    if (!ctx) { fprintf(stderr, "OpenGL-3.3-Kontext: %s\n", SDL_GetError()); return 1; }
-    if (gl_load()) return 1;
-#if defined(__APPLE__) && TARGET_OS_IPHONE
-    { unsigned fb = 0, cb = 0; if (!ios_gl_buffers(win, &fb, &cb)) { g_fb0 = fb; g_cb0 = cb; } }      /* iOS: the window's framebuffer is not 0 */
-#endif
     { const char *tm = getenv("NGPLAYER_TEST_MA"); if (tm) { snprintf(ma_buf, sizeof ma_buf, "%s", tm); ma_len = (int)strlen(ma_buf); ma_show(1); ma_start(); } }
-    vsync_ok = SDL_GL_SetSwapInterval(-1) == 0 || SDL_GL_SetSwapInterval(1) == 0;
-
-    int vsh = gl_compile(GL_VERTEX_SHADER, VS), fsh = gl_compile(GL_FRAGMENT_SHADER, FS);
-    if (!vsh || !fsh) return 1;
-    prog = glCreateProgram();
-    glAttachShader(prog, (GLuint)vsh); glAttachShader(prog, (GLuint)fsh);
-    glLinkProgram(prog);
-    GLint lk = 0;
-    glGetProgramiv(prog, GL_LINK_STATUS, &lk);
-    if (!lk) { char log[1024]; glGetProgramInfoLog(prog, sizeof log, NULL, log); fprintf(stderr, "Link: %s\n", log); return 1; }
-    u_res = glGetUniformLocation(prog, "res");
-    u_pxs = glGetUniformLocation(prog, "pxs");
-    u_tex = glGetUniformLocation(prog, "tex");
-    u_rip = glGetUniformLocation(prog, "rip");
-    u_rt = glGetUniformLocation(prog, "rt");
 
     vb = (vtx *)malloc(sizeof(vtx) * MAXV);
-    glGenVertexArrays(1, &vao);
-    glBindVertexArray(vao);
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(vtx) * MAXV), NULL, GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0); glVertexAttribPointer(0, 2, GL_FLOAT, 0, sizeof(vtx), (void *)0);
-    glEnableVertexAttribArray(1); glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof(vtx), (void *)8);
-    glEnableVertexAttribArray(2); glVertexAttribPointer(2, 4, GL_FLOAT, 0, sizeof(vtx), (void *)16);
-    glEnableVertexAttribArray(3); glVertexAttribPointer(3, 4, GL_FLOAT, 0, sizeof(vtx), (void *)32);
-
+    if (gfx_init(win, MAXV)) return 1;
+    vsync_ok = gfx_vsync();
     for (int i = 0; i < 256; i++) glyph_idx[i] = -1;
     for (int i = 0; i < FONT_GLYPH_COUNT; i++) if (font_glyphs[i].code < 256) glyph_idx[font_glyphs[i].code] = i;
-    glGenTextures(1, &fonttex);
-    glBindTexture(GL_TEXTURE_2D, fonttex);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, FONT_ATLAS_W, FONT_ATLAS_H, 0, GL_RED, GL_UNSIGNED_BYTE, font_atlas);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, fonttex);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    fonttex = gfx_tex_create(FONT_ATLAS_W, FONT_ATLAS_H, GFX_R8, font_atlas, GFX_MIPS);
+    gfx_set_texture(fonttex);
 
 #ifdef __EMSCRIPTEN__
     g_mobile = EM_ASM_INT({ return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 1 : 0; });
@@ -4064,7 +3984,7 @@ int main(int argc, char **argv) {
 #endif
     if (g_dev) SDL_CloseAudioDevice(g_dev);
     unload();
-    SDL_GL_DeleteContext(ctx);
+    gfx_shutdown();
     SDL_DestroyWindow(win);
     SDL_Quit();
     return 0;

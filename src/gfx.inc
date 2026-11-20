@@ -1,208 +1,22 @@
-/* ================================================================== OpenGL loader */
-#ifdef __APPLE__
-#include <TargetConditionals.h>
-#endif
-#if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
-#define NG_GLES 1                                  /* OpenGL ES 3: the browser (WebGL 2) and iOS; the desktop uses its own loader for GL 3.3 core */
-#endif
-#ifdef __EMSCRIPTEN__
-#include <GLES3/gl3.h>
-static int gl_load(void) { return 0; }
-#define GLSL_VERSION "#version 300 es\nprecision highp float;\nprecision highp int;\n"
-#elif defined(NG_GLES)
-#include <OpenGLES/ES3/gl.h>                       /* iOS (deprecated by Apple, still works) */
-static int gl_load(void) { return 0; }
-#define GLSL_VERSION "#version 300 es\nprecision highp float;\nprecision highp int;\n"
-#else
-#define GLSL_VERSION "#version 330 core\n"
-
-typedef unsigned int GLuint;
-typedef int GLint;
-typedef int GLsizei;
-typedef unsigned int GLenum;
-typedef float GLfloat;
-typedef char GLchar;
-typedef long GLsizeiptr;
-typedef long GLintptr;
-
-#define GL_COLOR_BUFFER_BIT 0x4000
-#define GL_BLEND 0x0BE2
-#define GL_SRC_ALPHA 0x0302
-#define GL_ONE_MINUS_SRC_ALPHA 0x0303
-#define GL_ONE 1
-#define GL_TEXTURE_2D 0x0DE1
-#define GL_TEXTURE_MIN_FILTER 0x2801
-#define GL_TEXTURE_MAG_FILTER 0x2800
-#define GL_TEXTURE_WRAP_S 0x2802
-#define GL_TEXTURE_WRAP_T 0x2803
-#define GL_LINEAR 0x2601
-#define GL_LINEAR_MIPMAP_LINEAR 0x2703
-#define GL_CLAMP_TO_EDGE 0x812F
-#define GL_RED 0x1903
-#define GL_R8 0x8229
-#define GL_RGBA 0x1908
-#define GL_UNSIGNED_BYTE 0x1401
-#define GL_UNSIGNED_SHORT_5_5_5_1 0x8034
-#define GL_FLOAT 0x1406
-#define GL_TRIANGLES 4
-#define GL_ARRAY_BUFFER 0x8892
-#define GL_DYNAMIC_DRAW 0x88E8
-#define GL_VERTEX_SHADER 0x8B31
-#define GL_FRAGMENT_SHADER 0x8B30
-#define GL_COMPILE_STATUS 0x8B81
-#define GL_LINK_STATUS 0x8B82
-#define GL_UNPACK_ALIGNMENT 0x0CF5
-#define GL_PACK_ALIGNMENT 0x0D05
-#define GL_DEPTH_BUFFER_BIT 0x100
-#define GL_DEPTH_TEST 0x0B71
-#define GL_LESS 0x0201
-#define GL_LEQUAL 0x0203
-#define GL_RGB 0x1907
-#define GL_UNSIGNED_SHORT_5_6_5 0x8363
-#define GL_UNSIGNED_SHORT 0x1403
-#define GL_UNSIGNED_INT 0x1405
-#define GL_STATIC_DRAW 0x88E4
-#define GL_ELEMENT_ARRAY_BUFFER 0x8893
-#define GL_FRAMEBUFFER 0x8D40
-#define GL_RENDERBUFFER 0x8D41
-#define GL_COLOR_ATTACHMENT0 0x8CE0
-#define GL_DEPTH_ATTACHMENT 0x8D00
-#define GL_DEPTH_COMPONENT24 0x81A6
-#define GL_FRAMEBUFFER_COMPLETE 0x8CD5
-#define GL_TEXTURE0 0x84C0
-#define GL_CULL_FACE 0x0B44
-#define GL_PROGRAM_POINT_SIZE 0x8642
-#define GL_R32F 0x822E
-#define GL_RGBA32F 0x8814
-#define GL_NEAREST 0x2600
-#define GL_TEXTURE1 0x84C1
-#define GL_TEXTURE2 0x84C2
-#define GL_POINTS 0
-
-#define GLFUNCS(X) \
-    X(void, glClearColor, (GLfloat, GLfloat, GLfloat, GLfloat)) \
-    X(void, glClear, (GLuint)) \
-    X(void, glViewport, (GLint, GLint, GLsizei, GLsizei)) \
-    X(void, glEnable, (GLenum)) \
-    X(void, glBlendFunc, (GLenum, GLenum)) \
-    X(void, glGenTextures, (GLsizei, GLuint *)) \
-    X(void, glBindTexture, (GLenum, GLuint)) \
-    X(void, glTexImage2D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *)) \
-    X(void, glTexParameteri, (GLenum, GLenum, GLint)) \
-    X(void, glPixelStorei, (GLenum, GLint)) \
-    X(void, glDrawArrays, (GLenum, GLint, GLsizei)) \
-    X(void, glReadPixels, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void *)) \
-    X(GLuint, glCreateShader, (GLenum)) \
-    X(void, glShaderSource, (GLuint, GLsizei, const GLchar *const *, const GLint *)) \
-    X(void, glCompileShader, (GLuint)) \
-    X(void, glGetShaderiv, (GLuint, GLenum, GLint *)) \
-    X(void, glGetShaderInfoLog, (GLuint, GLsizei, GLsizei *, GLchar *)) \
-    X(GLuint, glCreateProgram, (void)) \
-    X(void, glAttachShader, (GLuint, GLuint)) \
-    X(void, glLinkProgram, (GLuint)) \
-    X(void, glGetProgramiv, (GLuint, GLenum, GLint *)) \
-    X(void, glGetProgramInfoLog, (GLuint, GLsizei, GLsizei *, GLchar *)) \
-    X(void, glUseProgram, (GLuint)) \
-    X(void, glDeleteShader, (GLuint)) \
-    X(GLint, glGetUniformLocation, (GLuint, const GLchar *)) \
-    X(void, glUniform1i, (GLint, GLint)) \
-    X(void, glUniform1f, (GLint, GLfloat)) \
-    X(void, glUniform2f, (GLint, GLfloat, GLfloat)) \
-    X(void, glUniform4fv, (GLint, GLsizei, const GLfloat *)) \
-    X(void, glGenVertexArrays, (GLsizei, GLuint *)) \
-    X(void, glBindVertexArray, (GLuint)) \
-    X(void, glGenBuffers, (GLsizei, GLuint *)) \
-    X(void, glBindBuffer, (GLenum, GLuint)) \
-    X(void, glBufferData, (GLenum, GLsizeiptr, const void *, GLenum)) \
-    X(void, glBufferSubData, (GLenum, GLintptr, GLsizeiptr, const void *)) \
-    X(void, glEnableVertexAttribArray, (GLuint)) \
-    X(void, glVertexAttribPointer, (GLuint, GLint, GLenum, unsigned char, GLsizei, const void *)) \
-    X(void, glGenerateMipmap, (GLenum)) \
-    X(void, glDisable, (GLenum)) \
-    X(void, glTexSubImage2D, (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void *)) \
-    X(void, glDepthFunc, (GLenum)) \
-    X(void, glActiveTexture, (GLenum)) \
-    X(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *)) \
-    X(void, glDrawArraysInstanced, (GLenum, GLint, GLsizei, GLsizei)) \
-    X(void, glVertexAttribDivisor, (GLuint, GLuint)) \
-    X(void, glUniform3f, (GLint, GLfloat, GLfloat, GLfloat)) \
-    X(void, glUniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat)) \
-    X(void, glUniform1fv, (GLint, GLsizei, const GLfloat *)) \
-    X(void, glUniformMatrix4fv, (GLint, GLsizei, unsigned char, const GLfloat *)) \
-    X(void, glGenFramebuffers, (GLsizei, GLuint *)) \
-    X(void, glBindFramebuffer, (GLenum, GLuint)) \
-    X(void, glFramebufferTexture2D, (GLenum, GLenum, GLenum, GLuint, GLint)) \
-    X(void, glGenRenderbuffers, (GLsizei, GLuint *)) \
-    X(void, glBindRenderbuffer, (GLenum, GLuint)) \
-    X(void, glRenderbufferStorage, (GLenum, GLenum, GLsizei, GLsizei)) \
-    X(void, glFramebufferRenderbuffer, (GLenum, GLenum, GLenum, GLuint)) \
-    X(GLenum, glCheckFramebufferStatus, (GLenum))
-
-#define X(ret, name, args) static ret(*name) args;
-GLFUNCS(X)
-#undef X
-
-static int gl_load(void) {
-#define X(ret, name, args) \
-    name = (ret(*) args)SDL_GL_GetProcAddress(#name); \
-    if (!name) { fprintf(stderr, "missing OpenGL function %s\n", #name); return -1; }
-    GLFUNCS(X)
-#undef X
-    return 0;
-}
-
-#endif
+/* the batched 2D renderer of ngPlayer: the CPU side (vertices, shapes, text); the GPU side is behind gfx.h (gfx_gl.c / gfx_metal.m). */
+#include "gfx.h"
 
 /* ================================================================== batched 2D renderer */
 
 typedef struct { float r, g, b, a; } col;
-typedef struct { float x, y, u, v, r, g, b, a, m, p1, p2, p3; } vtx;
+typedef gfx_vtx vtx;
 
 #define MAXV 200000
 static vtx *vb;
 static int nv;
 static int add_blend;
-static GLuint prog, vao, vbo, fonttex;
-static GLint u_res, u_pxs, u_tex, u_rip, u_rt;
+static gfx_tex *fonttex;
 static float view_w, view_h, view_scale = 1;
 static int glyph_idx[256];
 
-static const char *VS =
-    GLSL_VERSION
-    "layout(location=0) in vec2 pos; layout(location=1) in vec2 uv; layout(location=2) in vec4 col;"
-    "layout(location=3) in vec4 par;\n"
-    "uniform vec2 res; out vec2 vuv; out vec4 vcol; out vec4 vpar;\n"
-    "void main(){ vuv=uv; vcol=col; vpar=par;"
-    " gl_Position=vec4(pos.x/res.x*2.0-1.0, 1.0-pos.y/res.y*2.0, 0.0, 1.0); }\n";
-
-static const char *FS =
-    GLSL_VERSION
-    "in vec2 vuv; in vec4 vcol; in vec4 vpar; out vec4 o;\n"
-    "uniform sampler2D tex; uniform float pxs; uniform vec4 rip[16]; uniform float rt;\n"
-    "float sdbox(vec2 p, vec2 h, float r){ vec2 q=abs(p)-h+vec2(r); return length(max(q,0.0))+min(max(q.x,q.y),0.0)-r; }\n"
-    "void main(){\n"
-    " int m=int(vpar.x+0.5);\n"
-    " if(m==0){ o=vcol; }\n"
-    " else if(m==1){ float a=texture(tex,vuv).r; o=vec4(vcol.rgb,vcol.a*a); }\n"
-    " else if(m==2){ float d=sdbox(vuv,vpar.yz,vpar.w); o=vec4(vcol.rgb,vcol.a*clamp(0.5-d*pxs,0.0,1.0)); }\n"
-    " else if(m==3){ float t=abs(vuv.y); o=vec4(vcol.rgb,vcol.a*exp(-t*t*vpar.y)); }\n"
-    " else if(m==7){ float d0=sdbox(vuv,vpar.yz,vpar.w); float mk=clamp(0.5-d0*pxs,0.0,1.0);\n"
-    "  float s=0.0, e=0.0;\n"
-    "  for(int i=0;i<16;i++){ vec4 r=rip[i]; if(r.z>0.001){ vec2 q=(vuv-r.xy)*vec2(1.0,1.5); float d=length(q);\n"
-    "   s+=sin(d*0.62-rt*4.0+r.w)*exp(-d*0.05)*r.z; e+=exp(-d*d*0.02)*r.z; } }\n"
-    "  float v=clamp(0.5+0.55*s,0.0,1.0);\n"
-    "  vec3 c=vec3(0.015,0.03,0.24)+vec3(0.08,0.26,0.70)*v*v+vec3(0.25,0.45,0.55)*clamp(e*0.30,0.0,1.0)*v;\n"
-    "  float sl=0.84+0.16*step(1.0,mod(floor(vuv.y),2.0));\n"
-    "  o=vec4(c*sl*vcol.rgb,vcol.a*mk); }\n"
-    " else if(m==8){ vec4 t=texture(tex,vuv); o=vec4(t.rgb*vcol.rgb,t.a*vcol.a); }\n"
-    " else if(m==5){ float d=sdbox(vuv,vpar.yz,vpar.w); float a=clamp(1.0-d/vpar.w,0.0,1.0); o=vec4(vcol.rgb,vcol.a*a*a); }\n"
-    " else { o=vec4(vcol.rgb,vcol.a*exp(-dot(vuv,vuv)/(2.0*vpar.y*vpar.y))); }\n"
-    "}\n";
-
 static void flush(void) {
     if (!nv) return;
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)((size_t)nv * sizeof(vtx)), vb);
-    glDrawArrays(GL_TRIANGLES, 0, nv);
+    gfx_draw(vb, nv);
     nv = 0;
 }
 
@@ -210,7 +24,7 @@ static void set_additive(int on) {
     if (on == add_blend) return;
     flush();
     add_blend = on;
-    glBlendFunc(GL_SRC_ALPHA, on ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+    gfx_set_additive(on);
 }
 
 static void V(float x, float y, float u, float v, col c, float m, float p1, float p2, float p3) {
@@ -255,20 +69,19 @@ static void tri(float x0, float y0, float x1, float y1, float x2, float y2, col 
 /* XTC-style water ripples: 16 sources (x, y offset from the box centre, amplitude, phase), time t; rounded box x,y,w,h,r */
 static void ripples(float x, float y, float w, float h, float r, float t, const float *src) {
     flush();
-    glUniform4fv(u_rip, 16, src);
-    glUniform1f(u_rt, t);
+    gfx_set_ripples(src, t);
     sdf_quad(x, y, w, h, 1.0f, C(1, 1, 1, 1), 7, w / 2, h / 2, r);
     flush();
 }
 
 /* textured quad (own texture, drawn with the main sampler): photo of a sound card */
-static void tex_quad(GLuint t, float x, float y, float w, float h, col c) {
+static void tex_quad(gfx_tex *t, float x, float y, float w, float h, col c) {
     flush();
-    glBindTexture(GL_TEXTURE_2D, t);
+    gfx_set_texture(t);
     V(x, y, 0, 0, c, 8, 0, 0, 0); V(x + w, y, 1, 0, c, 8, 0, 0, 0); V(x, y + h, 0, 1, c, 8, 0, 0, 0);
     V(x + w, y, 1, 0, c, 8, 0, 0, 0); V(x + w, y + h, 1, 1, c, 8, 0, 0, 0); V(x, y + h, 0, 1, c, 8, 0, 0, 0);
     flush();
-    glBindTexture(GL_TEXTURE_2D, fonttex);
+    gfx_set_texture(fonttex);
 }
 
 /* soft anti-aliased polyline, xy = n points; w half width in px, k = falloff */
