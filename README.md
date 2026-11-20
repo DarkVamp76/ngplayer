@@ -68,7 +68,7 @@ Planned: 15-sample MOD, WAV/VOC, MP1/MP2/MP3, more FM formats (RAD).
 - Written in C. The replayer and mixer are independent of the interface; one loader and replayer per format
   behind a common song layer.
 - Replayer behaviour is checked against reference renders with an automated regression suite.
-- Interface: SDL2 for window, input and audio, **OpenGL 3.3** for drawing. A batched renderer draws rounded
+- Interface: SDL2 for window, input and audio, **OpenGL 3.3** for drawing (behind a small interface, `src/gfx.h`, so that another backend can replace it). A batched renderer draws rounded
   rectangles via signed distance fields, glow, polylines and a baked glyph atlas from a single vertex buffer.
 - The audio thread renders in short slices and reports every row change with its sample position, so the
   display scrolls exactly in time with what you hear.
