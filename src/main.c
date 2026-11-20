@@ -2540,9 +2540,17 @@ static void draw_ui_portrait(float W, float H) {
         float tsize = 19;
         char t2[160] = "";                                                         /* the second line of a long title (portrait layout: phones, narrow windows) */
         if (text_width(title, 19) > tmax - 70) {                      /* a long title leaves no room for the sound card next to the time: two lines, a little smaller and narrower */
-            float wmax = tmax - 80, ts2 = 16;
+            float wmax = tmax - 80, ts2 = 16, best = 1e9f;
             int n = (int)strlen(title), cut = -1;
-            for (int i = 1; i < n; i++) if (title[i] == ' ') { char tmp[160]; memcpy(tmp, title, (size_t)i); tmp[i] = 0; if (text_width(tmp, ts2) <= wmax) cut = i; else break; }
+            for (int i = 1; i < n; i++) if (title[i] == ' ') {                  /* the break after which the longer line is the shortest (balanced lines), both lines fit */
+                char tmp[160]; memcpy(tmp, title, (size_t)i); tmp[i] = 0;
+                float w1 = text_width(tmp, ts2); if (w1 > wmax) break;
+                const char *r = title + i; while (*r == ' ') r++;
+                float w2 = text_width(r, ts2), w = w1 > w2 ? w1 : w2;
+                if (w2 <= wmax && w < best) { best = w; cut = i; }
+            }
+            if (cut < 0)                                                           /* the rest does not fit anywhere: break where the first line is full (the second is shortened) */
+                for (int i = 1; i < n; i++) if (title[i] == ' ') { char tmp[160]; memcpy(tmp, title, (size_t)i); tmp[i] = 0; if (text_width(tmp, ts2) <= wmax) cut = i; else break; }
             if (cut > 0) {
                 const char *r = title + cut; while (*r == ' ') r++;
                 snprintf(t2, sizeof t2, "%s", r); title[cut] = 0; fit_text(t2, wmax, ts2); tsize = ts2;
