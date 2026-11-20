@@ -3195,11 +3195,6 @@ static void cover_render(int dw, int dh) {
     glBindVertexArray(vao); glBindTexture(GL_TEXTURE_2D, fonttex);
     set_additive(0);
     rect_grad(0, 0, COVER_PX, COVER_PX, mix(BG0, acc, 0.32f), BG0);
-    set_additive(1); blob(300, 235, 150, alpha(acc, 0.50f)); set_additive(0);
-    if (kind > 0) {
-        float cw = 500, chh = cw / c3_box_aspect(kind - 1);
-        tex_quad(c3_texture_swing(kind - 1), (COVER_PX - cw) / 2, 235 - chh / 2, cw, chh, C(1, 1, 1, 1));
-    }
     const float fs = 50, maxw = 520;
     char l1[160] = "", l2[160] = "";
     if (text_width(title, fs) <= maxw) snprintf(l1, sizeof l1, "%s", title);
@@ -3212,7 +3207,14 @@ static void cover_render(int dw, int dh) {
         snprintf(l2, sizeof l2, "%s", r); fit_text(l2, maxw, fs);
     }
     char byl[80] = ""; if (g_cover_by[0]) { snprintf(byl, sizeof byl, "by %s", g_cover_by); fit_text(byl, maxw, 32); }
-    float ty = l2[0] ? (byl[0] ? 372 : 392) : (byl[0] ? 396 : 420);
+    const float cyc = l2[0] ? 190.0f : 235.0f;       /* two lines of title (and the artist): the card sits higher, so that the lower part has room */
+    set_additive(1); blob(300, cyc, 150, alpha(acc, 0.50f)); set_additive(0);
+    if (kind > 0) {
+        float cw = l2[0] ? 440 : 500, chh = cw / c3_box_aspect(kind - 1);
+        if (l2[0] && chh > 230) { chh = 230; cw = chh * c3_box_aspect(kind - 1); }       /* two lines of title: the card is a little smaller */
+        tex_quad(c3_texture_swing(kind - 1), (COVER_PX - cw) / 2, cyc - chh / 2, cw, chh, C(1, 1, 1, 1));
+    }
+    float ty = l2[0] ? (byl[0] ? 336 : 360) : (byl[0] ? 396 : 420);
     text((COVER_PX - text_width(l1, fs)) / 2, ty, fs, TXT, l1);
     if (l2[0]) text((COVER_PX - text_width(l2, fs)) / 2, ty + 58, fs, TXT, l2);
     if (byl[0]) text((COVER_PX - text_width(byl, 32)) / 2, ty + (l2[0] ? 124 : 66), 32, DIM, byl);
