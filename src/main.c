@@ -168,6 +168,11 @@ void ios_audio_longform(void);                                                  
 void ios_airplay_place(SDL_Window *win, float x, float y, float size, int visible);   /* ios_glue.m: the native AirPlay button over the window (points) */
 int ios_music_dir(char *out, int outlen);                                          /* ios_glue.m: Documents/Music, with the files bundled with the app copied in */
 #endif
+#if defined(__APPLE__) && TARGET_OS_OSX
+void mac_setup(void);                                                              /* macos_glue.m: File menu (Open...), media keys / Now Playing */
+void mac_media_update(const char *title, const char *artist, const char *album, int playing, double pos, double duration);
+int mac_media_poll(void);                                                          /* 0 play, 1 pause, 2 next, 3 previous, -1 nothing */
+#endif
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
 static void view_persist(void);       /* remembers the view (web: localStorage, iOS: settings file; the desktop saves at the end) */
 static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes (key V / buttons); the tab order is VIEW_ORDER */
@@ -3716,6 +3721,28 @@ static void ios_media_sync(void) {
     }
 }
 #endif
+#if defined(__APPLE__) && TARGET_OS_OSX
+/* The Mac app: the media keys and the Now Playing display of the system (title, tracker, position); no cover and no length yet */
+static void mac_media_sync(void) {
+    int c; while ((c = mac_media_poll()) >= 0) {
+        if (c == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; }
+        else if (c == 1) g_paused = 1;
+        else if (c == 2) next_user(1);
+        else if (c == 3) next_user(-1);
+    }
+    static char mt[160], ma[96], mb[96]; static int mp = -1; static Uint32 mt0;
+    const char *t = (cur >= 0 && cur < npl) ? pl[cur].label : "ngPlayer";
+    int now = g_song && !g_paused && !g_ended;
+    char artist[96] = "", album[96] = "";
+    if (g_song) { header_sub(artist, sizeof artist); snprintf(album, sizeof album, "%s \xc2\xb7 %d channels", song_format(g_song), song_channels(g_song)); }
+    Uint32 tn = SDL_GetTicks();
+    int newsong = strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb);
+    if (now != mp || newsong || tn - mt0 > 15000) {
+        mp = now; mt0 = tn; snprintf(mt, sizeof mt, "%s", t); snprintf(ma, sizeof ma, "%s", artist); snprintf(mb, sizeof mb, "%s", album);
+        mac_media_update(mt, ma, mb, now, (double)g_frames / g_rate, 0);
+    }
+}
+#endif
 #if defined(__APPLE__) && TARGET_OS_IPHONE
 /* The Mod Archive ID in a link: .../player/#160140 (also #ma=160140 / #id=160140), .../m/160140 or ngplayer://160140. 0 = not a link of ours. */
 static int url_ma_id(const char *u) {
@@ -3817,6 +3844,9 @@ static void iter(void) {
         }
         ios_media_sync();
         if (g_bg) { if (!shot) song_end_advance(); SDL_Delay(100); return; }      /* in the background: no drawing, the sound goes on */
+#endif
+#if defined(__APPLE__) && TARGET_OS_OSX
+        mac_media_sync();
 #endif
         int ww, wh, dw, dh;
         SDL_GetWindowSize(win, &ww, &wh);
@@ -4010,6 +4040,9 @@ int main(int argc, char **argv) {
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     ios_media_setup();
     SDL_AddEventWatch(ios_bg_watch, NULL);
+#endif
+#if defined(__APPLE__) && TARGET_OS_OSX
+    mac_setup();
 #endif
     gfx_window_attrs();
 #ifndef __EMSCRIPTEN__
