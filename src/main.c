@@ -169,6 +169,7 @@ void ios_airplay_place(SDL_Window *win, float x, float y, float size, int visibl
 int ios_music_dir(char *out, int outlen);                                          /* ios_glue.m: Documents/Music, with the files bundled with the app copied in */
 #endif
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
+static void view_persist(void);       /* remembers the view (web: localStorage, iOS: settings file; the desktop saves at the end) */
 static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes (key V / buttons); the tab order is VIEW_ORDER */
 static const int VIEW_ORDER[4] = { 0, 3, 1, 2 };   /* PATTERN, SCOPES, ORB, VOXEL */
 static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
@@ -386,7 +387,6 @@ static void play_index_sub(int idx, int sub) {
     g_song = s;
     g_rendered = 0; g_lastord = g_lastrow = -1; g_resync = 1;
     if (g_dev) SDL_UnlockAudioDevice(g_dev);
-    if (g_portrait && g_mobile && song_channels(s) > 8) g_vmode = 1;      /* phone, portrait, more than 8 voices: Orb view (scopes are too heavy) */
     view_reset = 1;
     g_open_sub = s ? song_subsong(s) : 0;
 #if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
@@ -572,7 +572,7 @@ static void view_switch(float x, float y, float w) {
         int on = (i == g_vmode), hv = hit(xx, by, cw - 4, 20);
         rrect(xx, by, cw - 4, 20, 6, on ? alpha(VC[2], 0.25f) : alpha(FAINT, hv ? 0.30f : 0.16f));
         text(xx + (cw - 4 - text_width(NAME[i], 11)) / 2, by + 4, 11, on ? VC[2] : alpha(DIM, 0.9f), NAME[i]);
-        if (clicked(xx, by, cw - 4, 20)) { g_vmode = i; click = 0; }
+        if (clicked(xx, by, cw - 4, 20)) { g_vmode = i; view_persist(); click = 0; }
     }
 }
 
@@ -1886,6 +1886,8 @@ static void draw_dice_big(float W, float H) {
 #ifdef __EMSCRIPTEN__
 EM_JS(int, web_rand_get, (void), { try { return localStorage.getItem('ngp.random') === '1' ? 1 : 0; } catch (e) { return 0; } });
 EM_JS(void, web_rand_set, (int v), { try { localStorage.setItem('ngp.random', v ? '1' : '0'); } catch (e) {} });
+EM_JS(int, web_view_get, (void), { try { var v = parseInt(localStorage.getItem('ngp.view') || '0', 10); return v >= 0 && v <= 3 ? v : 0; } catch (e) { return 0; } });
+EM_JS(void, web_view_set, (int v), { try { localStorage.setItem('ngp.view', String(v)); } catch (e) {} });
 EM_JS(int, web_rpt_get, (void), { try { var v = parseInt(localStorage.getItem('ngp.repeat') || '0', 10); return v === 1 || v === 2 ? v : 0; } catch (e) { return 0; } });
 EM_JS(void, web_rpt_set, (int v), { try { localStorage.setItem('ngp.repeat', String(v)); } catch (e) {} });
 #endif
@@ -2795,6 +2797,13 @@ static void settings_save(void) {
     fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\nview=%d\nrandom=%d\nrepeat=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_vmode, g_rand ? 1 : 0, g_rpt);
     fclose(f);
 }
+static void view_persist(void) {
+#ifdef __EMSCRIPTEN__
+    web_view_set(g_vmode);
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+    settings_save();                                     /* the app is never ended cleanly on iOS: write it when the view changes */
+#endif
+}
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -3676,7 +3685,7 @@ static void iter(void) {
                 if (ma_open) { ma_key(&e.key); break; }
                 switch (e.key.keysym.sym) {
                 case SDLK_o: ma_show(1); break;
-                case SDLK_v: { int t = 0; for (int k = 0; k < 4; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % 4]; } break;
+                case SDLK_v: { int t = 0; for (int k = 0; k < 4; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % 4]; view_persist(); } break;
                 case SDLK_ESCAPE: if (specs_on) specs_on = 0; else running = 0; break;
                 case SDLK_i: if (specs_on) specs_on = 0; else if (g_song && cur >= 0) { specs_fill(g_song, pl[cur].label); specs_just = 1; } break;
                 case SDLK_SPACE: g_paused = !g_paused; break;
@@ -3937,7 +3946,7 @@ int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
     g_mobile = EM_ASM_INT({ return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 1 : 0; });
     web_media_setup();
-    g_rand = web_rand_get(); g_rpt = web_rpt_get(); if (g_rpt) g_rand = 0;
+    g_vmode = web_view_get(); g_rand = web_rand_get(); g_rpt = web_rpt_get(); if (g_rpt) g_rand = 0;
     emscripten_async_call(bg_tick, NULL, 400);
 #endif
 #if defined(__APPLE__) && TARGET_OS_IPHONE
