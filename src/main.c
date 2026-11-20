@@ -2538,14 +2538,33 @@ static void draw_ui_portrait(float W, float H) {
         }
         float tmax = aw - 32 - 96 - (g_song ? 30 : 0);
         float tsize = 19;
-        while (tsize > 14 && text_width(title, tsize) > tmax) tsize -= 1;
-        fit_text(title, tmax, tsize);
-        text(M + 16, hy + 10, tsize, TXT, title);
-        float ichip = M + 16 + text_width(title, tsize) + 10;                   /* the Specs button right of the title */
-        if (g_song) draw_specs_chip(ichip, hy + 10 + tsize * 0.5f - 11);
+        char t2[160] = "";                                                         /* the second line of a long title (portrait layout: phones, narrow windows) */
+        if (text_width(title, 19) > tmax - 70) {                      /* a long title leaves no room for the sound card next to the time: two lines, a little smaller and narrower */
+            float wmax = tmax - 80, ts2 = 16;
+            int n = (int)strlen(title), cut = -1;
+            for (int i = 1; i < n; i++) if (title[i] == ' ') { char tmp[160]; memcpy(tmp, title, (size_t)i); tmp[i] = 0; if (text_width(tmp, ts2) <= wmax) cut = i; else break; }
+            if (cut > 0) {
+                const char *r = title + cut; while (*r == ' ') r++;
+                snprintf(t2, sizeof t2, "%s", r); title[cut] = 0; fit_text(t2, wmax, ts2); tsize = ts2;
+            }                                                                      /* no space to break at: one line as before */
+        }
+        float tw1, tw2 = 0, tline2 = hy + 8 + tsize + 2, ysub = hy + 14 + tsize;
+        if (t2[0]) {
+            fit_text(title, tmax, tsize);
+            text(M + 16, hy + 8, tsize, TXT, title); text(M + 16, tline2, tsize, TXT, t2);
+            tw1 = text_width(title, tsize); tw2 = text_width(t2, tsize);
+            ysub = tline2 + tsize + 4;
+        } else {
+            while (tsize > 14 && text_width(title, tsize) > tmax) tsize -= 1;
+            fit_text(title, tmax, tsize);
+            text(M + 16, hy + 10, tsize, TXT, title);
+            tw1 = text_width(title, tsize);
+        }
+        float ichip = M + 16 + (t2[0] ? tw2 : tw1) + 10;                        /* the Specs button right of the title (of its last line) */
+        if (g_song) draw_specs_chip(ichip, (t2[0] ? tline2 : hy + 10) + tsize * 0.5f - 11);
         fit_text(sub, tmax, 13);
-        if (g_error[0]) text(M + 16, hy + 14 + tsize, 12, WARN, g_error);
-        else text(M + 16, hy + 14 + tsize, 13, DIM, sub);
+        if (g_error[0]) text(M + 16, ysub, 12, WARN, g_error);
+        else text(M + 16, ysub, 13, DIM, sub);
         char tb[32];
         mmss(tb, sizeof tb, (double)g_frames / g_rate);
         text_right(M + aw - 16, hy + 10, 28, TXT, tb);
@@ -2565,7 +2584,7 @@ static void draw_ui_portrait(float W, float H) {
                 float chh = fminf(54 * k, hh - 14);                                                    /* never higher than the title card allows, however wide the window is */
                 if (unit > 0 && unit * chh > 96 * k) chh = 96 * k / unit;
                 float chw = chips_width(chh), rightE = M + aw - 60, x0 = rightE - chw;                  /* narrow: may cover part of the time while it turns */
-                float tl = M + 16 + fmaxf(text_width(title, tsize), text_width(sub, 13)), tr = M + aw - 16 - text_width(tb, 28);
+                float tl = M + 16 + fmaxf(fmaxf(tw1, tw2), text_width(sub, 13)), tr = M + aw - 16 - text_width(tb, 28);
                 if (ichip + 28 > tl) tl = ichip + 28;
                 if (cx > tl) tl = cx;
                 if (tr - tl >= 40) { x0 = 0.5f * (tl + tr) - chw / 2; if (x0 < tl + 4) x0 = tl + 4; }   /* centred between the title and the time; on a phone it may reach into the time, not into the title */
