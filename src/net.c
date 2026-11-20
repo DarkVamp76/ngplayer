@@ -51,8 +51,8 @@ void net_log(const char *fmt, ...) {
 /* Web-Version: kein Hilfsprozess curl */
 int net_have_curl(void) { return 0; }
 int net_get(const char *url, const char *dest, int timeout_s) { (void)url; (void)dest; (void)timeout_s; return -1; }
-#elif defined(__APPLE__) && TARGET_OS_IPHONE
-/* iOS: there is no fork/exec of curl. net_have_curl() and net_get() are provided by the iOS app (NSURLSession, same contract as below). */
+#elif (defined(__APPLE__) && TARGET_OS_IPHONE) || defined(NG_NET_NATIVE)
+/* iOS and the sandboxed macOS app (-DNG_NET_NATIVE): there is no fork/exec of curl. net_have_curl() and net_get() are provided by the app (NSURLSession, same contract as below). */
 #else
 static int run_curl(char *const argv[]) {
     pid_t pid = fork();
@@ -131,7 +131,7 @@ int ma_random_id(void) {
     if (net_cache_dir(dir, sizeof dir)) return 0;
     {   /* the random draw of ngplayer.org (ma.php?random=1 answers with a plain ID; the Mod Archive key stays on the server). iOS uses it by default. */
         const char *u = getenv("NGPLAYER_MA_RANDOM_URL");
-#if defined(__APPLE__) && TARGET_OS_IPHONE
+#if (defined(__APPLE__) && TARGET_OS_IPHONE) || defined(NG_NET_NATIVE)
         if (!u || !*u) u = "https://ngplayer.org/player/ma.php?random=1";
 #endif
         if (u && *u) {
