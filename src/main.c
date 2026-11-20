@@ -2797,6 +2797,7 @@ static void settings_save(void) {
     fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\nview=%d\nrandom=%d\nrepeat=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_vmode, g_rand ? 1 : 0, g_rpt);
     fclose(f);
 }
+#endif
 static void view_persist(void) {
 #ifdef __EMSCRIPTEN__
     web_view_set(g_vmode);
@@ -2804,7 +2805,6 @@ static void view_persist(void) {
     settings_save();                                     /* the app is never ended cleanly on iOS: write it when the view changes */
 #endif
 }
-#endif
 
 #ifdef __EMSCRIPTEN__
 /* Wird von der Webseite (Drag & Drop / Dateiauswahl) aufgerufen, nachdem die Datei ins virtuelle Dateisystem geschrieben wurde. */
