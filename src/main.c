@@ -163,6 +163,7 @@ void ios_media_setup(void);                                                     
 void ios_media_update(const char *title, const char *artist, const char *album, int playing, double pos, double duration);
 int ios_media_poll(void);
 int ios_gl_buffers(SDL_Window *win, unsigned *fb, unsigned *cb);                   /* ios_glue.m: the window's framebuffer and colour renderbuffer */
+void ios_media_set_cover(const unsigned char *px, int w, int h);                    /* ios_glue.m: the cover of the song (RGBA, bottom row first, as glReadPixels gives it); NULL = none */
 float ios_output_latency_ms(void);                                               /* ios_glue.m: latency of the current output route in ms (AirPlay: ~2000) */
 void ios_audio_longform(void);                                                    /* ios_glue.m: AirPlay 2 (HomePod) needs the long-form route sharing policy */
 void ios_airplay_place(SDL_Window *win, float x, float y, float size, int visible);   /* ios_glue.m: the native AirPlay button over the window (points) */
@@ -348,7 +349,7 @@ static void list_label(char *dst, size_t cap, char *tag, size_t tcap, const entr
     while (cut > 0 && dst[cut - 1] == ' ') cut--;
     snprintf(dst + cut, cap - cut, "...");
 }
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
 static void probe_start(int idx);
 #endif
 static void play_index_sub(int idx, int sub) {
@@ -389,7 +390,7 @@ static void play_index_sub(int idx, int sub) {
     if (g_portrait && g_mobile && song_channels(s) > 8) g_vmode = 1;      /* phone, portrait, more than 8 voices: Orb view (scopes are too heavy) */
     view_reset = 1;
     g_open_sub = s ? song_subsong(s) : 0;
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
     probe_start(s ? idx : -1);        /* length of the song for the lock screen */
 #endif
 }
@@ -3102,11 +3103,14 @@ static void probe_start(int idx) {
 /* Pushes the title and the playing state to the Media Session when one of them changed. Also called right after a lock screen command:
  * with the screen locked the browser stops requestAnimationFrame (the main loop), only the audio keeps running, so the loop alone would
  * leave the old title on the lock screen. */
+#endif
+#if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
 /* ---- The cover of the current song (Media Session: lock screen, CarPlay): drawn off screen with the player's own 2D renderer, 600 x 600:
  * a background gradient and glow in an accent colour taken from the title, the sound card of the song (the same picture as in the header,
  * front on), the title in at most two big lines and "ngPlayer". Only a few big things: the cover is small in a car. */
 /* Artists of Mod Archive modules (from web_ma_info): a small ring of (ID, name); an empty name means "none known". */
 static struct { int id; char name[64]; } ma_art[32]; static int ma_art_n;
+#ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE void ng_web_ma_info(int id, const char *artist) {
     int k = ma_art_n++ & 31;
     ma_art[k].id = id; snprintf(ma_art[k].name, sizeof ma_art[k].name, "%s", artist ? artist : "");
@@ -3115,6 +3119,7 @@ static const char *ma_artist_of(int id) {            /* NULL = not answered yet 
     for (int i = 0; i < 32; i++) if (ma_art[i].id == id) return ma_art[i].name;
     return NULL;
 }
+#endif
 static char g_cover_by[64];                          /* the artist shown on the cover ("by ...") */
 
 #define COVER_PX 600
@@ -3176,9 +3181,15 @@ static void cover_render(int dw, int dh) {
     flush();
     glReadPixels(0, 0, COVER_PX, COVER_PX, GL_RGBA, GL_UNSIGNED_BYTE, cv_buf);
     glBindFramebuffer(GL_FRAMEBUFFER, g_fb0);
+#ifdef __EMSCRIPTEN__
     web_media_set_cover(cv_buf, COVER_PX, COVER_PX, g_cover_gen);
+#else
+    ios_media_set_cover(cv_buf, COVER_PX, COVER_PX);
+#endif
 }
 
+#endif
+#ifdef __EMSCRIPTEN__
 static void media_sync(void) {
     static char mt[160], ma[96], mb[96]; static int mp = -1;
     if (g_hold && SDL_GetTicks() - g_hold_t > 700) g_hold = 0;      /* the element never answered: do not keep the song silent */
@@ -3444,6 +3455,36 @@ static int ios_bg_watch(void *ud, SDL_Event *e) {
     else if (e->type == SDL_APP_DIDENTERFOREGROUND) g_bg = 0;
     return 0;
 }
+/* The length of the song for the lock screen: a second instance of the song is rendered to its end in small slices (2 ms per frame, with the audio device locked, so
+ * that it never runs at the same time as the audio callback). Same rule as in the web build: only the replayers that keep all their state in their own instance. */
+static Song *g_probe; static unsigned long long g_probe_frames;
+static double g_len_s;                      /* > 0: length in seconds, 0: still being measured, -1: not available */
+static int probe_run(double ms) {
+    static int16_t buf[2048 * 2];
+    Uint64 t0 = SDL_GetPerformanceCounter(), fq = SDL_GetPerformanceFrequency();
+    for (;;) {
+        if (g_dev) SDL_LockAudioDevice(g_dev);
+        int got = song_render(g_probe, buf, 2048);
+        if (g_dev) SDL_UnlockAudioDevice(g_dev);
+        if (got > 0) g_probe_frames += (unsigned)got;
+        if (got <= 0 || g_probe_frames > (unsigned long long)g_rate * 3600) {
+            g_len_s = got <= 0 ? (double)g_probe_frames / g_rate : -1;
+            song_close(g_probe); g_probe = NULL;
+            return 1;
+        }
+        if ((SDL_GetPerformanceCounter() - t0) * 1000.0 / fq >= ms) return 0;
+    }
+}
+static void probe_start(int idx) {
+    if (g_probe) { song_close(g_probe); g_probe = NULL; }
+    g_len_s = 0; g_probe_frames = 0;
+    if (idx < 0 || idx >= npl || !g_song) { g_len_s = -1; return; }
+    const char *f = song_format(g_song);
+    if (!strcmp(f, "TFMX") || !strcmp(f, "DMF") || !strcmp(f, "AHX")) { g_len_s = -1; return; }
+    char err[64] = "";
+    g_probe = song_open_sub(pl[idx].path, g_rate, g_open_sub, err, sizeof err);
+    if (!g_probe) g_len_s = -1;
+}
 static void ios_media_sync(void) {
     int c; while ((c = ios_media_poll()) >= 0) {
         if (c == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; }
@@ -3451,15 +3492,18 @@ static void ios_media_sync(void) {
         else if (c == 2) next_user(1);
         else if (c == 3) next_user(-1);
     }
-    static char mt[160], ma[96], mb[96]; static int mp = -1; static Uint32 mt0;
+    if (g_probe) probe_run(2);                                  /* a few ms of the length measurement per frame */
+    static char mt[160], ma[96], mb[96]; static int mp = -1; static Uint32 mt0; static double mlen = -2;
     const char *t = (cur >= 0 && cur < npl) ? pl[cur].label : "ngPlayer";
     int now = g_song && !g_paused && !g_ended;
     char artist[96] = "", album[96] = "";
     if (g_song) { header_sub(artist, sizeof artist); snprintf(album, sizeof album, "%s \xc2\xb7 %d channels", song_format(g_song), song_channels(g_song)); }
     Uint32 tn = SDL_GetTicks();
-    if (now != mp || strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb) || tn - mt0 > 15000) {
-        mp = now; mt0 = tn; snprintf(mt, sizeof mt, "%s", t); snprintf(ma, sizeof ma, "%s", artist); snprintf(mb, sizeof mb, "%s", album);
-        ios_media_update(mt, ma, mb, now, (double)g_frames / g_rate, 0);
+    int newsong = strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb);
+    if (newsong) { ios_media_set_cover(NULL, 0, 0); g_cover_gen++; cover_pending = g_song != NULL; }      /* the cover of the previous song goes, the new one is drawn in the next frame */
+    if (now != mp || newsong || g_len_s != mlen || tn - mt0 > 15000) {
+        mlen = g_len_s; mp = now; mt0 = tn; snprintf(mt, sizeof mt, "%s", t); snprintf(ma, sizeof ma, "%s", artist); snprintf(mb, sizeof mb, "%s", album);
+        ios_media_update(mt, ma, mb, now, (double)g_frames / g_rate, g_len_s > 0 ? g_len_s : 0);
     }
 }
 #endif
@@ -3634,7 +3678,7 @@ static void iter(void) {
 
         if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
         if (specs_on && specs_kind > 0) card3d_frame_swing(specs_kind - 1, dw, dh);      /* the card of the Specs window swings to and fro and shows its front only */
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
         if (cover_pending && g_song) { cover_pending = 0; cover_render(dw, dh); }      /* the cover of the new song, drawn off screen (after the card of the song was rendered) */
 #endif
         g_vpw = dw; g_vph = dh; g_vpx = vpx; g_vpy = vpy;
