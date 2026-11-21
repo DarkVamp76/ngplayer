@@ -3688,7 +3688,7 @@ static void audio_watch(void) {
     int ev = ios_audio_event_poll();
     if (ev && tn - last_try < 1500) ev = 0;                                 /* the notifications that our own reopening causes */
     if (ev) { if (ev & 2) g_paused = 1; recover_at = tn + 400; }          /* a moment for the new route to settle */
-    if (recover_at && (int)(tn - recover_at) >= 0) { recover_at = 0; audio_recover(); last_try = tn; last_t = tn; }
+    if (recover_at && !g_paused && (int)(tn - recover_at) >= 0) { recover_at = 0; audio_recover(); last_try = tn; last_t = tn; }   /* paused: do not reopen the output (that takes the audio session from the app that plays now); done when playing again */
     int should = g_song && !g_paused && !g_ended;
     if (!should || g_cb_seq != last_seq) { last_seq = g_cb_seq; last_t = tn; return; }
     if (tn - last_t > 2000 && tn - last_try > 5000) { last_try = tn; last_t = tn; net_log("audio callback stands still, reopening the output"); audio_recover(); }
