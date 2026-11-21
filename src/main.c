@@ -168,6 +168,7 @@ float ios_output_latency_ms(void);                                              
 void ios_audio_longform(void);                                                    /* ios_glue.m: AirPlay 2 (HomePod) needs the long-form route sharing policy */
 void ios_airplay_place(SDL_Window *win, float x, float y, float size, int visible);   /* ios_glue.m: the native AirPlay button over the window (points) */
 int ios_music_dir(char *out, int outlen);                                          /* ios_glue.m: Documents/Music, with the files bundled with the app copied in */
+void ios_pick_files(void);                                                       /* ios_glue.m: the document picker of the Files app; the chosen files are copied to Documents/Music and arrive as drop events */
 #endif
 #if defined(__APPLE__) && TARGET_OS_OSX
 void mac_setup(void);                                                              /* macos_glue.m: File menu (Open...), media keys / Now Playing */
@@ -1204,6 +1205,23 @@ static void draw_logo(float x, float y, float s) {
 /* Apple versions: no wax seal with the version number. On iOS its place (top right corner of the card) takes the AirPlay button: a native view
  * (AVRoutePickerView, see ios_glue.m) put over the window; here only the round background is drawn and the place is remembered for the frame. */
 static float g_ap_x, g_ap_y, g_ap_r; static int g_ap_seen;
+#if TARGET_OS_IPHONE
+static void ma_show(int on);
+/* Two round buttons for the iPhone / iPad (no menu bar, no keyboard shortcut): 0 = open files from the device (the document picker), 1 = enter a Mod Archive ID */
+static void draw_import_btn(float cx, float cy, float r, int kind) {
+    int hv = hit(cx - r, cy - r, 2 * r, 2 * r);
+    rrect(cx - r, cy - r, 2 * r, 2 * r, r, C(0.13f, 0.18f, 0.28f, hv ? 1.0f : 0.92f));
+    col c = hv ? TXT : DIM;
+    if (kind == 0) {                                                       /* a folder */
+        rrect(cx - r * 0.50f, cy - r * 0.40f, r * 0.45f, r * 0.24f, r * 0.08f, c);
+        rrect(cx - r * 0.50f, cy - r * 0.26f, r * 1.00f, r * 0.64f, r * 0.12f, c);
+    } else {
+        float tw = text_width("#", 16);
+        text(cx - tw / 2, cy - 9, 16, c, "#");
+    }
+    if (clicked(cx - r - 4, cy - r - 4, 2 * r + 8, 2 * r + 8)) { click = 0; if (kind == 0) ios_pick_files(); else ma_show(1); }
+}
+#endif
 static void draw_apple_corner(float cx, float cy, float r) {
 #if TARGET_OS_IPHONE
     rrect(cx - r, cy - r, 2 * r, 2 * r, r, alpha(BG0, 0.0f));
@@ -2247,6 +2265,10 @@ static void draw_ui(double t) {
         text(x + 18, y + 14, 13, TXT, "PLAYLIST");
         char cnt[32]; snprintf(cnt, sizeof cnt, "%d", npl);
         text_right(x + w - 18, y + 14, 13, DIM, cnt);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        draw_import_btn(x + w - 62, y + 21, 12, 1);       /* iPad: open files, Mod Archive ID, in the head of the list */
+        draw_import_btn(x + w - 92, y + 21, 12, 0);
+#endif
         pl_build_vis();
         if (npl) pl_tabs(x, y + 40, w, 0, 0);
         float ry = y + (npl ? 76 : 44), rh = 28, area = h - (npl ? 76 : 44) - 66;
@@ -2709,6 +2731,9 @@ static void draw_ui_portrait(float W, float H) {
     int novis = 0;                                    /* many voices and the height runs out: only the channels, no visualisation, the whole room goes to the list */
     if ((g_song && song_channels(g_song) >= 36) || avail - oh - M < 150) { novis = 1; oh = avail; }       /* 36 voices or more: always only the channels */
     if (oh < 40) oh = 40;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    if (oh < 112) oh = 112;                           /* room for the AirPlay button and the two buttons below it */
+#endif
     view_update();
     overview_update((float)g_dt);
     if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "PTM") || !strcmp(song_format(g_song), "ULT") || !strcmp(song_format(g_song), "669") || !strcmp(song_format(g_song), "MED") || !strcmp(song_format(g_song), "PSM") || !strcmp(song_format(g_song), "IT") || !strcmp(song_format(g_song), "AMD") || !strcmp(song_format(g_song), "RAD"));
@@ -2718,6 +2743,10 @@ static void draw_ui_portrait(float W, float H) {
         draw_overview(M, cy0, aw, oh);
 #ifdef __APPLE__
         draw_apple_corner(M + aw - 24, cy0 + 24, 18);
+#if TARGET_OS_IPHONE
+        draw_import_btn(M + aw - 24, cy0 + 60, 14, 0);       /* below the AirPlay button: open files, Mod Archive ID */
+        draw_import_btn(M + aw - 24, cy0 + 94, 14, 1);
+#endif
 #else
         draw_seal(M + aw - 12, cy0 + 6, 21, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
 #endif
