@@ -2174,6 +2174,7 @@ static void header_sub(char *out, size_t n) {
 }
 static void draw_ui_portrait(float W, float H);
 static void draw_specs_chip(float x, float y);
+static void draw_seek_row(float bx, float ty, float bw);
 static void specs_open_entry(int idx);
 /* ---- Swipe actions of a list row on touch devices, like Mail: swipe left = Share (Mod Archive entries) and Remove (a long swipe removes), swipe right = Specs
  * (a long swipe opens it). The row slides, the buttons are revealed behind it; a tap on a button runs it, a tap elsewhere closes the row again. ---- */
@@ -2247,18 +2248,72 @@ static int sw_tap(int i, float rx, float rw) {
     sw_close();
     return 1;
 }
+static void draw_duo_bar(float W, float H) {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    const float M = 10, BH = 64;
+    float by = H - M - BH, cy = by + BH / 2, r = 20, fold = W / 2;
+    card(M, by, W - 2 * M, BH, 0);
+    /* left half: previous, play / pause, next, the order slider (nothing over the fold) */
+    float bxs[3] = { M + 12, M + 62, M + 112 };
+    for (int i = 0; i < 3; i++) {
+        float x = bxs[i];
+        int hv = hit(x, cy - r, 2 * r, 2 * r);
+        rrect(x, cy - r, 2 * r, 2 * r, r, alpha(hv ? VC[0] : EDGE, hv ? 0.30f : 0.35f));
+        col ic = hv ? TXT : DIM;
+        float ccx = x + r, ccy = cy;
+        if (i == 0) { tri(ccx + 6, ccy - 8, ccx + 6, ccy + 8, ccx - 6, ccy, ic); rect(ccx - 9, ccy - 8, 3, 16, ic); }
+        else if (i == 1) {
+            if (g_paused || g_ended) tri(ccx - 6, ccy - 9, ccx - 6, ccy + 9, ccx + 9, ccy, ic);
+            else { rect(ccx - 7, ccy - 8, 5, 16, ic); rect(ccx + 2, ccy - 8, 5, 16, ic); }
+        } else { tri(ccx - 6, ccy - 8, ccx - 6, ccy + 8, ccx + 6, ccy, ic); rect(ccx + 6, ccy - 8, 3, 16, ic); }
+        if (clicked(x, cy - r, 2 * r, 2 * r)) {
+            if (i == 0) next_user(-1);
+            else if (i == 2) next_user(1);
+            else if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); }
+            else g_paused = !g_paused;
+            click = 0;
+        }
+    }
+    if (g_song && song_norders(g_song) > 1) draw_seek_row(M + 164, cy - 36.0f / 2 + 3, fold - 24 - (M + 164));      /* 36 = SEEK_ROW */
+    /* right half, from the right edge: info, import, open, AirPlay, volume, dice, LIST */
+    float ri = W - M - 16;
+    float info_x = ri - 22, hash_cx = info_x - 10 - 14, fold_cx = hash_cx - 14 - 8 - 14, air_cx = fold_cx - 14 - 10 - 18;
+    if (g_song) draw_specs_chip(info_x, cy - 11);
+    draw_import_btn(hash_cx, cy, 14, 1);
+    draw_import_btn(fold_cx, cy, 14, 0);
+    draw_apple_corner(air_cx, cy, 18);
+    float vend = air_cx - 18 - 16, vw = 140, vx = vend - vw;
+    rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
+    rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
+    float kx = vx + 3 + (vw - 6) * g_vol;
+    rrect(kx - 9, cy - 9, 18, 18, 9, TXT);
+    if (!mouse_down) vol_drag = 0;
+    else if (hit(vx - 12, cy - 18, vw + 24, 36) || (click && clicked(vx - 12, cy - 18, vw + 24, 36))) vol_drag = 1;
+    if (vol_drag) { g_vol = (mx - vx - 3) / (vw - 6); if (g_vol < 0) g_vol = 0; if (g_vol > 1) g_vol = 1; }
+    float dice_cx = vx - 14 - 13;
+    draw_dice(dice_cx, cy, 13.0f);
+    float lw = 58, lx = dice_cx - 13 - 12 - lw;
+    int hv = hit(lx, cy - 16, lw, 32);
+    rrect(lx, cy - 16, lw, 32, 9, alpha(g_plopen ? VC[2] : (hv ? VC[0] : EDGE), g_plopen ? 0.28f : 0.35f));
+    text(lx + (lw - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
+    if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; if (g_plopen) list_follow = 1; click = 0; }
+#else
+    (void)W; (void)H;
+#endif
+}
 static void draw_ui_duo(float W, float H) {
 #if defined(__APPLE__) && TARGET_OS_IPHONE
-    const float M = 10, gap = 0;                        /* the two pages touch: the cards keep the normal distance, no empty column in the middle (the fold) */
-    float pw = (W - gap) / 2;
+    const float M = 10, BAR = 64;
+    float pw = W / 2, Hc = H - BAR - M;                 /* the two pages touch (the fold lies between them); the wide bar below them */
     g_ox = 0;
-    draw_ui_portrait(pw, H);                            /* left page: everything but the pattern (the visualisation shows scopes, orb or voxel); its bottom edge lies exactly on that of the pattern card */
-    float ox = pw + gap, mx0 = mx;
+    draw_ui_portrait(pw, Hc);                           /* left page: everything but the pattern, the bar and the buttons (the visualisation shows scopes, orb or voxel) */
+    float ox = pw, mx0 = mx;
     int cl0 = clickx, rcl0 = rclickx;
     g_ox = ox; mx -= ox; clickx -= (int)ox; rclickx -= (int)ox;     /* the right page works in its own coordinates */
-    card(0, M, pw - M, H - 2 * M, 0);                   /* the pattern card starts at the page edge: the distance to the left cards is the normal 10 */
-    draw_pattern(0, M, pw - M, H - 2 * M);
+    card(0, M, pw - M, Hc - 2 * M, 0);                  /* the pattern card starts at the page edge: the distance to the left cards is the normal 10 */
+    draw_pattern(0, M, pw - M, Hc - 2 * M);
     g_ox = 0; mx = mx0; clickx = cl0; rclickx = rcl0;
+    draw_duo_bar(W, H);
 #else
     draw_ui_portrait(W, H);
 #endif
@@ -2658,7 +2713,7 @@ static void draw_seek_row(float bx, float ty, float bw) {
 }
 
 static void draw_ui_portrait(float W, float H) {
-    const float M = 10, BOT = 64;
+    const float M = 10, BOT = g_duo ? 0.0f : 64.0f;          /* iPhone Duo opened: the transport bar is the wide one over both pages (draw_duo_bar) */
     float aw = W - 2 * M;
     /* ---------------- Kopf */
     float hy = M, hh = 92;
@@ -2706,7 +2761,7 @@ static void draw_ui_portrait(float W, float H) {
             tw1 = text_width(title, tsize);
         }
         float ichip = M + 16 + (t2[0] ? tw2 : tw1) + 10;                        /* the Specs button right of the title (of its last line) */
-        if (g_song) draw_specs_chip(ichip, (t2[0] ? tline2 : hy + 10) + tsize * 0.5f - 11);
+        if (g_song && !g_duo) draw_specs_chip(ichip, (t2[0] ? tline2 : hy + 10) + tsize * 0.5f - 11);   /* the Duo has the info sign in the wide bar */
         fit_text(sub, tmax, 13);
         if (g_error[0]) text(M + 16, ysub, 12, WARN, g_error);
         else text(M + 16, ysub, 13, DIM, sub);
@@ -2741,7 +2796,7 @@ static void draw_ui_portrait(float W, float H) {
     }
     /* ---------------- Mitte */
     int nosp = g_song && song_channels(g_song) > 8;      /* many voices: drop spectrum/level, the room goes to channels + pattern */
-    int has_seek = g_song && song_norders(g_song) > 1;   /* order slider row above the buttons */
+    int has_seek = g_song && song_norders(g_song) > 1 && !g_duo;   /* order slider row above the buttons */
     float botH = BOT + (has_seek ? SEEK_ROW : 0);
     float by = H - M - botH, sh = nosp ? 0 : 96, sy = nosp ? by : by - M - sh, cy0 = hy + hh + M;
     float oh = g_song ? overview_height(song_channels(g_song) > 64 ? 64 : song_channels(g_song)) : 60.0f;
@@ -2755,7 +2810,7 @@ static void draw_ui_portrait(float W, float H) {
     if ((g_song && song_channels(g_song) >= 36) || avail - oh - M < 150) { novis = 1; oh = avail; }       /* 36 voices or more: always only the channels */
     if (oh < 40) oh = 40;
 #if defined(__APPLE__) && TARGET_OS_IPHONE
-    if (oh < 112) oh = 112;                           /* room for the AirPlay button and the two buttons below it */
+    if (oh < 112 && !g_duo) oh = 112;                 /* room for the AirPlay button and the two buttons below it */
 #endif
     view_update();
     overview_update((float)g_dt);
@@ -2765,11 +2820,13 @@ static void draw_ui_portrait(float W, float H) {
     } else {
         draw_overview(M, cy0, aw, oh);
 #ifdef __APPLE__
+        if (!g_duo) {                                         /* (the Duo has them in the wide bar) */
         draw_apple_corner(M + aw - 24, cy0 + 24, 18);
 #if TARGET_OS_IPHONE
         draw_import_btn(M + aw - 24, cy0 + 60, 14, 0);       /* below the AirPlay button: open files, Mod Archive ID */
         draw_import_btn(M + aw - 24, cy0 + 94, 14, 1);
 #endif
+        }
 #else
         draw_seal(M + aw - 12, cy0 + 6, 21, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
 #endif
@@ -2787,7 +2844,7 @@ static void draw_ui_portrait(float W, float H) {
         if (!nosp) { draw_spectrum(M, sy, spw, sh); draw_level(M + spw + M, sy, vuw, sh); }
     }
     /* ---------------- Transport */
-    {
+    if (!g_duo) {
         float bx = M, bw = aw;
         card(bx, by, bw, botH, 0);
         float cy = by + botH - BOT / 2, r = 20;
@@ -3515,7 +3572,7 @@ static void specs_open_entry(int idx) { specs_show_entry(idx); specs_just = 1; }
 static void specs_geom(float *x, float *y, float *w, float *h) {
     float chh = view_h - 24 < 440 ? 84.0f : 110.0f;
     float need = 14 + chh * 1.12f + 10 + 36 + 12 + 3 * 26 + 6 + 12 + specs_info.nextra * 22 + 52;     /* the window is as high as its content */
-    *w = view_w - 24 < 540 ? view_w - 24 : 540; *h = need < view_h - 24 ? need : view_h - 24;
+    *w = g_duo ? view_w - 120 : (view_w - 24 < 540 ? view_w - 24 : 540); *h = need < view_h - 24 ? need : view_h - 24;        /* Duo opened: big, over both pages */
     *x = (view_w - *w) / 2; *y = (view_h - *h) / 2;
 }
 /* the small "i" next to the title: opens the Specs of the playing song */
