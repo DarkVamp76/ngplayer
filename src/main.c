@@ -815,7 +815,8 @@ static void draw_pattern(float x, float y, float w, float h) {
     if (vis < 1) vis = 1;
     if (vis > nch) vis = nch;
     pat_visch = vis;
-    if (g_duo && g_ox > 0) {                                  /* iPhone Duo: a finger moves the columns sideways (the number bar above stays for taps = mute) */
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    {                                                         /* iOS (iPhone, iPad, Duo): a finger moves the columns sideways (the number bar above stays for taps = mute) */
         static int pd, ch_start; static float px0;
         int inside = mx >= x && mx < x + w && my >= y + 34 + 26 && my < y + h;
         if (mouse_down) {
@@ -826,6 +827,7 @@ static void draw_pattern(float x, float y, float w, float h) {
         if (tch == -2) { const char *e = getenv("NGPLAYER_TEST_CH0"); tch = e ? atoi(e) : -1; }      /* test aid: start with this first column */
         if (tch >= 0 && !pd) pat_ch0 = tch;
     }
+#endif
     if (pat_ch0 > nch - vis) pat_ch0 = nch - vis;
     if (pat_ch0 < 0) pat_ch0 = 0;
     float used = cw * vis, ox = ax0 + (avail - used) / 2;
