@@ -354,7 +354,7 @@ gfx_tex *gfx_tex_create(int w, int h, int fmt, const void *px, int flags) {
             } else {
                 [g->tex replaceRegion:rg mipmapLevel:0 withBytes:px bytesPerRow:(NSUInteger)w * (fmt == GFX_R8 ? 1u : 4u)];
             }
-            if (flags & GFX_MIPS) {
+            if ((flags & GFX_MIPS) && g->tex.mipmapLevelCount > 1) {      /* a 1 x 1 texture has one level only: nothing to generate (the Metal API validation stops there) */
                 id<MTLCommandBuffer> cb = [queue commandBuffer];
                 id<MTLBlitCommandEncoder> be = [cb blitCommandEncoder];
                 [be generateMipmapsForTexture:g->tex];
