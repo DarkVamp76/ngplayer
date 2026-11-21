@@ -2252,7 +2252,7 @@ static void draw_ui_duo(float W, float H) {
     const float M = 10, gap = 0;                        /* the two pages touch: the cards keep the normal distance, no empty column in the middle (the fold) */
     float pw = (W - gap) / 2;
     g_ox = 0;
-    draw_ui_portrait(pw, H - 14);                       /* left page: everything but the pattern (the visualisation shows scopes, orb or voxel); the controls stay a little above the edge (home bar) */
+    draw_ui_portrait(pw, H);                            /* left page: everything but the pattern (the visualisation shows scopes, orb or voxel); its bottom edge lies exactly on that of the pattern card */
     float ox = pw + gap, mx0 = mx;
     int cl0 = clickx, rcl0 = rclickx;
     g_ox = ox; mx -= ox; clickx -= (int)ox; rclickx -= (int)ox;     /* the right page works in its own coordinates */
