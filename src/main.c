@@ -2249,15 +2249,15 @@ static int sw_tap(int i, float rx, float rw) {
 }
 static void draw_ui_duo(float W, float H) {
 #if defined(__APPLE__) && TARGET_OS_IPHONE
-    const float M = 10, gap = 40;                       /* the fold lies in the middle, nothing important is drawn over it */
+    const float M = 10, gap = 0;                        /* the two pages touch: the cards keep the normal distance, no empty column in the middle (the fold) */
     float pw = (W - gap) / 2;
     g_ox = 0;
     draw_ui_portrait(pw, H - 14);                       /* left page: everything but the pattern (the visualisation shows scopes, orb or voxel); the controls stay a little above the edge (home bar) */
     float ox = pw + gap, mx0 = mx;
     int cl0 = clickx, rcl0 = rclickx;
     g_ox = ox; mx -= ox; clickx -= (int)ox; rclickx -= (int)ox;     /* the right page works in its own coordinates */
-    card(M, M, pw - 2 * M, H - 2 * M, 0);
-    draw_pattern(M, M, pw - 2 * M, H - 2 * M);
+    card(0, M, pw - M, H - 2 * M, 0);                   /* the pattern card starts at the page edge: the distance to the left cards is the normal 10 */
+    draw_pattern(0, M, pw - M, H - 2 * M);
     g_ox = 0; mx = mx0; clickx = cl0; rclickx = rcl0;
 #else
     draw_ui_portrait(W, H);
