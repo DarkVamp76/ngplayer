@@ -169,6 +169,8 @@ void ios_audio_longform(void);                                                  
 void ios_airplay_place(SDL_Window *win, float x, float y, float size, int visible);   /* ios_glue.m: the native AirPlay button over the window (points) */
 int ios_music_dir(char *out, int outlen);                                          /* ios_glue.m: Documents/Music, with the files bundled with the app copied in */
 void ios_pick_files(void);                                                       /* ios_glue.m: the document picker of the Files app; the chosen files are copied to Documents/Music and arrive as drop events */
+int ios_launched_in_background(void);                                         /* ios_glue.m: started by the system in the background (CarPlay / lock screen play command): do not play by itself */
+int ios_app_active(void);                                                        /* ios_glue.m: the app is in the foreground */
 #endif
 #if defined(__APPLE__) && TARGET_OS_OSX
 void mac_setup(void);                                                              /* macos_glue.m: File menu (Open...), media keys / Now Playing */
@@ -3627,6 +3629,7 @@ static void ipc_poll(void) {
     }
 }
 #endif
+static int g_launch_bg;                                    /* iOS: the app was started in the background: no song starts by itself until it comes to the foreground or gets a play command */
 #if defined(__APPLE__) && TARGET_OS_IPHONE
 /* iOS: the lock screen / CarPlay. Title, artist (the tracker) and position go to Now Playing when something changed (and every 15 s); the remote commands
  * (0 play, 1 pause, 2 next, 3 previous) are picked up here. While the app is in the background nothing is drawn (iOS does not allow OpenGL there), the
@@ -3722,11 +3725,17 @@ static void ma_titles_apply(void) {
         for (int i = 0; i < npl; i++)
             if (pl[i].ma_id == tq[done].id && !strncmp(pl[i].label, "ModArchive #", 12)) snprintf(pl[i].label, sizeof pl[i].label, "%s", tq[done].t);
 }
+/* the first song after a start in the background: the first entry of the list, or a random module */
+static void ios_start_idle(void) {
+    if (g_song || ma_busy()) return;
+    if (npl && !(pl[0].ma_id > 0 && access(pl[0].path, R_OK))) play_index(0); else if (!npl) ma_random();
+}
 static void ios_media_sync(void) {
     ma_titles_apply();
     audio_watch();
+    if (g_launch_bg && ios_app_active()) { g_launch_bg = 0; ios_start_idle(); }        /* the user opened the app: now it may start */
     int c; while ((c = ios_media_poll()) >= 0) {
-        if (c == 0) { if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; if (!g_dev || SDL_GetAudioDeviceStatus(g_dev) != SDL_AUDIO_PLAYING) audio_recover(); }
+        if (c == 0) { if (g_launch_bg && !g_song) { g_launch_bg = 0; ios_start_idle(); } if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; if (!g_dev || SDL_GetAudioDeviceStatus(g_dev) != SDL_AUDIO_PLAYING) audio_recover(); }
         else if (c == 1) g_paused = 1;
         else if (c == 2) next_user(1);
         else if (c == 3) next_user(-1);
@@ -3877,7 +3886,7 @@ static void iter(void) {
         }
         {   /* iOS: nothing to play (no bundled songs, no files yet): draw a random module of The Mod Archive right at the start, once, so that there is a song */
             static int first_shuffle;
-            if (!first_shuffle && !g_bg && npl == 0 && !g_song && !ma_busy() && SDL_GetTicks() > 800) { first_shuffle = 1; ma_random(); }
+            if (!first_shuffle && !g_bg && !g_launch_bg && npl == 0 && !g_song && !ma_busy() && SDL_GetTicks() > 800) { first_shuffle = 1; ma_random(); }
             else if (!first_shuffle && npl > 0) first_shuffle = 1;
         }
         ios_media_sync();
@@ -4143,7 +4152,10 @@ int main(int argc, char **argv) {
 #ifdef __EMSCRIPTEN__
     ma_list_load_web();                 /* Mod Archive list of the last visit (entries without file: fetched when played) */
 #endif
-    if (npl && !(pl[0].ma_id > 0 && access(pl[0].path, R_OK))) play_index(0);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    g_launch_bg = ios_launched_in_background();
+#endif
+    if (npl && !g_launch_bg && !(pl[0].ma_id > 0 && access(pl[0].path, R_OK))) play_index(0);
 
     running = 1;
 #ifndef __EMSCRIPTEN__
