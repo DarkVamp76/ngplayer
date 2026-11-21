@@ -171,6 +171,7 @@ int ios_music_dir(char *out, int outlen);                                       
 void ios_pick_files(void);                                                       /* ios_glue.m: the document picker of the Files app; the chosen files are copied to Documents/Music and arrive as drop events */
 int ios_launched_in_background(void);                                         /* ios_glue.m: started by the system in the background (CarPlay / lock screen play command): do not play by itself */
 int ios_app_active(void);                                                        /* ios_glue.m: the app is in the foreground */
+int ios_hinge_status(SDL_Window *win);                                       /* ios_glue.m: -1 no hinge (iPhone, iPad), 1 closed, 2 partly open, 3 open (iPhone Duo) */
 #endif
 #if defined(__APPLE__) && TARGET_OS_OSX
 void mac_setup(void);                                                              /* macos_glue.m: File menu (Open...), media keys / Now Playing */
@@ -180,6 +181,7 @@ int mac_media_poll(void);                                                       
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
 static void view_persist(void);       /* remembers the view (web: localStorage, iOS: settings file; the desktop saves at the end) */
 static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes (key V / buttons); the tab order is VIEW_ORDER */
+static int g_duo;                                           /* iPhone Duo opened: two pages, the left one is the phone layout, the right one shows the pattern */
 static const int VIEW_ORDER[4] = { 0, 3, 1, 2 };   /* PATTERN, SCOPES, ORB, VOXEL */
 static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
 static int list_follow;
@@ -574,10 +576,12 @@ static void draw_pattern(float x, float y, float w, float h);
 static void draw_voxel(float x, float y, float w, float h);
 /* Umschalter Pattern | Orb oben in der Karte (auch per Touch/Klick) */
 static void view_switch(float x, float y, float w) {
+    if (g_duo && g_ox > 0) return;                              /* Duo opened: the tabs sit on the left page only */
     float cw = 62, bx = g_portrait ? x + w - 14 - 4 * cw + 4 : x + w / 2 - 2.0f * cw, by = y + 8;
     static const char *const NAME[4] = { "PATTERN", "ORB", "VOXEL", "SCOPES" };
     for (int t = 0; t < 4; t++) {
         int i = VIEW_ORDER[t];
+        if (g_duo && i == 0) continue;                         /* Duo opened: the pattern has its own page (the slot stays empty, the others keep their place) */
         float xx = bx + t * cw;
         int on = (i == g_vmode), hv = hit(xx, by, cw - 4, 20);
         rrect(xx, by, cw - 4, 20, 6, on ? alpha(VC[2], 0.25f) : alpha(FAINT, hv ? 0.30f : 0.16f));
@@ -2243,6 +2247,22 @@ static int sw_tap(int i, float rx, float rw) {
     sw_close();
     return 1;
 }
+static void draw_ui_duo(float W, float H) {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    const float M = 10, gap = 40;                       /* the fold lies in the middle, nothing important is drawn over it */
+    float pw = (W - gap) / 2;
+    g_ox = 0;
+    draw_ui_portrait(pw, H - 14);                       /* left page: everything but the pattern (the visualisation shows scopes, orb or voxel); the controls stay a little above the edge (home bar) */
+    float ox = pw + gap, mx0 = mx;
+    int cl0 = clickx, rcl0 = rclickx;
+    g_ox = ox; mx -= ox; clickx -= (int)ox; rclickx -= (int)ox;     /* the right page works in its own coordinates */
+    card(M, M, pw - 2 * M, H - 2 * M, 0);
+    draw_pattern(M, M, pw - 2 * M, H - 2 * M);
+    g_ox = 0; mx = mx0; clickx = cl0; rclickx = rcl0;
+#else
+    draw_ui_portrait(W, H);
+#endif
+}
 static void draw_ui(double t) {
     (void)t;
     float W = view_w, H = view_h;
@@ -2258,6 +2278,7 @@ static void draw_ui(double t) {
         set_additive(0);
     }
 
+    if (g_duo) { draw_ui_duo(W, H); return; }
     if (g_portrait) { draw_ui_portrait(W, H); return; }
     const float M = 16, SB = 288, BOT = 64;
     /* ---------------- Playlist */
@@ -2753,6 +2774,7 @@ static void draw_ui_portrait(float W, float H) {
         draw_seal(M + aw - 12, cy0 + 6, 21, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
 #endif
         if (!novis) {
+            if (g_duo && g_vmode == 0) g_vmode = 3;                       /* the pattern is on the right page */
             if (g_vmode == 1) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
             else if (g_vmode == 3) draw_scopes(M, cy0 + oh + M, aw, avail - oh - M);
             else if (g_vmode == 2) draw_voxel(M, cy0 + oh + M, aw, avail - oh - M);
@@ -3900,9 +3922,10 @@ static void iter(void) {
         gfx_drawable_size(win, &dw, &dh);
         int fdw = dw, fdh = dh, vpx = 0, vpy = 0;      /* the whole framebuffer; dw/dh become the part the UI is laid out in */
 #if defined(__APPLE__) && TARGET_OS_IPHONE
+        g_duo = ios_hinge_status(win) >= 2 && ww > wh;               /* iPhone Duo opened: the hinge is open and the picture is wide; it uses the whole window (time and Wi-Fi lie over it) */
         {   /* iOS: keep the UI out of the notch / Dynamic Island, the home bar and the rounded corners (insets in points, from ios_glue.m: SDL2 has no safe-area API) */
             float il, it, ir, ib;
-            if (ww > 0 && wh > 0 && !ios_safe_insets(win, &il, &it, &ir, &ib)) {
+            if (!g_duo && ww > 0 && wh > 0 && !ios_safe_insets(win, &il, &it, &ir, &ib)) {
                 float kx = (float)fdw / ww, ky = (float)fdh / wh;
                 int l = (int)(il * kx), t = (int)(it * ky), r = (int)(ir * kx), b = (int)(ib * ky);
                 if (l + r < fdw / 3 && t + b < fdh / 3) { vpx = l; vpy = b; dw = fdw - l - r; dh = fdh - t - b; }      /* GL counts from below, so the bottom inset is the y offset */
@@ -3912,7 +3935,14 @@ static void iter(void) {
         /* Hochformat (Seitenverhaeltnis < 0,8) oder zu klein fuer das Querformat: schmales, gestapeltes Layout (virtuell 440 breit) */
         g_portrait = dw * 10 < dh * 12 || dw < 640 || dh < 430;      /* aspect < 1.2: tablets upright, phones */
         if (getenv("NGPLAYER_TEST_MOBILE")) g_portrait = 1;          /* test hook: force the phone layout */
-        if (g_portrait) {                                              /* virtual width 440, but at least 640 high (tablets are wider than phones) */
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        if (g_duo) g_portrait = 1;                                   /* the phone layout is the left page */
+#endif
+        if (g_duo) {                                                   /* two phone pages side by side, 2 x 440 and the fold between them */
+            view_scale = (float)dw / 920.0f;
+            if ((float)dh / 640.0f < view_scale) view_scale = (float)dh / 640.0f;
+        }
+        else if (g_portrait) {                                              /* virtual width 440, but at least 640 high (tablets are wider than phones) */
             view_scale = (float)dw / 440.0f;
             if ((float)dh / 640.0f < view_scale) view_scale = (float)dh / 640.0f;
         }
