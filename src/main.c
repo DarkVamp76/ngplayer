@@ -180,9 +180,15 @@ int mac_media_poll(void);                                                       
 #endif
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
 static void view_persist(void);       /* remembers the view (web: localStorage, iOS: settings file; the desktop saves at the end) */
-static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes (key V / buttons); the tab order is VIEW_ORDER */
+#if defined(__APPLE__) && TARGET_OS_TV
+#define NG_TV 1                       /* Apple TV: random mode only, the Siri Remote (Left/Right = views, Select/Down = next random module, Up = back) */
+#else
+#define NG_TV 0
+#endif
+#define NVIEW (NG_TV ? 5 : 4)         /* + the Info page on the Apple TV */
+static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes, 4 = Info (Apple TV only) (key V / buttons); the tab order is VIEW_ORDER */
 static int g_duo;                                           /* iPhone Duo opened: two pages, the left one is the phone layout, the right one shows the pattern */
-static const int VIEW_ORDER[4] = { 0, 3, 1, 2 };   /* PATTERN, SCOPES, ORB, VOXEL */
+static const int VIEW_ORDER[5] = { 0, 3, 1, 2, 4 };   /* PATTERN, SCOPES, ORB, VOXEL */
 static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
 static int list_follow;
 static int g_pltab;                      /* playlist tab: 0 = FILES (local), 1 = MOD ARCHIVE (online) */
@@ -574,12 +580,13 @@ static float glow_l, glow_r;
 static double g_dt;
 static void draw_pattern(float x, float y, float w, float h);
 static void draw_voxel(float x, float y, float w, float h);
+static void draw_info_tv(float x, float y, float w, float h);
 /* Umschalter Pattern | Orb oben in der Karte (auch per Touch/Klick) */
 static void view_switch(float x, float y, float w) {
     if (g_duo && g_ox > 0) return;                              /* Duo opened: the tabs sit on the left page only */
-    float cw = 62, bx = g_portrait ? x + w - 14 - 4 * cw + 4 : x + w / 2 - 2.0f * cw, by = y + 8;
-    static const char *const NAME[4] = { "PATTERN", "ORB", "VOXEL", "SCOPES" };
-    for (int t = 0; t < 4; t++) {
+    float cw = 62, bx = NG_TV ? x + w / 2 - NVIEW * cw / 2.0f : g_portrait ? x + w - 14 - 4 * cw + 4 : x + w / 2 - 2.0f * cw, by = y + 8;
+    static const char *const NAME[5] = { "PATTERN", "ORB", "VOXEL", "SCOPES", "INFO" };
+    for (int t = 0; t < NVIEW; t++) {
         int i = VIEW_ORDER[t];
         if (g_duo && i == 0) continue;                         /* Duo opened: the pattern has its own page (the slot stays empty, the others keep their place) */
         float xx = bx + t * cw;
@@ -2348,7 +2355,7 @@ static void draw_ui(double t) {
     }
 
     if (g_duo) { draw_ui_duo(W, H); return; }
-    if (g_portrait) { draw_ui_portrait(W, H); return; }
+    if (g_portrait || NG_TV) { draw_ui_portrait(W, H); return; }
     const float M = 16, SB = 288, BOT = 64;
     /* ---------------- Playlist */
     {
@@ -2727,7 +2734,7 @@ static void draw_seek_row(float bx, float ty, float bw) {
 }
 
 static void draw_ui_portrait(float W, float H) {
-    const float M = 10, BOT = g_duo ? 0.0f : 64.0f;          /* iPhone Duo opened: the transport bar is the wide one over both pages (draw_duo_bar) */
+    const float M = 10, BOT = (g_duo || NG_TV) ? 0.0f : 64.0f;          /* iPhone Duo opened: the transport bar is the wide one over both pages (draw_duo_bar) */
     float aw = W - 2 * M;
     /* ---------------- Kopf */
     float hy = M, hh = 92;
@@ -2810,7 +2817,7 @@ static void draw_ui_portrait(float W, float H) {
     }
     /* ---------------- Mitte */
     int nosp = g_song && song_channels(g_song) > 8;      /* many voices: drop spectrum/level, the room goes to channels + pattern */
-    int has_seek = g_song && song_norders(g_song) > 1 && !g_duo;   /* order slider row above the buttons */
+    int has_seek = g_song && song_norders(g_song) > 1 && !g_duo && !NG_TV;   /* order slider row above the buttons */
     float botH = BOT + (has_seek ? SEEK_ROW : 0);
     float by = H - M - botH, sh = nosp ? 0 : 96, sy = nosp ? by : by - M - sh, cy0 = hy + hh + M;
     float oh = g_song ? overview_height(song_channels(g_song) > 64 ? 64 : song_channels(g_song)) : 60.0f;
@@ -2834,7 +2841,7 @@ static void draw_ui_portrait(float W, float H) {
     } else {
         draw_overview(M, cy0, aw, oh);
 #ifdef __APPLE__
-        if (!g_duo) {                                         /* (the Duo has them in the wide bar) */
+        if (!g_duo && !NG_TV) {                               /* (the Duo has them in the wide bar) */
         draw_apple_corner(M + aw - 24, cy0 + 24, 18);
 #if TARGET_OS_IPHONE
         draw_import_btn(M + aw - 24, cy0 + 60, 14, 0);       /* below the AirPlay button: open files, Mod Archive ID */
@@ -2849,16 +2856,17 @@ static void draw_ui_portrait(float W, float H) {
             if (g_vmode == 1) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
             else if (g_vmode == 3) draw_scopes(M, cy0 + oh + M, aw, avail - oh - M);
             else if (g_vmode == 2) draw_voxel(M, cy0 + oh + M, aw, avail - oh - M);
+            else if (g_vmode == 4 && NG_TV) draw_info_tv(M, cy0 + oh + M, aw, avail - oh - M);
             else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
         }
         float chy = novis ? cy0 + oh - 34 : cy0 + oh + M + (avail - oh - M) - 34;   /* without the visualisation the chips sit in the lower right corner of the channels card */
-        draw_rand_chip(M + aw - 56, chy, 44);
-        draw_rpt_chip(M + aw - 106, chy, 44);       /* RND (and RPT left of it) in the lower right corner of the pattern / orb card */
+        if (!NG_TV) { draw_rand_chip(M + aw - 56, chy, 44);
+        draw_rpt_chip(M + aw - 106, chy, 44); }       /* RND (and RPT left of it) in the lower right corner of the pattern / orb card */
         float vuw = 130, spw = aw - vuw - M;
         if (!nosp) { draw_spectrum(M, sy, spw, sh); draw_level(M + spw + M, sy, vuw, sh); }
     }
     /* ---------------- Transport */
-    if (!g_duo) {
+    if (!g_duo && !NG_TV) {
         float bx = M, bw = aw;
         card(bx, by, bw, botH, 0);
         float cy = by + botH - BOT / 2, r = 20;
@@ -2949,7 +2957,7 @@ static void settings_load(void) {
         if (sscanf(line, "window_w=%d", &v) == 1 && v >= 360 && v <= 16384) g_win_w = v;
         else if (sscanf(line, "window_h=%d", &v) == 1 && v >= 480 && v <= 16384) g_win_h = v;
         else if (sscanf(line, "orb=%d", &v) == 1) g_vmode = v != 0;                  /* older settings files */
-        else if (sscanf(line, "view=%d", &v) == 1 && v >= 0 && v <= 3) g_vmode = v;
+        else if (sscanf(line, "view=%d", &v) == 1 && v >= 0 && v < NVIEW) g_vmode = v;
         else if (sscanf(line, "random=%d", &v) == 1) g_rand = v != 0;
         else if (sscanf(line, "repeat=%d", &v) == 1) { g_rpt = v == 1 || v == 2 ? v : 0; if (g_rpt) g_rand = 0; }
         else if (sscanf(line, "window_x=%d", &v) == 1) g_win_x = v;
@@ -3628,6 +3636,39 @@ static void draw_specs_window(void) {
         text(x + w - 28 - lw, y + h - 29, 12, lh ? TXT : VC[0], "Mod Archive page");
     }
 }
+/* ---- Apple TV: the Info page, one of the views (the same content as the Specs window, laid out to fill the visualisation card) ---- */
+static void draw_info_tv(float x, float y, float w, float h) {
+    card(x, y, w, h, 0);
+    view_switch(x, y, w);
+    static const Song *isong; static int icur = -2; static SongInfo isi; static char ilabel[128]; static int ikind;
+    if (!g_song) { text(x + 24, y + h / 2 - 8, 16, DIM, "no module"); return; }
+    if (isong != g_song || icur != cur) {
+        isong = g_song; icur = cur; song_info(g_song, &isi);
+        snprintf(ilabel, sizeof ilabel, "%s", isi.title[0] ? isi.title : (cur >= 0 ? pl[cur].label : ""));
+        ikind = chip_kind_of(song_format(g_song), song_channels(g_song));
+    }
+    float k = h / 380.0f; if (k < 0.7f) k = 0.7f; if (k > 1.5f) k = 1.5f;
+    float chh = fminf(h - 56, 220.0f * k), cw = chips_width_k(ikind, chh), lx = x + 24;
+    float cx0 = lx + (w * 0.30f - cw) / 2; if (cx0 < lx) cx0 = lx;
+    chip_swing = 1; draw_chip_k(ikind, cx0, y + 38 + (h - 38 - chh * 1.12f) / 2, chh, 0.0f); chip_swing = 0;
+    float rx = x + w * 0.34f, rw = w - (rx - x) - 28, ty = y + 40 * k;
+    char title[128]; snprintf(title, sizeof title, "%s", ilabel); fit_text(title, rw, 26 * k);
+    text(rx, ty, 26 * k, TXT, title);
+    ty += 40 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
+    char vb[64]; snprintf(vb, sizeof vb, "%d %s", isi.voices, isi.voice_unit);
+    const char *lab[3] = { "TRACKER", "FORMAT", "VOICES" }, *val[3] = { isi.tracker, isi.format, vb };
+    for (int i = 0; i < 3; i++) {
+        text(rx, ty + 3 * k, 12 * k, FAINT, lab[i]);
+        char v[96]; snprintf(v, sizeof v, "%s", val[i]); fit_text(v, rw - 120 * k, 17 * k);
+        text(rx + 120 * k, ty, 17 * k, TXT, v); ty += 30 * k;
+    }
+    ty += 4 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
+    for (int i = 0; i < isi.nextra && ty < y + h - 22 * k; i++) {
+        char v[96]; snprintf(v, sizeof v, "%s", isi.extra[i]); fit_text(v, rw, 15 * k);
+        text(rx, ty, 15 * k, i == 0 ? VC[0] : DIM, v); ty += 25 * k;
+    }
+}
+
 static void draw_ctx_menu(void) {
     if (ctx_idx >= 0 && ctx_idx < npl) {
         static const char *const item[4] = { "Share", "", "Info", "Remove" };
@@ -3937,9 +3978,21 @@ static void iter(void) {
             case SDL_TEXTINPUT: if (ma_open) ma_text(e.text.text); break;
             case SDL_KEYDOWN:
                 if (ma_open) { ma_key(&e.key); break; }
+#if defined(__APPLE__) && TARGET_OS_TV
+                {   /* Siri Remote: Left/Right = the views (the Info page is one of them), Select / Down = the next random module, Up = back */
+                    int done = 1;
+                    switch (e.key.keysym.sym) {
+                    case SDLK_LEFT: case SDLK_RIGHT: { int t = 0, d = e.key.keysym.sym == SDLK_RIGHT ? 1 : NVIEW - 1; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + d) % NVIEW]; view_persist(); } break;
+                    case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_DOWN: next_user(1); break;
+                    case SDLK_UP: next_user(-1); break;
+                    default: done = 0; break;
+                    }
+                    if (done) break;
+                }
+#endif
                 switch (e.key.keysym.sym) {
                 case SDLK_o: ma_show(1); break;
-                case SDLK_v: { int t = 0; for (int k = 0; k < 4; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % 4]; view_persist(); } break;
+                case SDLK_v: { int t = 0; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % NVIEW]; view_persist(); } break;
                 case SDLK_ESCAPE: if (specs_on) specs_on = 0; else running = 0; break;
                 case SDLK_i: if (specs_on) specs_on = 0; else if (g_song && cur >= 0) { specs_idx = cur; specs_fill(g_song, pl[cur].label); specs_just = 1; } break;
                 case SDLK_SPACE: g_paused = !g_paused; break;
@@ -4195,6 +4248,9 @@ int main(int argc, char **argv) {
     gfx_window_attrs();
 #ifndef __EMSCRIPTEN__
     if (!shot) { settings_load(); ma_list_load(); }
+#if defined(__APPLE__) && TARGET_OS_TV
+    g_rand = 1; g_rpt = 0;                                     /* Apple TV: random mode only */
+#endif
 #define WIN_X0 g_win_x
 #define WIN_Y0 g_win_y
 #define WIN_W0 g_win_w
@@ -4239,6 +4295,7 @@ int main(int argc, char **argv) {
     if (getenv("NGPLAYER_TEST_ORB")) g_vmode = 1;                  /* test hook: orb view */
     if (getenv("NGPLAYER_TEST_SCOPES")) g_vmode = 3;               /* test hook: scopes view */
     if (getenv("NGPLAYER_TEST_VOXEL")) g_vmode = 2;               /* test hook: voxel flight view */
+    if (getenv("NGPLAYER_TEST_INFO") && NG_TV) g_vmode = 4;        /* test hook: the Info page (Apple TV) */
     if (getenv("NGPLAYER_TEST_DICE")) { dice_start(); if (getenv("NGPLAYER_TEST_DICE")[0] == '2') dice_stop_req = 1; }        /* test hook: the big dancing dice, as while a random module is fetched */
     SDL_AudioSpec want, have;
     SDL_zero(want);
