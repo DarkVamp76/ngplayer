@@ -67,8 +67,8 @@ static void c3_setup(int mi) {
         free(px);
     }
     g->w = getenv("NGPLAYER_CARD_W") ? atoi(getenv("NGPLAYER_CARD_W")) : (g_mobile && !NG_TV ? 512 : 1024);        /* the start size; c3_fit() makes it larger when the card is shown large */ g->h = (int)(g->w / c3_box_aspect(mi) + 0.5f);       /* off-screen target: the thin ridges of the cases (vents, floppy slot) only look calm when the picture is made large and shrunk through the mip maps (512 / 320 flickered when turning on a big screen or in the Specs window) */
-    g->color = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH);     /* target 0: the turning card of the header */
-    g->color2 = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH);    /* target 1: the swinging card of the Specs window */
+    g->color = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH | GFX_MSAA);     /* target 0: the turning card of the header */
+    g->color2 = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH | GFX_MSAA);    /* target 1: the swinging card of the Specs window */
     g->ready = 1;
 }
 /* The off-screen picture has to be larger than the card looks on the screen (it is shrunk through the mip maps, which is the anti-aliasing): about twice the size it is shown at, between 1024 and 2048
@@ -82,8 +82,8 @@ static void c3_fit(int mi, float px) {
     if (want <= g->w) return;
     gfx_tex_free(g->color); gfx_tex_free(g->color2);
     g->w = want; g->h = (int)(g->w / c3_box_aspect(mi) + 0.5f);
-    g->color = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH);
-    g->color2 = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH);
+    g->color = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH | GFX_MSAA);
+    g->color2 = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH | GFX_MSAA);
 }
 /* draws the card at the angle ang into the given target */
 static void c3_render(int mi, float ang, gfx_tex *target, int fw, int fh) {

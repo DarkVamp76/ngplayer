@@ -76,6 +76,10 @@ typedef long GLintptr;
 #define GL_COLOR_ATTACHMENT0 0x8CE0
 #define GL_DEPTH_ATTACHMENT 0x8D00
 #define GL_DEPTH_COMPONENT24 0x81A6
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#define GL_MAX_SAMPLES 0x8D57
+#define GL_RGBA8 0x8058
 #define GL_FRAMEBUFFER_COMPLETE 0x8CD5
 #define GL_TEXTURE0 0x84C0
 #define GL_CULL_FACE 0x0B44
@@ -143,6 +147,9 @@ typedef long GLintptr;
     X(void, glGenRenderbuffers, (GLsizei, GLuint *)) \
     X(void, glBindRenderbuffer, (GLenum, GLuint)) \
     X(void, glRenderbufferStorage, (GLenum, GLenum, GLsizei, GLsizei)) \
+    X(void, glGetIntegerv, (GLenum, GLint *)) \
+    X(void, glRenderbufferStorageMultisample, (GLenum, GLsizei, GLenum, GLsizei, GLsizei)) \
+    X(void, glBlitFramebuffer, (GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLuint, GLenum)) \
     X(void, glFramebufferRenderbuffer, (GLenum, GLenum, GLenum, GLuint)) \
     X(void, glDeleteFramebuffers, (GLsizei, const GLuint *)) \
     X(void, glDeleteRenderbuffers, (GLsizei, const GLuint *)) \
@@ -299,7 +306,7 @@ static const char *C3_FS =
     " o=vec4(base*sh,1.0); }\n";
 
 /* ================================================================== state */
-struct gfx_tex { GLuint id, fbo, depth; int w, h, flags; };
+struct gfx_tex { GLuint id, fbo, depth; int w, h, flags; GLuint msfbo, mscol, msdep; };     /* ms*: the multisampled buffers of a GFX_MSAA target (resolved into the texture) */
 struct gfx_mesh { GLuint vao, vbo, ebo; int n; };
 
 static SDL_GLContext ctx;
@@ -445,7 +452,17 @@ gfx_tex *gfx_tex_create(int w, int h, int fmt, const void *px, int flags) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     if (px && (flags & GFX_MIPS)) glGenerateMipmap(GL_TEXTURE_2D);
     if (flags & GFX_TARGET) {
-        if (flags & GFX_DEPTH) {
+        GLint ms = 0;
+        if ((flags & GFX_MSAA) && (flags & GFX_DEPTH)) { glGetIntegerv(GL_MAX_SAMPLES, &ms); if (ms > GFX_MSAA_SAMPLES) ms = GFX_MSAA_SAMPLES; }       /* no multisampling on a device without it: the target is drawn as before */
+        if (ms >= 2) {
+            glGenRenderbuffers(1, &t->mscol); glBindRenderbuffer(GL_RENDERBUFFER, t->mscol); glRenderbufferStorageMultisample(GL_RENDERBUFFER, ms, GL_RGBA8, w, h);
+            glGenRenderbuffers(1, &t->msdep); glBindRenderbuffer(GL_RENDERBUFFER, t->msdep); glRenderbufferStorageMultisample(GL_RENDERBUFFER, ms, GL_DEPTH_COMPONENT24, w, h);
+            glGenFramebuffers(1, &t->msfbo); glBindFramebuffer(GL_FRAMEBUFFER, t->msfbo);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, t->mscol);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, t->msdep);
+            if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { fprintf(stderr, "render target: incomplete multisample framebuffer\n"); glDeleteFramebuffers(1, &t->msfbo); glDeleteRenderbuffers(1, &t->mscol); glDeleteRenderbuffers(1, &t->msdep); t->msfbo = t->mscol = t->msdep = 0; ms = 0; }
+        }
+        if ((flags & GFX_DEPTH) && ms < 2) {
             glGenRenderbuffers(1, &t->depth);
             glBindRenderbuffer(GL_RENDERBUFFER, t->depth);
             glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
@@ -453,7 +470,7 @@ gfx_tex *gfx_tex_create(int w, int h, int fmt, const void *px, int flags) {
         glGenFramebuffers(1, &t->fbo);
         glBindFramebuffer(GL_FRAMEBUFFER, t->fbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->id, 0);
-        if (flags & GFX_DEPTH) glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, t->depth);
+        if (t->depth) glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, t->depth);
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fprintf(stderr, "render target: incomplete framebuffer\n");
         glBindFramebuffer(GL_FRAMEBUFFER, fb0);
     }
@@ -464,6 +481,9 @@ void gfx_tex_free(gfx_tex *t) {
     if (!t) return;
     if (t->fbo) glDeleteFramebuffers(1, &t->fbo);
     if (t->depth) glDeleteRenderbuffers(1, &t->depth);
+    if (t->msfbo) glDeleteFramebuffers(1, &t->msfbo);
+    if (t->mscol) glDeleteRenderbuffers(1, &t->mscol);
+    if (t->msdep) glDeleteRenderbuffers(1, &t->msdep);
     glDeleteTextures(1, &t->id);
     if (cur2d == t) cur2d = NULL;
     free(t);
@@ -625,7 +645,7 @@ void gfx_card_render(gfx_tex *target, const float *mvp, const float *mv, gfx_mes
         c3_mvp = glGetUniformLocation(c3_prog, "mvp"); c3_mv = glGetUniformLocation(c3_prog, "mv");
         c3_umode = glGetUniformLocation(c3_prog, "umode"); c3_utex = glGetUniformLocation(c3_prog, "tex");
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, target->fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, target->msfbo ? target->msfbo : target->fbo);       /* a GFX_MSAA target: draw into the multisampled buffers, resolve below */
     glViewport(0, 0, target->w, target->h);
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -644,6 +664,10 @@ void gfx_card_render(gfx_tex *target, const float *mvp, const float *mv, gfx_mes
     glBindVertexArray(back->vao);
     glDrawElements(GL_TRIANGLES, back->n, GL_UNSIGNED_SHORT, (const void *)0);
     glDisable(GL_DEPTH_TEST);
+    if (target->msfbo) {                                                                  /* resolve the samples into the texture (same size, so the blit only averages) */
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, target->msfbo); glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target->fbo);
+        glBlitFramebuffer(0, 0, target->w, target->h, 0, 0, target->w, target->h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
     gfx_target_end(target);
 }
 

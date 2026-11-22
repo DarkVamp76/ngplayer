@@ -159,7 +159,7 @@ static NSString *const MSL =
     "  return float4(base * sh, 1.0);\n"
     "}\n";
 
-struct gfx_tex { id<MTLTexture> tex; id<MTLTexture> depth; int w, h, flags; };
+struct gfx_tex { id<MTLTexture> tex; id<MTLTexture> depth; id<MTLTexture> msc, msd; int w, h, flags; };     /* msc / msd: the multisampled colour + depth of a GFX_MSAA target (resolved into tex) */
 struct gfx_mesh { id<MTLBuffer> vb, ib; int n; };
 
 #define INFLIGHT 3
@@ -171,7 +171,7 @@ static id<MTLLibrary> lib;
 static id<MTLSamplerState> sampler;
 static id<MTLDepthStencilState> dss_less;
 static id<MTLRenderPipelineState> pso2d[2][2];         /* [target format][0 = alpha blend, 1 = additive] */
-static id<MTLRenderPipelineState> pso_orb[2], pso_scope[2], pso_vx, pso_c3;
+static id<MTLRenderPipelineState> pso_orb[2], pso_scope[2], pso_vx, pso_c3, pso_c3ms;
 static id<MTLBuffer> vbuf[INFLIGHT];
 static size_t vcap, voff;                              /* capacity of one frame's buffer, bytes used so far */
 static dispatch_semaphore_t inflight;
@@ -222,11 +222,13 @@ float gfx_last_gpu_ms(void) { return last_gpu_ms; }
 
 /* ---------------------------------------------------------------- pipelines */
 /* blend: 0 none, 1 alpha, 2 additive */
+static int mk_samples = 1;                                  /* the sample count of the pipelines made next (GFX_MSAA_SAMPLES for the multisampled card) */
 static id<MTLRenderPipelineState> mkpso(NSString *vs, NSString *fs, MTLVertexDescriptor *vd, MTLPixelFormat fmt, int blend, int depth) {
     MTLRenderPipelineDescriptor *d = [[MTLRenderPipelineDescriptor alloc] init];
     d.vertexFunction = [lib newFunctionWithName:vs];
     d.fragmentFunction = [lib newFunctionWithName:fs];
     d.vertexDescriptor = vd;
+    d.rasterSampleCount = (NSUInteger)mk_samples;
     MTLRenderPipelineColorAttachmentDescriptor *c = d.colorAttachments[0];
     c.pixelFormat = fmt;
     if (blend) {                                       /* glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA or GL_ONE): the same for colour and alpha */
@@ -271,7 +273,10 @@ int gfx_init(SDL_Window *win, int max_vtx) {
         for (int a = 0; a < 2; a++) { pso_scope[a] = mkpso(@"vs_scope", @"fs_scope", nil, fm[0], a ? 2 : 1, 0); if (!pso_scope[a]) return -1; }
         pso_vx = mkpso(@"vs_vx", @"fs_vx", nil, fm[1], 0, 1);
         {   const MTLVertexFormat f[3] = { MTLVertexFormatFloat3, MTLVertexFormatFloat2, MTLVertexFormatUChar4Normalized }; const int o[3] = { 0, 12, 20 };
-            pso_c3 = mkpso(@"vs_c3", @"fs_c3", vdesc(3, f, o, 24), fm[1], 0, 1); }
+            pso_c3 = mkpso(@"vs_c3", @"fs_c3", vdesc(3, f, o, 24), fm[1], 0, 1);
+            if ([dev supportsTextureSampleCount:GFX_MSAA_SAMPLES]) {                      /* the same card pipeline for the multisampled target */
+                mk_samples = GFX_MSAA_SAMPLES; pso_c3ms = mkpso(@"vs_c3", @"fs_c3", vdesc(3, f, o, 24), fm[1], 0, 1); mk_samples = 1;
+            } }
         if (!pso_vx || !pso_c3) return -1;
         MTLSamplerDescriptor *sd = [[MTLSamplerDescriptor alloc] init];
         sd.minFilter = sd.magFilter = MTLSamplerMinMagFilterLinear; sd.mipFilter = MTLSamplerMipFilterLinear;
@@ -326,12 +331,18 @@ static void offscreen_begin(gfx_tex *t, float r, float g, float b, float a) {
     ensure_cmd();
     end_enc();
     MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
-    rp.colorAttachments[0].texture = t->tex;
+    if (t->msc) {                                                 /* a GFX_MSAA target: draw into the multisampled texture, resolve into tex at the end of the pass */
+        rp.colorAttachments[0].texture = t->msc;
+        rp.colorAttachments[0].resolveTexture = t->tex;
+        rp.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
+    } else {
+        rp.colorAttachments[0].texture = t->tex;
+        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    }
     rp.colorAttachments[0].loadAction = MTLLoadActionClear;
-    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
     rp.colorAttachments[0].clearColor = MTLClearColorMake(r, g, b, a);
-    if (t->depth) {
-        rp.depthAttachment.texture = t->depth;
+    if (t->depth || t->msd) {
+        rp.depthAttachment.texture = t->msd ? t->msd : t->depth;
         rp.depthAttachment.loadAction = MTLLoadActionClear;
         rp.depthAttachment.storeAction = MTLStoreActionDontCare;
         rp.depthAttachment.clearDepth = 1.0;
@@ -365,7 +376,15 @@ gfx_tex *gfx_tex_create(int w, int h, int fmt, const void *px, int flags) {
         g->w = w; g->h = h; g->flags = flags;
         g->tex = [dev newTextureWithDescriptor:td];
         if (!g->tex) { free(g); return NULL; }
-        if (flags & GFX_DEPTH) {
+        if ((flags & GFX_MSAA) && (flags & GFX_TARGET) && (flags & GFX_DEPTH) && pso_c3ms) {      /* multisampled colour + depth (private: they never leave the GPU; the colour is resolved into tex) */
+            MTLTextureDescriptor *cd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pf width:(NSUInteger)w height:(NSUInteger)h mipmapped:NO];
+            cd.textureType = MTLTextureType2DMultisample; cd.sampleCount = GFX_MSAA_SAMPLES; cd.usage = MTLTextureUsageRenderTarget; cd.storageMode = MTLStorageModePrivate;
+            MTLTextureDescriptor *md = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float width:(NSUInteger)w height:(NSUInteger)h mipmapped:NO];
+            md.textureType = MTLTextureType2DMultisample; md.sampleCount = GFX_MSAA_SAMPLES; md.usage = MTLTextureUsageRenderTarget; md.storageMode = MTLStorageModePrivate;
+            g->msc = [dev newTextureWithDescriptor:cd]; g->msd = [dev newTextureWithDescriptor:md];
+            if (!g->msc || !g->msd) { g->msc = nil; g->msd = nil; }                      /* no multisampling: drawn as before */
+        }
+        if ((flags & GFX_DEPTH) && !g->msd) {
             MTLTextureDescriptor *dd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float width:(NSUInteger)w height:(NSUInteger)h mipmapped:NO];
             dd.usage = MTLTextureUsageRenderTarget; dd.storageMode = MTLStorageModePrivate;
             g->depth = [dev newTextureWithDescriptor:dd];
@@ -398,7 +417,7 @@ gfx_tex *gfx_tex_create(int w, int h, int fmt, const void *px, int flags) {
 void gfx_tex_free(gfx_tex *t) {
     if (!t) return;
     if (cur_tex == t) cur_tex = NULL;
-    t->tex = nil; t->depth = nil;
+    t->tex = nil; t->depth = nil; t->msc = nil; t->msd = nil;
     free(t);
 }
 
@@ -573,7 +592,7 @@ void gfx_card_render(gfx_tex *target, const float *mvp, const float *mv, gfx_mes
     struct { float mvp[16], mv[16]; int umode, pad[3]; } p;
     memcpy(p.mvp, mvp, sizeof p.mvp); memcpy(p.mv, mv, sizeof p.mv); memset(p.pad, 0, sizeof p.pad);
     offscreen_begin(target, 0, 0, 0, 0);
-    [enc setRenderPipelineState:pso_c3];
+    [enc setRenderPipelineState:target->msc ? pso_c3ms : pso_c3];
     [enc setDepthStencilState:dss_less];
     if (front_tex) [enc setFragmentTexture:front_tex->tex atIndex:0];                 /* the board pass does not sample, but a texture has to be bound */
     gfx_mesh *ms[3] = { board, front, back }; gfx_tex *ts[3] = { front_tex, front_tex, back_tex };
