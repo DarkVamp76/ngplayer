@@ -182,7 +182,7 @@ int mac_media_poll(void);                                                       
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
 static void view_persist(void);       /* remembers the view (web: localStorage, iOS: settings file; the desktop saves at the end) */
 #if defined(__APPLE__) && TARGET_OS_TV
-#define NG_TV 1                       /* Apple TV: random mode only, the Siri Remote (Left/Right = views, Select/Down = next random module, Up = back) */
+#define NG_TV 1                       /* Apple TV: random mode only, the Siri Remote (Left/Right = views, Select = new random module, Down/Up = the loaded modules) */
 #else
 #define NG_TV 0
 #endif
@@ -1651,6 +1651,12 @@ static void next_user(int d) {              /* next / previous as the user asks 
     }
     next_prev(d);
 }
+static void tv_dice(void) {                 /* Apple TV, Select: always draw a new random module (also when the last draw failed or nothing is loaded yet) */
+    if (ma_take_prefetch()) return;                                                  /* loaded in advance: no gap */
+    if (ma_prefetch_running()) { ma_prefetch_adopt(); return; }
+    if (ma_busy()) { if (ma_loading()) { snprintf(toast_txt, sizeof toast_txt, "Still loading ..."); toast_t = 1.5f; } return; }
+    rand_fail_t = 0; snprintf(toast_txt, sizeof toast_txt, "Drawing a random module ..."); toast_t = 2.5f; ma_random();
+}
 static void song_end_advance(void) {        /* song ended -> next entry (a new random one at the end of the list in random mode) */
     if (!g_ended || cur < 0 || cur >= npl) return;
     if (g_rpt == 2) { play_index_sub(cur, g_open_sub); return; }                      /* RPT 1: the same song again */
@@ -1998,14 +2004,17 @@ static void ma_need_download(int idx) {
 }
 #endif
 
+static int dl_fail_kind;                    /* why the last random draw failed: 1 no ID (the server did not answer), 2 the module could not be saved, 3 the download failed */
+static int dl_fail_rc;
 static int dl_thread(void *p) {
     if (!dl_id) {                                          /* random module: ask The Mod Archive for an ID first; a draw that fails is repeated with a new ID (up to 3 times, not after 40 s) */
         Uint32 t0 = SDL_GetTicks();
         for (int tries = 0; tries < 3 && SDL_GetTicks() - t0 < 40000 && !net_cancel; tries++) {
             int id = ma_random_id();
-            if (!id) { fprintf(stderr, "ngplayer: random draw %d: no ID (%u ms)\n", tries + 1, SDL_GetTicks() - t0); net_log("random draw try %d: no ID (%u ms)", tries + 1, SDL_GetTicks() - t0); continue; }
+            if (!id) { dl_fail_kind = 1; fprintf(stderr, "ngplayer: random draw %d: no ID (%u ms)\n", tries + 1, SDL_GetTicks() - t0); net_log("random draw try %d: no ID (%u ms)", tries + 1, SDL_GetTicks() - t0); continue; }
             int rc = ma_download(id, dl_path, sizeof dl_path);
             if (!rc) { net_log("random draw try %d: #%d ok (%u ms)", tries + 1, id, SDL_GetTicks() - t0); dl_id = id; dl_rc = 0; dl_state = 2; return 0; }
+            dl_fail_kind = rc == -1 ? 2 : 3; dl_fail_rc = rc;
             fprintf(stderr, "ngplayer: random draw %d: #%d failed (code %d, %u ms)\n", tries + 1, id, rc, SDL_GetTicks() - t0);
             net_log("random draw try %d: #%d failed, code %d (%u ms)", tries + 1, id, rc, SDL_GetTicks() - t0);
         }
@@ -2110,7 +2119,7 @@ static void ma_poll(void) {
         dl_thr = NULL;
         if (dl_random) {
             dice_stop_req = 1;                                     /* the dice settles */
-            if (dl_state == 3) { snprintf(toast_txt, sizeof toast_txt, "Mod Archive did not answer"); toast_t = 3.0f; rand_fail_t = SDL_GetTicks(); }
+            if (dl_state == 3) { if (dl_fail_kind == 2) snprintf(toast_txt, sizeof toast_txt, "Cannot save the module on this device"); else if (dl_fail_kind == 3) snprintf(toast_txt, sizeof toast_txt, "Download failed (code %d)", dl_fail_rc); else snprintf(toast_txt, sizeof toast_txt, "Mod Archive did not answer"); toast_t = 3.0f; rand_fail_t = SDL_GetTicks(); }
             dl_random = 0;
         }
         if (dl_state == 2) {
@@ -4040,12 +4049,13 @@ static void iter(void) {
             case SDL_KEYDOWN:
                 if (ma_open) { ma_key(&e.key); break; }
 #if defined(__APPLE__) && TARGET_OS_TV
-                {   /* Siri Remote: Left/Right = the views (the Info page is one of them), Select / Down = the next random module, Up = back */
+                {   /* Siri Remote: Left/Right = the views (the Info page is one of them), Select = a new random module, Down / Up = the loaded modules */
                     int done = 1;
                     switch (e.key.keysym.sym) {
                     case SDLK_LEFT: case SDLK_RIGHT: { int t = 0, d = e.key.keysym.sym == SDLK_RIGHT ? 1 : NVIEW - 1; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + d) % NVIEW]; view_persist(); } break;
-                    case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_DOWN: next_user(1); break;
-                    case SDLK_UP: next_user(-1); break;
+                    case SDLK_RETURN: case SDLK_KP_ENTER: tv_dice(); break;            /* Select: always a new random module */
+                    case SDLK_DOWN: next_prev(1); break;                               /* Down / Up: through the modules that are already loaded (after the last the first) */
+                    case SDLK_UP: next_prev(-1); break;
                     default: done = 0; break;
                     }
                     if (done) break;
@@ -4300,7 +4310,11 @@ int main(int argc, char **argv) {
             if (!npl) add_path(dp, 0);                                          /* the music folder of the app (with the kept downloads) */
             ma_titles_start();                                                   /* their titles are read in the background */
         }
-        if (h && *h) { snprintf(ma, sizeof ma, "%s/Library/Caches", h); setenv("XDG_CACHE_HOME", ma, 1); }
+        if (h && *h) { snprintf(ma, sizeof ma, "%s/Library/Caches", h); setenv("XDG_CACHE_HOME", ma, 1);
+#if TARGET_OS_TV
+            setenv("XDG_CONFIG_HOME", ma, 1);           /* Apple TV: an app may only write to Library/Caches (and tmp): settings and the list live there too */
+#endif
+        }
     }
 #endif
     if (!npl) {   /* ohne Argumente: Musikordner des Benutzers */
