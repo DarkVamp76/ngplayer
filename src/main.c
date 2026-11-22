@@ -182,7 +182,7 @@ int mac_media_poll(void);                                                       
 static int g_mobile;                  /* Touch-Geraet (Web): schlanker Modus mit weniger Ueberblend-Effekten */
 static void view_persist(void);       /* remembers the view (web: localStorage, iOS: settings file; the desktop saves at the end) */
 #if defined(__APPLE__) && TARGET_OS_TV
-#define NG_TV 1                       /* Apple TV: random mode only, the Siri Remote (Left/Right = views, Select/Down = next random module, Up = back) */
+#define NG_TV 1                       /* Apple TV: random mode only, the Siri Remote (Left/Right = views, Select = new random module, Down/Up = the loaded modules) */
 #else
 #define NG_TV 0
 #endif
@@ -4049,12 +4049,13 @@ static void iter(void) {
             case SDL_KEYDOWN:
                 if (ma_open) { ma_key(&e.key); break; }
 #if defined(__APPLE__) && TARGET_OS_TV
-                {   /* Siri Remote: Left/Right = the views (the Info page is one of them), Select / Down = the next random module, Up = back */
+                {   /* Siri Remote: Left/Right = the views (the Info page is one of them), Select = a new random module, Down / Up = the loaded modules */
                     int done = 1;
                     switch (e.key.keysym.sym) {
                     case SDLK_LEFT: case SDLK_RIGHT: { int t = 0, d = e.key.keysym.sym == SDLK_RIGHT ? 1 : NVIEW - 1; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + d) % NVIEW]; view_persist(); } break;
-                    case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_DOWN: tv_dice(); break;
-                    case SDLK_UP: next_user(-1); break;
+                    case SDLK_RETURN: case SDLK_KP_ENTER: tv_dice(); break;            /* Select: always a new random module */
+                    case SDLK_DOWN: next_prev(1); break;                               /* Down / Up: through the modules that are already loaded (after the last the first) */
+                    case SDLK_UP: next_prev(-1); break;
                     default: done = 0; break;
                     }
                     if (done) break;
