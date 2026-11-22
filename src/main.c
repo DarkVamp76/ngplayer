@@ -3748,10 +3748,12 @@ static void draw_info_tv(float x, float y, float w, float h) {
         snprintf(ilabel, sizeof ilabel, "%s", isi.title[0] ? isi.title : (cur >= 0 ? pl[cur].label : ""));
         ikind = chip_kind_of(song_format(g_song), song_channels(g_song));
     }
-    /* the room: the sound card (swinging, as in the Specs window) takes the left 40 percent at the largest size that fits, the text column the rest, centred in the height */
+    { const char *tc = getenv("NGPLAYER_TEST_CHIP"); if (tc) ikind = atoi(tc); }          /* test hook: another card kind (0 = Paula strip, 1 .. 5 the 3D cards) */
+    /* the room: the sound card (swinging, as in the Specs window) takes the left part at the largest size that fits, the text column the rest, centred in the height */
     const float top = 40;
-    float boxw = w * 0.40f, boxh = h - top - 16;
-    float chh = fminf(boxh / 1.12f, 320.0f), cw = chips_width_k(ikind, chh);
+    float boxw = fminf(w * 0.46f, w - 400.0f), boxh = h - top - 16;           /* the cards differ in width (a flat strip, wide expansion cards, a compact computer): the column is as wide as the text on the right allows */
+    if (boxw < w * 0.34f) boxw = w * 0.34f;                                   /* (all sizes here are view units: this card is about 757 wide on the Apple TV) */
+    float chh = fminf(boxh / 1.12f, 400.0f), cw = chips_width_k(ikind, chh);
     if (cw > boxw - 24) { chh *= (boxw - 24) / cw; cw = boxw - 24; }
     chip_swing = 1; draw_chip_k(ikind, x + (boxw - cw) / 2 + 8, y + top + (boxh - chh * 1.12f) / 2 + chh * 0.06f, chh, 0.0f); chip_swing = 0;
     float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
@@ -3765,8 +3767,8 @@ static void draw_info_tv(float x, float y, float w, float h) {
     const char *lab[3] = { "TRACKER", "FORMAT", "VOICES" }, *val[3] = { isi.tracker, isi.format, vb };
     for (int i = 0; i < 3; i++) {
         text(rx, ty + 3 * k, 12 * k, FAINT, lab[i]);
-        char v[96]; snprintf(v, sizeof v, "%s", val[i]); fit_text(v, rw - 120 * k, 17 * k);
-        text(rx + 120 * k, ty, 17 * k, TXT, v); ty += 30 * k;
+        char v[96]; snprintf(v, sizeof v, "%s", val[i]); fit_text(v, rw - 100 * k, 16 * k);
+        text(rx + 100 * k, ty, 16 * k, TXT, v); ty += 30 * k;
     }
     ty += 4 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
     for (int i = 0; i < isi.nextra && ty < y + h - 22 * k; i++) {
@@ -4277,7 +4279,7 @@ static void iter(void) {
         if (!shot) song_end_advance();
 
         if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
-        if (NG_TV && g_vmode == 4 && g_song && chip_kind() > 0) card3d_frame_swing(chip_kind() - 1, dw, dh);      /* Apple TV: the Info page swings the card as the Specs window does */
+        if (NG_TV && g_vmode == 4 && g_song && (getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) > 0) card3d_frame_swing((getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) - 1, dw, dh);      /* Apple TV: the Info page swings the card as the Specs window does */
         else if (specs_on && specs_kind > 0) card3d_frame_swing(specs_kind - 1, dw, dh);      /* the card of the Specs window swings to and fro and shows its front only */
 #if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
         if (cover_pending && g_song) { cover_pending = 0; cover_render(dw, dh); }      /* the cover of the new song, drawn off screen (after the card of the song was rendered) */
