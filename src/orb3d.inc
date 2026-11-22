@@ -35,5 +35,5 @@ static void ob_gpu_draw(float cx, float cy, float R, float spin, float t, float 
     if (!ob_ready) ob_gpu_init();
     flush();
     float c[9] = { VC[0].r, VC[0].g, VC[0].b, VC[1].r, VC[1].g, VC[1].b, VC[2].r, VC[2].g, VC[2].b };
-    gfx_orb_draw(cx, cy, R, spin, t, beat, bs, c);
+    gfx_orb_draw(cx + GFX_OX, cy + GFX_OY, R, spin, t, beat, bs, c);
 }

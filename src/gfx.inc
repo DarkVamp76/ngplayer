@@ -27,16 +27,19 @@ static void set_additive(int on) {
     gfx_set_additive(on);
 }
 
+static float g_oy;      /* Apple TV: the free margin above the cards (the picture itself fills the whole screen) */
 static float g_ox;      /* iPhone Duo, opened: the right page is drawn with this offset in x (the left one at 0); elsewhere it stays 0 and is not used */
 #if defined(__APPLE__) && TARGET_OS_IPHONE
 #define GFX_OX g_ox
+#define GFX_OY g_oy
 #else
 #define GFX_OX 0.0f
+#define GFX_OY 0.0f
 #endif
 static void V(float x, float y, float u, float v, col c, float m, float p1, float p2, float p3) {
     if (nv >= MAXV) flush();
     vtx *t = &vb[nv++];
-    t->x = x + GFX_OX; t->y = y; t->u = u; t->v = v;
+    t->x = x + GFX_OX; t->y = y + GFX_OY; t->u = u; t->v = v;
     t->r = c.r; t->g = c.g; t->b = c.b; t->a = c.a;
     t->m = m; t->p1 = p1; t->p2 = p2; t->p3 = p3;
 }

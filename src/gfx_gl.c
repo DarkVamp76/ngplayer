@@ -646,3 +646,9 @@ void gfx_card_render(gfx_tex *target, const float *mvp, const float *mv, gfx_mes
     glDisable(GL_DEPTH_TEST);
     gfx_target_end(target);
 }
+
+/* Apple TV helpers: the OpenGL backend has no use for them */
+void  gfx_native_size(SDL_Window *win, int *w, int *h) { SDL_GL_GetDrawableSize(win, w, h); }
+int   gfx_refresh_hz(SDL_Window *win) { (void)win; return 60; }
+void  gfx_set_render_scale(float s) { (void)s; }
+float gfx_last_gpu_ms(void) { return 0; }

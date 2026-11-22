@@ -188,7 +188,37 @@ static float clear_rgb[3];
 Uint32 gfx_window_flags(void) { return SDL_WINDOW_METAL; }
 void gfx_window_attrs(void) {}
 int gfx_vsync(void) { return 1; }
+#if TARGET_OS_TV
+#include <SDL2/SDL_syswm.h>
+static float render_scale = 1.0f;
+void gfx_set_render_scale(float sc) { render_scale = sc < 0.25f ? 0.25f : (sc > 1.0f ? 1.0f : sc); }
+int gfx_refresh_hz(SDL_Window *win) {
+    SDL_SysWMinfo info; SDL_VERSION(&info.version);
+    if (SDL_GetWindowWMInfo(win, &info) && info.subsystem == SDL_SYSWM_UIKIT && info.info.uikit.window) { NSInteger r = info.info.uikit.window.screen.maximumFramesPerSecond; if (r >= 24 && r <= 240) return (int)r; }
+    return 60;
+}
+/* Apple TV: the window is 1920 x 1080 points whatever the output; at 4K the screen scale is 2. SDL reports the size of the layer, which this program sets itself every frame,
+ * so the native size is computed from the window and the screen. */
+void gfx_native_size(SDL_Window *win, int *w, int *h) {
+    int pw = 0, ph = 0; SDL_GetWindowSize(win, &pw, &ph);
+    float ns = 1;
+    SDL_SysWMinfo info; SDL_VERSION(&info.version);
+    if (SDL_GetWindowWMInfo(win, &info) && info.subsystem == SDL_SYSWM_UIKIT && info.info.uikit.window) ns = (float)info.info.uikit.window.screen.nativeScale;
+    if (ns < 1) ns = 1;
+    *w = (int)((float)pw * ns + 0.5f); *h = (int)((float)ph * ns + 0.5f);
+}
+void gfx_drawable_size(SDL_Window *win, int *w, int *h) {
+    gfx_native_size(win, w, h);
+    *w = ((int)((float)*w * render_scale + 0.5f)) & ~1; *h = ((int)((float)*h * render_scale + 0.5f)) & ~1;     /* even sizes */
+}
+#else
 void gfx_drawable_size(SDL_Window *win, int *w, int *h) { SDL_Metal_GetDrawableSize(win, w, h); }
+void gfx_native_size(SDL_Window *win, int *w, int *h) { SDL_Metal_GetDrawableSize(win, w, h); }
+int gfx_refresh_hz(SDL_Window *win) { (void)win; return 60; }
+void gfx_set_render_scale(float sc) { (void)sc; }
+#endif
+static volatile float last_gpu_ms;
+float gfx_last_gpu_ms(void) { return last_gpu_ms; }
 
 /* ---------------------------------------------------------------- pipelines */
 /* blend: 0 none, 1 alpha, 2 additive */
@@ -271,7 +301,7 @@ static void commit_cmd(int present) {
     end_enc();
     if (present && drawable) [cmd presentDrawable:drawable];
     dispatch_semaphore_t s = inflight;
-    [cmd addCompletedHandler:^(id<MTLCommandBuffer> c) { (void)c; dispatch_semaphore_signal(s); }];
+    [cmd addCompletedHandler:^(id<MTLCommandBuffer> c) { if (present) last_gpu_ms = (float)((c.GPUEndTime - c.GPUStartTime) * 1000.0); dispatch_semaphore_signal(s); }];
     [cmd commit];
 }
 static void gen_mips(id<MTLTexture> t) {

@@ -29,6 +29,12 @@ void   gfx_frame_begin(int fw, int fh, int vx, int vy, int vw, int vh, float r, 
 void   gfx_frame_end(SDL_Window *win);                /* show the frame */
 void   gfx_read_pixels(int w, int h, unsigned char *rgba);   /* the current target (frame buffer or render target) as RGBA, bottom row first (like glReadPixels) */
 
+/* ---- Apple TV (elsewhere: harmless defaults) ---------------------------------------------------------------------------------------------------------- */
+void   gfx_native_size(SDL_Window *win, int *w, int *h);   /* the size of the screen in pixels, whatever the picture is rendered at */
+int    gfx_refresh_hz(SDL_Window *win);                 /* refresh rate of the screen (Apple TV: 50, 60 ...); 60 where it is not known */
+void   gfx_set_render_scale(float s);                  /* Apple TV: render at this fraction of the native size (1 = native); elsewhere without effect */
+float  gfx_last_gpu_ms(void);                          /* how long the GPU needed for the last finished frame (Metal; 0 where it is not known) */
+
 /* ---- 2D ------------------------------------------------------------------------------------------------------------------------------------------------ */
 void   gfx_set_params(float res_w, float res_h, float pxs);  /* size of the view in view units, and pixels per view unit */
 void   gfx_set_texture(gfx_tex *t);                   /* the texture of the following 2D draws (the caller flushes its batch first) */
