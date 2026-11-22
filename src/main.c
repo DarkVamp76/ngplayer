@@ -159,6 +159,7 @@ static int npl, cur = -1;
 static float list_scroll;
 #if defined(__APPLE__) && TARGET_OS_IPHONE
 int ios_safe_insets(SDL_Window *win, float *l, float *t, float *r, float *b);      /* ios_glue.m */
+int ios_is_testflight(void);                                                      /* ios_glue.m: a TestFlight build (not the App Store one) */
 void ios_media_setup(void);                                                       /* ios_glue.m: lock screen / CarPlay (Now Playing, remote commands) */
 void ios_media_update(const char *title, const char *artist, const char *album, int playing, double pos, double duration);
 int ios_media_poll(void);
@@ -2339,6 +2340,56 @@ static void draw_ui_duo(float W, float H) {
     draw_ui_portrait(W, H);
 #endif
 }
+static Uint64 g_draw_t0; static float g_draw_ms;                          /* CPU time of the frame (building the picture), shown by draw_fps */
+static float g_tvi_l, g_tvi_t, g_tvi_r, g_tvi_b; static int tv_inset_px[4];     /* Apple TV: the free margin around the cards (view units / pixels); the background fills the whole screen */
+#if defined(__APPLE__) && TARGET_OS_TV
+/* Apple TV: locked frame rate by an adaptive render size (same method as in ngSid). The picture is rendered at the native size of the screen (4K when the Apple TV is set to 4K),
+ * at the middle step or at 1920 wide, whichever the GPU keeps at the refresh rate of the screen: the GPU time of the frames is averaged over a second; more than 80 percent of a
+ * frame budget steps down at once, less than 70 percent (predicted for the next step from the pixel count) four seconds in a row steps up. Starts at the lowest step. */
+static float tv_fps, tv_slowest, tv_cpu, tv_gpu; static int tv_w, tv_h, tv_hz;       /* the last second, for the counter */
+static void tv_adapt(SDL_Window *wn, int fw, int fh) {
+    static Uint64 last; static double acc, worst, cpu, gpu; static int n, good, lvl = -1, nlv, fixed, refresh; static float lv[3];
+    if (lvl < 0) {
+        int nw = 0, nh = 0; gfx_native_size(wn, &nw, &nh);
+        float lo = nw > 1920 ? 1920.0f / (float)nw : 1.0f;
+        lv[0] = lo; nlv = 1; if (lo < 1.0f) { lv[1] = (lo + 1.0f) / 2; lv[2] = 1.0f; nlv = 3; }
+        lvl = 0; gfx_set_render_scale(lv[0]); refresh = gfx_refresh_hz(wn);
+        const char *fx = getenv("NGPLAYER_TEST_SCALE");                  /* test aid: a fixed render scale (1 = native), no adaptation */
+        if (fx) { fixed = 1; gfx_set_render_scale((float)atof(fx)); }
+    }
+    (void)fh;
+    Uint64 t = SDL_GetPerformanceCounter();
+    if (last) {
+        double dt = (double)(t - last) / (double)SDL_GetPerformanceFrequency();
+        acc += dt; n++; cpu += g_draw_ms; gpu += gfx_last_gpu_ms(); if (dt > worst) worst = dt;
+        if (acc >= 1.0) {
+            double g = gpu / n; tv_fps = (float)(n / acc); tv_slowest = (float)(worst * 1000.0); tv_cpu = (float)(cpu / n); tv_gpu = (float)g; tv_w = fw; tv_h = fh;
+            refresh = gfx_refresh_hz(wn); tv_hz = refresh;                              /* the screen can be switched while the app runs (50 / 60 Hz) */
+            const double budget = 1000.0 / (double)(refresh > 0 ? refresh : 60);
+            if (fixed) { /* no adaptation */ }
+            else if (g > 0.80 * budget && lvl > 0) { lvl--; gfx_set_render_scale(lv[lvl]); good = 0; }
+            else if (lvl + 1 < nlv && tv_fps > (float)refresh - 1.5f && g * (double)(lv[lvl + 1] / lv[lvl]) * (double)(lv[lvl + 1] / lv[lvl]) < 0.70 * budget) { if (++good >= 4) { lvl++; gfx_set_render_scale(lv[lvl]); good = 0; } }
+            else good = 0;
+            acc = 0; n = 0; worst = 0; cpu = 0; gpu = 0;
+        }
+    }
+    last = t;
+}
+/* the counter: compiled in only for TestFlight test builds (NG_FPS_COUNTER); an App Store build has none at all */
+static void draw_fps(float W, float H) {
+    static int on = -1;
+    if (on < 0) {
+        on = 0;
+#ifdef NG_FPS_COUNTER
+        on = getenv("NGPLAYER_TEST_FPS") != NULL || ios_is_testflight();
+#endif
+    }
+    if (!on || tv_w <= 0) return;
+    char txt[96];
+    snprintf(txt, sizeof txt, "%.0f/%d fps  slowest %.0f ms  cpu %.1f  gpu %.1f  %dx%d", tv_fps, tv_hz, tv_slowest, tv_cpu, tv_gpu, tv_w, tv_h);
+    text_right(W - 12, H - 13, 10, alpha(DIM, 0.85f), txt);          /* in the free margin below the cards */
+}
+#endif
 static void draw_ui(double t) {
     (void)t;
     float W = view_w, H = view_h;
@@ -2355,7 +2406,17 @@ static void draw_ui(double t) {
     }
 
     if (g_duo) { draw_ui_duo(W, H); return; }
-    if (g_portrait || NG_TV) { draw_ui_portrait(W, H); return; }
+#if defined(__APPLE__) && TARGET_OS_TV
+    {   /* Apple TV: the background fills the whole screen, the cards keep the small free margin (g_tvi_*) */
+        float vw0 = view_w, vh0 = view_h, aw = W - g_tvi_l - g_tvi_r, ah = H - g_tvi_t - g_tvi_b;
+        g_ox = g_tvi_l; g_oy = g_tvi_t; view_w = aw; view_h = ah;
+        draw_ui_portrait(aw, ah);
+        g_ox = 0; g_oy = 0; view_w = vw0; view_h = vh0;
+        draw_fps(W, H);
+        return;
+    }
+#endif
+    if (g_portrait) { draw_ui_portrait(W, H); return; }
     const float M = 16, SB = 288, BOT = 64;
     /* ---------------- Playlist */
     {
@@ -4050,9 +4111,18 @@ static void iter(void) {
         {   /* iOS: keep the UI out of the notch / Dynamic Island, the home bar and the rounded corners (insets in points, from ios_glue.m: SDL2 has no safe-area API) */
             float il, it, ir, ib;
             if (!g_duo && ww > 0 && wh > 0 && !ios_safe_insets(win, &il, &it, &ir, &ib)) {
+#if TARGET_OS_TV
+                {   /* Apple TV: the system asks for 90 points at the sides and 60 above and below; modern televisions show every pixel, so only a small part is kept free */
+                    if (il > 30) il = 30; if (ir > 30) ir = 30; if (it > 20) it = 20; if (ib > 20) ib = 20;
+                }
+#endif
                 float kx = (float)fdw / ww, ky = (float)fdh / wh;
                 int l = (int)(il * kx), t = (int)(it * ky), r = (int)(ir * kx), b = (int)(ib * ky);
+#if TARGET_OS_TV
+                tv_inset_px[0] = l; tv_inset_px[1] = t; tv_inset_px[2] = r; tv_inset_px[3] = b;      /* the picture (background) keeps the whole screen, only the cards keep this distance */
+#else
                 if (l + r < fdw / 3 && t + b < fdh / 3) { vpx = l; vpy = b; dw = fdw - l - r; dh = fdh - t - b; }      /* GL counts from below, so the bottom inset is the y offset */
+#endif
             }
         }
 #endif
@@ -4077,6 +4147,9 @@ static void iter(void) {
         }
         view_w = (float)dw / view_scale;
         view_h = (float)dh / view_scale;
+#if defined(__APPLE__) && TARGET_OS_TV
+        g_tvi_l = (float)tv_inset_px[0] / view_scale; g_tvi_t = (float)tv_inset_px[1] / view_scale; g_tvi_r = (float)tv_inset_px[2] / view_scale; g_tvi_b = (float)tv_inset_px[3] / view_scale;
+#endif
         int mxi, myi;
         Uint32 mb = SDL_GetMouseState(&mxi, &myi);
         mouse_down = (mb & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
@@ -4153,6 +4226,7 @@ static void iter(void) {
         if (cover_pending && g_song) { cover_pending = 0; cover_render(dw, dh); }      /* the cover of the new song, drawn off screen (after the card of the song was rendered) */
 #endif
         gfx_frame_begin(fdw, fdh, vpx, vpy, dw, dh, BG0.r, BG0.g, BG0.b);
+        g_draw_t0 = SDL_GetPerformanceCounter();                       /* after the wait for the display: what follows is the time this program needs for the frame */
         gfx_set_params(view_w, view_h, view_scale);
         gfx_set_texture(fonttex);
         ma_poll();
@@ -4173,11 +4247,22 @@ static void iter(void) {
             g_ap_seen = 0;
         }
 #endif
+        g_draw_ms = (float)((double)(SDL_GetPerformanceCounter() - g_draw_t0) * 1000.0 / (double)SDL_GetPerformanceFrequency());
+#if defined(__APPLE__) && TARGET_OS_TV
+        tv_adapt(win, fdw, fdh);
+#endif
         gfx_frame_end(win);
 #ifndef __EMSCRIPTEN__
         double spent = (double)(SDL_GetPerformanceCounter() - now) / freq;
+#if defined(__APPLE__) && TARGET_OS_TV
+        {   /* Apple TV: the display paces; a sleep to the end of the period would push the frames against its beat, so only to 85 percent of it */
+            double period = 1.0 / (double)(tv_hz > 0 ? tv_hz : 60);
+            if (spent < period * 0.85) SDL_Delay((Uint32)((period * 0.85 - spent) * 1000));
+        }
+#else
         if (!vsync_ok || shot) { if (spent < 0.012) SDL_Delay((Uint32)((0.0167 - spent) * 1000)); }
         else if (spent < 0.002) SDL_Delay(1);       /* Schutz, falls der Treiber VSync nicht wirklich abwartet */
+#endif
 #endif
     }
 

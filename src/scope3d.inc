@@ -11,7 +11,7 @@ static void sc_begin(void) { sc_nt = 0; }
 static void sc_add(const float *v, int np, float bx, float mid, float bw, float amp, float lvl, int ci, int vis) {
     if (sc_nt >= SC_MAXT) return;
     for (int j = 0; j < SC_NP; j++) sc_vals[sc_nt][j] = j < np ? v[j] : 0;
-    sc_info[sc_nt][0][0] = bx; sc_info[sc_nt][0][1] = mid; sc_info[sc_nt][0][2] = bw; sc_info[sc_nt][0][3] = amp;
+    sc_info[sc_nt][0][0] = bx + GFX_OX; sc_info[sc_nt][0][1] = mid + GFX_OY; sc_info[sc_nt][0][2] = bw; sc_info[sc_nt][0][3] = amp;
     sc_info[sc_nt][1][0] = lvl; sc_info[sc_nt][1][1] = (float)ci; sc_info[sc_nt][1][2] = (float)np; sc_info[sc_nt][1][3] = (float)vis;
     sc_nt++;
 }
