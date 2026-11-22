@@ -66,10 +66,24 @@ static void c3_setup(int mi) {
         g->btex = gfx_tex_create(m->bw, m->bh, GFX_RGB565, px, GFX_MIPS);
         free(px);
     }
-    g->w = getenv("NGPLAYER_CARD_W") ? atoi(getenv("NGPLAYER_CARD_W")) : (g_mobile && !NG_TV ? 512 : 1024); g->h = (int)(g->w / c3_box_aspect(mi) + 0.5f);       /* off-screen target: the thin ridges of the cases (vents, floppy slot) only look calm when the picture is made large and shrunk through the mip maps (512 / 320 flickered when turning on a big screen or in the Specs window) */
+    g->w = getenv("NGPLAYER_CARD_W") ? atoi(getenv("NGPLAYER_CARD_W")) : (g_mobile && !NG_TV ? 512 : 1024);        /* the start size; c3_fit() makes it larger when the card is shown large */ g->h = (int)(g->w / c3_box_aspect(mi) + 0.5f);       /* off-screen target: the thin ridges of the cases (vents, floppy slot) only look calm when the picture is made large and shrunk through the mip maps (512 / 320 flickered when turning on a big screen or in the Specs window) */
     g->color = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH);     /* target 0: the turning card of the header */
     g->color2 = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH);    /* target 1: the swinging card of the Specs window */
     g->ready = 1;
+}
+/* The off-screen picture has to be larger than the card looks on the screen (it is shrunk through the mip maps, which is the anti-aliasing): about twice the size it is shown at, between 1024 and 2048
+ * (phones 512 .. 1024). It only grows. c3_px[0] / [1]: the width in pixels the turning / the swinging card was last drawn at (set by draw_chip_k). */
+static float c3_px[2];
+static void c3_fit(int mi, float px) {
+    C3Gl *g = &c3gl[mi];
+    int lo = (g_mobile && !NG_TV) ? 512 : 1024, hi = (g_mobile && !NG_TV) ? 1024 : 2048, want = lo;
+    while (want < hi && (float)want < px * 2.0f) want *= 2;
+    if (getenv("NGPLAYER_CARD_W")) return;                                  /* test hook: a fixed size */
+    if (want <= g->w) return;
+    gfx_tex_free(g->color); gfx_tex_free(g->color2);
+    g->w = want; g->h = (int)(g->w / c3_box_aspect(mi) + 0.5f);
+    g->color = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH);
+    g->color2 = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH);
 }
 /* draws the card at the angle ang into the given target */
 static void c3_render(int mi, float ang, gfx_tex *target, int fw, int fh) {
@@ -80,7 +94,7 @@ static void c3_render(int mi, float ang, gfx_tex *target, int fw, int fh) {
 }
 /* once per frame, before the 2D pass: advance the turn and draw the card into its texture (only while a card is shown) */
 static void card3d_frame(int mi, int fw, int fh) {
-    c3_setup(mi);
+    c3_setup(mi); c3_fit(mi, c3_px[0]);
     static int last_mi = -1;
     const char *fix = getenv("NGPLAYER_TEST_CARDANG");
     if (fix) c3_ang = (float)atof(fix) * 0.017453293f;
@@ -93,7 +107,7 @@ static void card3d_frame(int mi, int fw, int fh) {
 static float c3_swing_t;
 #define C3_SWING_AMP 0.50f          /* radians to each side (about 29 degrees) */
 static void card3d_frame_swing(int mi, int fw, int fh) {
-    c3_setup(mi);
+    c3_setup(mi); c3_fit(mi, c3_px[1]);
     const char *fix = getenv("NGPLAYER_TEST_SWING");                             /* test: a fixed phase in degrees of the swing */
     if (fix) c3_swing_t = (float)atof(fix) * 0.017453293f / 1.1f; else c3_swing_t += (float)g_dt;
     c3_render(mi, C3_SWING_AMP * sinf(c3_swing_t * 1.1f), c3gl[mi].color2, fw, fh);
