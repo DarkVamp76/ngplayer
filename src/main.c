@@ -2289,7 +2289,9 @@ static void draw_duo_bar(float W, float H) {
     float ri = W - M - 16;
     float hash_cx = ri - 22, fold_cx = hash_cx - 14 - 8 - 14, air_cx = fold_cx - 14 - 10 - 18;
     float vx = fold + 8, lw = 58;
-    float vw = (air_cx - 18 - 12) - (26 + 12 + lw + 16) - vx;                  /* what is left up to the AirPlay button, for the volume */
+    float room = (air_cx - 18 - 12) - (26 + 12 + lw + 16) - vx;                /* what is left up to the AirPlay button, for the volume (and RPT / RND) */
+    int chips = room - 92 >= 96;                                               /* RPT and RND (two chips of 38 and the gaps) next to the dice, when the bar is wide enough */
+    float vw = chips ? room - 92 : room;
     if (vw > 168) vw = 168; if (vw < 96) vw = 96;
     if (g_song && song_norders(g_song) > 1) draw_seek_row(M + 164, cy - 36.0f / 2 + 3, (fold - 8) - (M + 164));      /* 36 = SEEK_ROW */
     rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
@@ -2305,6 +2307,7 @@ static void draw_duo_bar(float W, float H) {
     text(lx + (lw - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
     if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; if (g_plopen) list_follow = 1; click = 0; }
     draw_dice(lx + lw + 12 + 13, cy, 13.0f);
+    if (chips) { float qx = lx + lw + 12 + 26 + 10; draw_rpt_chip(qx, cy - 11, 38); draw_rand_chip(qx + 44, cy - 11, 38); }
     draw_import_btn(hash_cx, cy, 14, 1);
     draw_import_btn(fold_cx, cy, 14, 0);
     draw_apple_corner(air_cx, cy, 18);
@@ -3681,10 +3684,13 @@ static void draw_info_tv(float x, float y, float w, float h) {
         text(rx, ty, 15 * k, i == 0 ? VC[0] : DIM, v); ty += 25 * k;
     }
     if (!NG_TV && cur >= 0 && cur < npl && pl[cur].ma_id) {                       /* a Mod Archive entry: the link to its page there (the Apple TV has no pointer) */
-        float lw = text_width("Mod Archive page", 13), lx = x + w - 24 - lw, ly = y + h - 30;
-        int lh = hit(lx - 8, ly - 5, lw + 16, 26);
-        text(lx, ly, 13, lh ? TXT : VC[0], "Mod Archive page");
-        if (clicked(lx - 8, ly - 5, lw + 16, 26)) { info_open(cur); click = 0; }
+        /* top left, where the other views have their label (the bottom right belongs to the RPT / RND buttons); under the label line when the tabs leave no room */
+        float lw = text_width("Mod Archive page", 12), lx = x + 18, ly = y + 12;
+        float tabs_left = g_portrait ? x + w - 14 - NVIEW * 62.0f + 4 : x + w / 2 - NVIEW * 31.0f;
+        if (lx + lw + 12 > tabs_left) ly = y + 38;
+        int lh = hit(lx - 6, ly - 4, lw + 12, 22);
+        text(lx, ly, 12, lh ? TXT : VC[0], "Mod Archive page");
+        if (clicked(lx - 6, ly - 4, lw + 12, 22)) { info_open(cur); click = 0; }
     }
 }
 
