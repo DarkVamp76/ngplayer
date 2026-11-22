@@ -186,8 +186,8 @@ static void view_persist(void);       /* remembers the view (web: localStorage, 
 #else
 #define NG_TV 0
 #endif
-#define NVIEW (NG_TV ? 5 : 4)         /* + the Info page on the Apple TV */
-static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes, 4 = Info (Apple TV only) (key V / buttons); the tab order is VIEW_ORDER */
+#define NVIEW 5                       /* Pattern, Scopes, Orb, Voxel, Info */
+static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes, 4 = Info (key V / buttons); the tab order is VIEW_ORDER */
 static int g_duo;                                           /* iPhone Duo opened: two pages, the left one is the phone layout, the right one shows the pattern */
 static const int VIEW_ORDER[5] = { 0, 3, 1, 2, 4 };   /* PATTERN, SCOPES, ORB, VOXEL */
 static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
@@ -585,7 +585,7 @@ static void draw_info_tv(float x, float y, float w, float h);
 /* Umschalter Pattern | Orb oben in der Karte (auch per Touch/Klick) */
 static void view_switch(float x, float y, float w) {
     if (g_duo && g_ox > 0) return;                              /* Duo opened: the tabs sit on the left page only */
-    float cw = 62, bx = NG_TV ? x + w / 2 - NVIEW * cw / 2.0f : g_portrait ? x + w - 14 - 4 * cw + 4 : x + w / 2 - 2.0f * cw, by = y + 8;
+    float cw = 62, bx = NG_TV ? x + w / 2 - NVIEW * cw / 2.0f : g_portrait ? x + w - 14 - NVIEW * cw + 4 : x + w / 2 - NVIEW * cw / 2.0f, by = y + 8;
     static const char *const NAME[5] = { "PATTERN", "ORB", "VOXEL", "SCOPES", "INFO" };
     for (int t = 0; t < NVIEW; t++) {
         int i = VIEW_ORDER[t];
@@ -1948,7 +1948,7 @@ static void draw_dice_big(float W, float H) {
 #ifdef __EMSCRIPTEN__
 EM_JS(int, web_rand_get, (void), { try { return localStorage.getItem('ngp.random') === '1' ? 1 : 0; } catch (e) { return 0; } });
 EM_JS(void, web_rand_set, (int v), { try { localStorage.setItem('ngp.random', v ? '1' : '0'); } catch (e) {} });
-EM_JS(int, web_view_get, (void), { try { var v = parseInt(localStorage.getItem('ngp.view') || '0', 10); return v >= 0 && v <= 3 ? v : 0; } catch (e) { return 0; } });
+EM_JS(int, web_view_get, (void), { try { var v = parseInt(localStorage.getItem('ngp.view') || '0', 10); return v >= 0 && v <= 4 ? v : 0; } catch (e) { return 0; } });
 EM_JS(void, web_view_set, (int v), { try { localStorage.setItem('ngp.view', String(v)); } catch (e) {} });
 EM_JS(int, web_rpt_get, (void), { try { var v = parseInt(localStorage.getItem('ngp.repeat') || '0', 10); return v === 1 || v === 2 ? v : 0; } catch (e) { return 0; } });
 EM_JS(void, web_rpt_set, (int v), { try { localStorage.setItem('ngp.repeat', String(v)); } catch (e) {} });
@@ -2662,6 +2662,7 @@ static void draw_ui(double t) {
     if (g_vmode == 1) draw_orb(ax, cy0 + oh + M, aw, avail - oh - M);
     else if (g_vmode == 3) draw_scopes(ax, cy0 + oh + M, aw, avail - oh - M);
     else if (g_vmode == 2) draw_voxel(ax, cy0 + oh + M, aw, avail - oh - M);
+    else if (g_vmode == 4) draw_info_tv(ax, cy0 + oh + M, aw, avail - oh - M);
     else draw_pattern(ax, cy0 + oh + M, aw, avail - oh - M);
     if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "PTM") || !strcmp(song_format(g_song), "ULT") || !strcmp(song_format(g_song), "669") || !strcmp(song_format(g_song), "MED") || !strcmp(song_format(g_song), "PSM") || !strcmp(song_format(g_song), "IT") || !strcmp(song_format(g_song), "AMD") || !strcmp(song_format(g_song), "RAD"));
     float vuw = 300, spw = aw - vuw - M;
@@ -2958,7 +2959,7 @@ static void draw_ui_portrait(float W, float H) {
             if (g_vmode == 1) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
             else if (g_vmode == 3) draw_scopes(M, cy0 + oh + M, aw, avail - oh - M);
             else if (g_vmode == 2) draw_voxel(M, cy0 + oh + M, aw, avail - oh - M);
-            else if (g_vmode == 4 && NG_TV) draw_info_tv(M, cy0 + oh + M, aw, avail - oh - M);
+            else if (g_vmode == 4) draw_info_tv(M, cy0 + oh + M, aw, avail - oh - M);
             else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
         }
         float chy = novis ? cy0 + oh - 34 : cy0 + oh + M + (avail - oh - M) - 34;   /* without the visualisation the chips sit in the lower right corner of the channels card */
@@ -4280,7 +4281,7 @@ static void iter(void) {
         if (!shot) song_end_advance();
 
         if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
-        if (NG_TV && g_vmode == 4 && g_song && (getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) > 0) card3d_frame_swing((getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) - 1, dw, dh);      /* Apple TV: the Info page swings the card as the Specs window does */
+        if (g_vmode == 4 && g_song && (getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) > 0) card3d_frame_swing((getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) - 1, dw, dh);      /* Apple TV: the Info page swings the card as the Specs window does */
         else if (specs_on && specs_kind > 0) card3d_frame_swing(specs_kind - 1, dw, dh);      /* the card of the Specs window swings to and fro and shows its front only */
 #if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
         if (cover_pending && g_song) { cover_pending = 0; cover_render(dw, dh); }      /* the cover of the new song, drawn off screen (after the card of the song was rendered) */
@@ -4444,7 +4445,7 @@ int main(int argc, char **argv) {
     if (getenv("NGPLAYER_TEST_ORB")) g_vmode = 1;                  /* test hook: orb view */
     if (getenv("NGPLAYER_TEST_SCOPES")) g_vmode = 3;               /* test hook: scopes view */
     if (getenv("NGPLAYER_TEST_VOXEL")) g_vmode = 2;               /* test hook: voxel flight view */
-    if (getenv("NGPLAYER_TEST_INFO") && NG_TV) g_vmode = 4;        /* test hook: the Info page (Apple TV) */
+    if (getenv("NGPLAYER_TEST_INFO")) g_vmode = 4;        /* test hook: the Info page */
     if (getenv("NGPLAYER_TEST_DICE")) { dice_start(); if (getenv("NGPLAYER_TEST_DICE")[0] == '2') dice_stop_req = 1; }        /* test hook: the big dancing dice, as while a random module is fetched */
     SDL_AudioSpec want, have;
     SDL_zero(want);
