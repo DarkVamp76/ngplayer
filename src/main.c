@@ -1651,6 +1651,12 @@ static void next_user(int d) {              /* next / previous as the user asks 
     }
     next_prev(d);
 }
+static void tv_dice(void) {                 /* Apple TV, Select: always draw a new random module (also when the last draw failed or nothing is loaded yet) */
+    if (ma_take_prefetch()) return;                                                  /* loaded in advance: no gap */
+    if (ma_prefetch_running()) { ma_prefetch_adopt(); return; }
+    if (ma_busy()) { if (ma_loading()) { snprintf(toast_txt, sizeof toast_txt, "Still loading ..."); toast_t = 1.5f; } return; }
+    rand_fail_t = 0; snprintf(toast_txt, sizeof toast_txt, "Drawing a random module ..."); toast_t = 2.5f; ma_random();
+}
 static void song_end_advance(void) {        /* song ended -> next entry (a new random one at the end of the list in random mode) */
     if (!g_ended || cur < 0 || cur >= npl) return;
     if (g_rpt == 2) { play_index_sub(cur, g_open_sub); return; }                      /* RPT 1: the same song again */
@@ -4044,7 +4050,7 @@ static void iter(void) {
                     int done = 1;
                     switch (e.key.keysym.sym) {
                     case SDLK_LEFT: case SDLK_RIGHT: { int t = 0, d = e.key.keysym.sym == SDLK_RIGHT ? 1 : NVIEW - 1; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + d) % NVIEW]; view_persist(); } break;
-                    case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_DOWN: next_user(1); break;
+                    case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_DOWN: tv_dice(); break;
                     case SDLK_UP: next_user(-1); break;
                     default: done = 0; break;
                     }
@@ -4300,7 +4306,11 @@ int main(int argc, char **argv) {
             if (!npl) add_path(dp, 0);                                          /* the music folder of the app (with the kept downloads) */
             ma_titles_start();                                                   /* their titles are read in the background */
         }
-        if (h && *h) { snprintf(ma, sizeof ma, "%s/Library/Caches", h); setenv("XDG_CACHE_HOME", ma, 1); }
+        if (h && *h) { snprintf(ma, sizeof ma, "%s/Library/Caches", h); setenv("XDG_CACHE_HOME", ma, 1);
+#if TARGET_OS_TV
+            setenv("XDG_CONFIG_HOME", ma, 1);           /* Apple TV: an app may only write to Library/Caches (and tmp): settings and the list live there too */
+#endif
+        }
     }
 #endif
     if (!npl) {   /* ohne Argumente: Musikordner des Benutzers */
