@@ -66,7 +66,7 @@ static void c3_setup(int mi) {
         g->btex = gfx_tex_create(m->bw, m->bh, GFX_RGB565, px, GFX_MIPS);
         free(px);
     }
-    g->w = g_mobile ? 320 : 512; g->h = (int)(g->w / c3_box_aspect(mi) + 0.5f);       /* off-screen target, shown at about half this size: smooth edges through the mip maps */
+    g->w = getenv("NGPLAYER_CARD_W") ? atoi(getenv("NGPLAYER_CARD_W")) : (g_mobile && !NG_TV ? 512 : 1024); g->h = (int)(g->w / c3_box_aspect(mi) + 0.5f);       /* off-screen target: the thin ridges of the cases (vents, floppy slot) only look calm when the picture is made large and shrunk through the mip maps (512 / 320 flickered when turning on a big screen or in the Specs window) */
     g->color = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH);     /* target 0: the turning card of the header */
     g->color2 = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH);    /* target 1: the swinging card of the Specs window */
     g->ready = 1;
