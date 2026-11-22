@@ -44,7 +44,8 @@ void   gfx_draw(const gfx_vtx *v, int n);             /* n vertices = n/3 triang
 
 /* ---- textures and render targets ----------------------------------------------------------------------------------------------------------------------- */
 enum { GFX_R8, GFX_RGBA8, GFX_RGB565 };               /* pixel formats (GFX_RGB565: 16 bit, as unsigned short) */
-enum { GFX_MIPS = 1, GFX_TARGET = 2, GFX_DEPTH = 4 };  /* flags: full mip chain (made from px, or after every pass into a target), render target, depth buffer */
+enum { GFX_MIPS = 1, GFX_TARGET = 2, GFX_DEPTH = 4, GFX_MSAA = 8 };  /* flags: full mip chain (made from px, or after every pass into a target), render target, depth buffer, multisampled (target + depth only: gfx_card_render draws with GFX_MSAA_SAMPLES samples and resolves into the texture; a device without that many samples draws as before) */
+#define GFX_MSAA_SAMPLES 4                                    /* the sample count of a GFX_MSAA target (both backends) */
 gfx_tex *gfx_tex_create(int w, int h, int fmt, const void *px, int flags);  /* linear filtering, clamped edges; px may be NULL for a target */
 void   gfx_tex_free(gfx_tex *t);
 /* 2D drawing into a target (the cover picture): clear to r,g,b,a, view = the whole target; gfx_target_end goes back to the window */
