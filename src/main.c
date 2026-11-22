@@ -2004,14 +2004,17 @@ static void ma_need_download(int idx) {
 }
 #endif
 
+static int dl_fail_kind;                    /* why the last random draw failed: 1 no ID (the server did not answer), 2 the module could not be saved, 3 the download failed */
+static int dl_fail_rc;
 static int dl_thread(void *p) {
     if (!dl_id) {                                          /* random module: ask The Mod Archive for an ID first; a draw that fails is repeated with a new ID (up to 3 times, not after 40 s) */
         Uint32 t0 = SDL_GetTicks();
         for (int tries = 0; tries < 3 && SDL_GetTicks() - t0 < 40000 && !net_cancel; tries++) {
             int id = ma_random_id();
-            if (!id) { fprintf(stderr, "ngplayer: random draw %d: no ID (%u ms)\n", tries + 1, SDL_GetTicks() - t0); net_log("random draw try %d: no ID (%u ms)", tries + 1, SDL_GetTicks() - t0); continue; }
+            if (!id) { dl_fail_kind = 1; fprintf(stderr, "ngplayer: random draw %d: no ID (%u ms)\n", tries + 1, SDL_GetTicks() - t0); net_log("random draw try %d: no ID (%u ms)", tries + 1, SDL_GetTicks() - t0); continue; }
             int rc = ma_download(id, dl_path, sizeof dl_path);
             if (!rc) { net_log("random draw try %d: #%d ok (%u ms)", tries + 1, id, SDL_GetTicks() - t0); dl_id = id; dl_rc = 0; dl_state = 2; return 0; }
+            dl_fail_kind = rc == -1 ? 2 : 3; dl_fail_rc = rc;
             fprintf(stderr, "ngplayer: random draw %d: #%d failed (code %d, %u ms)\n", tries + 1, id, rc, SDL_GetTicks() - t0);
             net_log("random draw try %d: #%d failed, code %d (%u ms)", tries + 1, id, rc, SDL_GetTicks() - t0);
         }
@@ -2116,7 +2119,7 @@ static void ma_poll(void) {
         dl_thr = NULL;
         if (dl_random) {
             dice_stop_req = 1;                                     /* the dice settles */
-            if (dl_state == 3) { snprintf(toast_txt, sizeof toast_txt, "Mod Archive did not answer"); toast_t = 3.0f; rand_fail_t = SDL_GetTicks(); }
+            if (dl_state == 3) { if (dl_fail_kind == 2) snprintf(toast_txt, sizeof toast_txt, "Cannot save the module on this device"); else if (dl_fail_kind == 3) snprintf(toast_txt, sizeof toast_txt, "Download failed (code %d)", dl_fail_rc); else snprintf(toast_txt, sizeof toast_txt, "Mod Archive did not answer"); toast_t = 3.0f; rand_fail_t = SDL_GetTicks(); }
             dl_random = 0;
         }
         if (dl_state == 2) {
