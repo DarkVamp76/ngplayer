@@ -1651,6 +1651,7 @@ static void next_user(int d) {              /* next / previous as the user asks 
     }
     next_prev(d);
 }
+static Uint32 tv_dn_t; static int tv_dn_armed, tv_dn_warn;        /* Apple TV: Down is held (delete after 1 s) */
 static void tv_dice(void) {                 /* Apple TV, Select: always draw a new random module (also when the last draw failed or nothing is loaded yet) */
     if (ma_take_prefetch()) return;                                                  /* loaded in advance: no gap */
     if (ma_prefetch_running()) { ma_prefetch_adopt(); return; }
@@ -2399,6 +2400,34 @@ static void draw_fps(float W, float H) {
     text_right(W - 12, H - 13, 10, alpha(DIM, 0.85f), txt);          /* in the free margin below the cards */
 }
 #endif
+#if defined(__APPLE__) && TARGET_OS_TV
+/* Apple TV: the loaded modules on the left, the current one marked (Up / Down move through them, hold Down to delete the marked one) */
+static float tv_list_scroll;
+static void draw_playlist_tv(float x, float y, float w, float h) {
+    card(x, y, w, h, 0);
+    text(x + 18, y + 16, 15, TXT, "PLAYLIST");
+    char cnt[16]; snprintf(cnt, sizeof cnt, "%d", npl); text_right(x + w - 18, y + 16, 15, DIM, cnt);
+    float ry = y + 52, rh = 34, area = h - 52 - 12;
+    if (npl <= 0) { text(x + 18, ry + 6, 14, DIM, "Select draws a module"); return; }
+    int vis = (int)(area / rh); if (vis < 1) vis = 1;
+    rh = area / (float)vis;
+    float maxs = npl > vis ? (float)(npl - vis) : 0;
+    if (cur >= 0) { if ((float)cur < tv_list_scroll) tv_list_scroll = (float)cur; if ((float)cur > tv_list_scroll + (float)vis - 1) tv_list_scroll = (float)(cur - vis + 1); }
+    if (tv_list_scroll > maxs) tv_list_scroll = maxs; if (tv_list_scroll < 0) tv_list_scroll = 0;
+    int i0 = (int)tv_list_scroll;
+    for (int n = 0; n < vis && i0 + n < npl; n++) {
+        int i = i0 + n; float yy = ry + (float)n * rh;
+        if (i == cur) { rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(VC[0], 0.30f)); rect(x + 8, yy + 4, 3, rh - 10, VC[0]); }
+        char lb[128]; snprintf(lb, sizeof lb, "%s", pl[i].label); fit_text(lb, w - 52, 15);
+        text(x + 22, yy + (rh - 15) / 2 - 2, 15, i == cur ? TXT : DIM, lb);
+    }
+    if (npl > vis) {   /* scrollbar */
+        float th = area * (float)vis / (float)npl; if (th < 24) th = 24;
+        float ty = ry + (area - th) * (maxs > 0 ? tv_list_scroll / maxs : 0);
+        rrect(x + w - 8, ty, 3, th, 1.5f, alpha(DIM, 0.5f));
+    }
+}
+#endif
 static void draw_ui(double t) {
     (void)t;
     float W = view_w, H = view_h;
@@ -2417,9 +2446,11 @@ static void draw_ui(double t) {
     if (g_duo) { draw_ui_duo(W, H); return; }
 #if defined(__APPLE__) && TARGET_OS_TV
     {   /* Apple TV: the background fills the whole screen, the cards keep the small free margin (g_tvi_*) */
-        float vw0 = view_w, vh0 = view_h, aw = W - g_tvi_l - g_tvi_r, ah = H - g_tvi_t - g_tvi_b;
-        g_ox = g_tvi_l; g_oy = g_tvi_t; view_w = aw; view_h = ah;
-        draw_ui_portrait(aw, ah);
+        float vw0 = view_w, vh0 = view_h, aw = W - g_tvi_l - g_tvi_r, ah = H - g_tvi_t - g_tvi_b, lw = floorf(aw * 0.30f), M = 10;
+        g_ox = g_tvi_l; g_oy = g_tvi_t; view_w = lw; view_h = ah;
+        draw_playlist_tv(M, M, lw - M, ah - 2 * M);                             /* left: the loaded modules, same height as the cards on the right */
+        g_ox = g_tvi_l + lw; view_w = aw - lw; view_h = ah + M;
+        draw_ui_portrait(aw - lw, ah + M);                                      /* right: the player (the phone layout keeps one margin above the end of its height, so the bottom edges line up with the list) */
         g_ox = 0; g_oy = 0; view_w = vw0; view_h = vh0;
         draw_fps(W, H);
         return;
@@ -3717,11 +3748,16 @@ static void draw_info_tv(float x, float y, float w, float h) {
         snprintf(ilabel, sizeof ilabel, "%s", isi.title[0] ? isi.title : (cur >= 0 ? pl[cur].label : ""));
         ikind = chip_kind_of(song_format(g_song), song_channels(g_song));
     }
-    float k = h / 380.0f; if (k < 0.7f) k = 0.7f; if (k > 1.5f) k = 1.5f;
-    float chh = fminf(h - 56, 220.0f * k), cw = chips_width_k(ikind, chh), lx = x + 24;
-    float cx0 = lx + (w * 0.30f - cw) / 2; if (cx0 < lx) cx0 = lx;
-    chip_swing = 1; draw_chip_k(ikind, cx0, y + 38 + (h - 38 - chh * 1.12f) / 2, chh, 0.0f); chip_swing = 0;
-    float rx = x + w * 0.34f, rw = w - (rx - x) - 28, ty = y + 40 * k;
+    /* the room: the sound card (swinging, as in the Specs window) takes the left 40 percent at the largest size that fits, the text column the rest, centred in the height */
+    const float top = 40;
+    float boxw = w * 0.40f, boxh = h - top - 16;
+    float chh = fminf(boxh / 1.12f, 320.0f), cw = chips_width_k(ikind, chh);
+    if (cw > boxw - 24) { chh *= (boxw - 24) / cw; cw = boxw - 24; }
+    chip_swing = 1; draw_chip_k(ikind, x + (boxw - cw) / 2 + 8, y + top + (boxh - chh * 1.12f) / 2 + chh * 0.06f, chh, 0.0f); chip_swing = 0;
+    float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
+    float rx = x + boxw + 12, rw = w - boxw - 12 - 28;
+    float need = 40 * k + 12 * k + 3 * 30 * k + 4 * k + 12 * k + (isi.nextra > 0 ? isi.nextra : 0) * 25 * k;
+    float ty = y + top + (boxh - need) / 2; if (ty < y + top) ty = y + top;
     char title[128]; snprintf(title, sizeof title, "%s", ilabel); fit_text(title, rw, 26 * k);
     text(rx, ty, 26 * k, TXT, title);
     ty += 40 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
@@ -4046,6 +4082,9 @@ static void iter(void) {
                 break;
             }
             case SDL_TEXTINPUT: if (ma_open) ma_text(e.text.text); break;
+#if defined(__APPLE__) && TARGET_OS_TV
+            case SDL_KEYUP: if (e.key.keysym.sym == SDLK_DOWN && tv_dn_armed) { tv_dn_armed = 0; next_prev(1); } break;     /* Down / Up: through the modules that are already loaded (after the last the first) */
+#endif
             case SDL_KEYDOWN:
                 if (ma_open) { ma_key(&e.key); break; }
 #if defined(__APPLE__) && TARGET_OS_TV
@@ -4054,7 +4093,7 @@ static void iter(void) {
                     switch (e.key.keysym.sym) {
                     case SDLK_LEFT: case SDLK_RIGHT: { int t = 0, d = e.key.keysym.sym == SDLK_RIGHT ? 1 : NVIEW - 1; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + d) % NVIEW]; view_persist(); } break;
                     case SDLK_RETURN: case SDLK_KP_ENTER: tv_dice(); break;            /* Select: always a new random module */
-                    case SDLK_DOWN: next_prev(1); break;                               /* Down / Up: through the modules that are already loaded (after the last the first) */
+                    case SDLK_DOWN: if (!e.key.repeat) { tv_dn_t = SDL_GetTicks(); tv_dn_armed = 1; tv_dn_warn = 0; } break;   /* acts on release: a short press steps on, a long one (1 s) deletes the marked module */
                     case SDLK_UP: next_prev(-1); break;
                     default: done = 0; break;
                     }
@@ -4106,6 +4145,13 @@ static void iter(void) {
             if (!first_shuffle && !g_bg && !g_launch_bg && npl == 0 && !g_song && !ma_busy() && SDL_GetTicks() > 800) { first_shuffle = 1; ma_random(); }
             else if (!first_shuffle && npl > 0) first_shuffle = 1;
         }
+#if defined(__APPLE__) && TARGET_OS_TV
+        if (tv_dn_armed) {
+            Uint32 held = SDL_GetTicks() - tv_dn_t;
+            if (held >= 1000) { tv_dn_armed = 0; if (cur >= 0) { pl_remove(cur); snprintf(toast_txt, sizeof toast_txt, "Removed"); toast_t = 1.5f; } }
+            else if (held >= 350 && !tv_dn_warn && cur >= 0) { tv_dn_warn = 1; snprintf(toast_txt, sizeof toast_txt, "Keep holding to remove this module ..."); toast_t = 1.0f; }
+        }
+#endif
         ios_media_sync();
         if (g_bg) { if (!shot) song_end_advance(); SDL_Delay(100); return; }      /* in the background: no drawing, the sound goes on */
 #endif
@@ -4231,7 +4277,8 @@ static void iter(void) {
         if (!shot) song_end_advance();
 
         if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
-        if (specs_on && specs_kind > 0) card3d_frame_swing(specs_kind - 1, dw, dh);      /* the card of the Specs window swings to and fro and shows its front only */
+        if (NG_TV && g_vmode == 4 && g_song && chip_kind() > 0) card3d_frame_swing(chip_kind() - 1, dw, dh);      /* Apple TV: the Info page swings the card as the Specs window does */
+        else if (specs_on && specs_kind > 0) card3d_frame_swing(specs_kind - 1, dw, dh);      /* the card of the Specs window swings to and fro and shows its front only */
 #if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
         if (cover_pending && g_song) { cover_pending = 0; cover_render(dw, dh); }      /* the cover of the new song, drawn off screen (after the card of the song was rendered) */
 #endif
