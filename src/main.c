@@ -1475,6 +1475,7 @@ static void draw_chip_k(int k, float x, float y, float h, float beat) {
         blob(gx, gy, (k == 0 ? cw * 0.30f : h * 0.55f) * (1.0f + 0.4f * beat), alpha(BEATC, 0.55f * beat));
         set_additive(0);
     }
+    if (k > 0) c3_px[chip_swing ? 1 : 0] = cw * sc * view_scale;           /* how large the card is shown, in pixels (the off-screen picture is made to fit) */
     float hh = h * sc;                                    /* leicht wachsen, um die Mitte */
     float xx = x - (cw * sc - cw) / 2, yy = y - (hh - h) / 2;
     if (k == 0) chip_dip(xx, yy + hh * 0.25f, hh * 0.5f, beat);            /* the chip is half as high as the slot: centred in it */
