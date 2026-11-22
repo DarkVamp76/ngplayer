@@ -1651,7 +1651,7 @@ static void next_user(int d) {              /* next / previous as the user asks 
     }
     next_prev(d);
 }
-static Uint32 tv_dn_t; static int tv_dn_armed, tv_dn_warn;        /* Apple TV: Down is held (delete after 1 s) */
+static Uint32 tv_dn_t; static int tv_dn_armed, tv_dn_warn;        /* Apple TV: Select is held (remove after 1 s) */
 static void tv_dice(void) {                 /* Apple TV, Select: always draw a new random module (also when the last draw failed or nothing is loaded yet) */
     if (ma_take_prefetch()) return;                                                  /* loaded in advance: no gap */
     if (ma_prefetch_running()) { ma_prefetch_adopt(); return; }
@@ -2401,7 +2401,7 @@ static void draw_fps(float W, float H) {
 }
 #endif
 #if defined(__APPLE__) && TARGET_OS_TV
-/* Apple TV: the loaded modules on the left, the current one marked (Up / Down move through them, hold Down to delete the marked one) */
+/* Apple TV: the loaded modules on the left, the current one marked (Up / Down move through them, hold Select to remove the marked one) */
 static float tv_list_scroll;
 static void draw_playlist_tv(float x, float y, float w, float h) {
     card(x, y, w, h, 0);
@@ -4083,7 +4083,7 @@ static void iter(void) {
             }
             case SDL_TEXTINPUT: if (ma_open) ma_text(e.text.text); break;
 #if defined(__APPLE__) && TARGET_OS_TV
-            case SDL_KEYUP: if (e.key.keysym.sym == SDLK_DOWN && tv_dn_armed) { tv_dn_armed = 0; next_prev(1); } break;     /* Down / Up: through the modules that are already loaded (after the last the first) */
+            case SDL_KEYUP: if ((e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER) && tv_dn_armed) { tv_dn_armed = 0; tv_dice(); } break;     /* a short Select: the dice */
 #endif
             case SDL_KEYDOWN:
                 if (ma_open) { ma_key(&e.key); break; }
@@ -4092,8 +4092,8 @@ static void iter(void) {
                     int done = 1;
                     switch (e.key.keysym.sym) {
                     case SDLK_LEFT: case SDLK_RIGHT: { int t = 0, d = e.key.keysym.sym == SDLK_RIGHT ? 1 : NVIEW - 1; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + d) % NVIEW]; view_persist(); } break;
-                    case SDLK_RETURN: case SDLK_KP_ENTER: tv_dice(); break;            /* Select: always a new random module */
-                    case SDLK_DOWN: if (!e.key.repeat) { tv_dn_t = SDL_GetTicks(); tv_dn_armed = 1; tv_dn_warn = 0; } break;   /* acts on release: a short press steps on, a long one (1 s) deletes the marked module */
+                    case SDLK_RETURN: case SDLK_KP_ENTER: if (!e.key.repeat) { tv_dn_t = SDL_GetTicks(); tv_dn_armed = 1; tv_dn_warn = 0; } break;   /* Select acts on release: short = a new random module, long (1 s) = remove the marked one */
+                    case SDLK_DOWN: next_prev(1); break;                               /* Down / Up: through the modules that are already loaded (after the last the first) */
                     case SDLK_UP: next_prev(-1); break;
                     default: done = 0; break;
                     }
