@@ -536,26 +536,10 @@ static int ctx_idx = -1; static float ctx_x, ctx_y;        /* context menu ("Sha
 static float toast_t; static char toast_txt[48];
 #define CTX_W 120.0f
 #define CTX_ROW 30.0f
-/* The information sign: a yellow disc with a dark "i" (a dot over a bar), drawn from shapes so that it stays a clear sign at any size */
-static void draw_info_sign(float cx, float cy, float r, int hover) {
-    col yel = VC[2];
-    if (hover) rrect(cx - r - 2, cy - r - 2, 2 * r + 4, 2 * r + 4, r + 2, alpha(yel, 0.25f));
-    rrect(cx - r, cy - r, 2 * r, 2 * r, r, alpha(yel, hover ? 1.0f : 0.88f));
-    col ink = C(0.07f, 0.09f, 0.16f, 1);
-    float w = r * 0.24f > 1.8f ? r * 0.24f : 1.8f;
-    rrect(cx - w / 2 - 0.2f, cy - r * 0.58f, w + 0.4f, w + 0.4f, (w + 0.4f) / 2, ink);                      /* the dot */
-    rrect(cx - w / 2, cy - r * 0.18f, w, r * 0.80f, w / 2, ink);                                          /* the bar */
-}
-/* The list menu: Share and Info (the Mod Archive page) for Mod Archive entries, Specs in the web player, on touch screens and in the narrow layout (the
- * desktop player has an I button next to the x of each row instead), Remove for all. Items are numbered 0 Share, 1 Info, 2 Specs, 3 Remove. */
+/* The list menu: Share for Mod Archive entries, Remove for all. Items are numbered 0 Share, 3 Remove (the Mod Archive page is a link on the Info page). */
 static int ctx_acts(int idx, int *act) {
     int n = 0, ma = idx >= 0 && idx < npl && pl[idx].ma_id;
     if (ma) act[n++] = 0;                                     /* Share; the Mod Archive page is a link in the Info window now */
-#ifdef __EMSCRIPTEN__
-    act[n++] = 2;
-#else
-    if (g_mobile || g_portrait) act[n++] = 2;                 /* the narrow layout has no I button in its rows either */
-#endif
     act[n++] = 3;
     return n;
 }
@@ -1466,7 +1450,7 @@ static float chips_width(float h) {                       /* Breite des Chipbere
     if (!g_song) return 0;
     return chips_width_k(chip_kind(), h);
 }
-static int chip_swing;                                  /* set while the Specs window draws its card: the swinging picture instead of the turning one */
+static int chip_swing;                                  /* set while the Info page draws its card: the swinging picture instead of the turning one */
 static void draw_chip_k(int k, float x, float y, float h, float beat) {
     float cw = chips_width_k(k, h), sc = 1.0f + 0.07f * beat;
     float gx = x + cw / 2, gy = y + h / 2;
@@ -2193,7 +2177,7 @@ static void draw_ma_dialog(double t) {
     else text(x + 24, y + 120, 12, FAINT, "Enter downloads  \xb7  Ctrl+V paste  \xb7  Ctrl+R random  \xb7  Esc close");
 }
 
-/* the second line of the title card: the tracker the module was made with (the same text as in the Specs window), or its format when that is not known */
+/* the second line of the title card: the tracker the module was made with (the same text as on the Info page), or its format when that is not known */
 static void header_sub(char *out, size_t n) {
     static const Song *cache_song; static int cache_cur = -2, cache_ch = -1; static char cache[sizeof ((SongInfo *)0)->tracker], cache_title[48];
     if (!g_song) { out[0] = 0; return; }
@@ -2205,11 +2189,9 @@ static void header_sub(char *out, size_t n) {
     snprintf(out, n, "%s", cache);
 }
 static void draw_ui_portrait(float W, float H);
-static void draw_specs_chip(float x, float y);
 static void draw_seek_row(float bx, float ty, float bw);
-static void specs_open_entry(int idx);
-/* ---- Swipe actions of a list row on touch devices, like Mail: swipe left = Share (Mod Archive entries) and Remove (a long swipe removes), swipe right = Specs
- * (a long swipe opens it). The row slides, the buttons are revealed behind it; a tap on a button runs it, a tap elsewhere closes the row again. ---- */
+/* ---- Swipe actions of a list row on touch devices, like Mail: swipe left = Share (Mod Archive entries) and Remove (a long swipe removes).
+ * The row slides, the buttons are revealed behind it; a tap on a button runs it, a tap elsewhere closes the row again. ---- */
 #define SW_W 76.0f
 static int sw_drag, sw_nl = 1, sw_axis;                  /* a finger moves the row / its number of left buttons / the direction of the current touch: 0 undecided, 1 horizontal, 2 vertical */
 static float sw_base, sw_rw = 272, sw_px0, sw_apy0;
@@ -2226,7 +2208,7 @@ static void sw_drag_row(int i, float rw, int nl) {       /* the finger moves the
     sw_rw = rw; sw_nl = nl;
     float o = sw_base + (mx - sw_px0);
     if (o < -rw) o = -rw;
-    if (o > rw) o = rw;
+    if (o > 0) o = 0;                                    /* only to the left: Share / Remove */
     sw_off = sw_tgt = o;
 }
 static void sw_release(void) {                           /* the finger is lifted after a horizontal move: run, settle open or close */
@@ -2237,12 +2219,9 @@ static void sw_release(void) {                           /* the finger is lifted
         float R = -sw_off;
         if (R > 0.62f * sw_rw) { sw_idx = -1; sw_off = sw_tgt = 0; pl_remove(i); return; }          /* a long swipe: remove */
         sw_tgt = R > 0.45f * sw_nl * SW_W ? -(float)sw_nl * SW_W : 0;
-    } else {
-        if (sw_off > 0.5f * sw_rw) { sw_idx = -1; sw_off = sw_tgt = 0; specs_open_entry(i); return; }   /* a long swipe: Specs */
-        sw_tgt = sw_off > 0.4f * SW_W ? SW_W : 0;
-    }
+    } else sw_tgt = 0;
 }
-/* the buttons that the shift of row i reveals: x and width of each, and what it does (0 Share, 2 Specs, 3 Remove) */
+/* the buttons that the shift of row i reveals: x and width of each, and what it does (0 Share, 3 Remove) */
 static int sw_buttons(int i, float rx, float rw, float *bx, float *bw, int *act) {
     float o = i == sw_idx ? sw_off : 0; int n = 0;
     if (o < -0.5f) {
@@ -2252,7 +2231,7 @@ static int sw_buttons(int i, float rx, float rw, float *bx, float *bw, int *act)
             bx[n] = right - R; bw[n] = sh; act[n++] = 0;
             bx[n] = right - rm; bw[n] = rm; act[n++] = 3;
         } else { bx[n] = right - R; bw[n] = R; act[n++] = 3; }
-    } else if (o > 0.5f) { bx[n] = rx; bw[n] = o; act[n++] = 2; }
+    }
     return n;
 }
 static void sw_draw(int i, float rx, float rw, float yy, float bh) {      /* behind the row: the revealed buttons */
@@ -2273,7 +2252,7 @@ static int sw_tap(int i, float rx, float rw) {
         float bx[2], bw[2]; int act[2], n = sw_buttons(i, rx, rw, bx, bw, act);
         for (int k = 0; k < n; k++) if (mx >= bx[k] && mx < bx[k] + bw[k]) {
             int a = act[k]; sw_close();
-            if (a == 0) share_link(i); else if (a == 3) pl_remove(i); else specs_open_entry(i);
+            if (a == 0) share_link(i); else if (a == 3) pl_remove(i);
             return 1;
         }
     }
@@ -2306,9 +2285,9 @@ static void draw_duo_bar(float W, float H) {
             click = 0;
         }
     }
-    /* the order slider fills the left half up to the fold; right behind the fold: the volume, then LIST and the dice; at the right edge: AirPlay, open, import, info */
+    /* the order slider fills the left half up to the fold; right behind the fold: the volume, then LIST and the dice; at the right edge: AirPlay, open, import */
     float ri = W - M - 16;
-    float info_x = ri - 22, hash_cx = info_x - 10 - 14, fold_cx = hash_cx - 14 - 8 - 14, air_cx = fold_cx - 14 - 10 - 18;
+    float hash_cx = ri - 22, fold_cx = hash_cx - 14 - 8 - 14, air_cx = fold_cx - 14 - 10 - 18;
     float vx = fold + 8, lw = 58;
     float vw = (air_cx - 18 - 12) - (26 + 12 + lw + 16) - vx;                  /* what is left up to the AirPlay button, for the volume */
     if (vw > 168) vw = 168; if (vw < 96) vw = 96;
@@ -2326,7 +2305,6 @@ static void draw_duo_bar(float W, float H) {
     text(lx + (lw - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
     if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; if (g_plopen) list_follow = 1; click = 0; }
     draw_dice(lx + lw + 12 + 13, cy, 13.0f);
-    if (g_song) draw_specs_chip(info_x, cy - 11);
     draw_import_btn(hash_cx, cy, 14, 1);
     draw_import_btn(fold_cx, cy, 14, 0);
     draw_apple_corner(air_cx, cy, 18);
@@ -2514,25 +2492,18 @@ static void draw_ui(double t) {
             float tx = x + 20 + orr;
             tx += draw_fmt_badge(tx, yy + 6, &pl[i], isc);      /* file format in its own colour */
             float tgw = tg[0] ? text_width(tg, 14) : 0;
-            /* the title gets all the room: the #ID is flush right, and while the pointer is over a desktop row the I and x take the place of the ID (touch: swipe the row instead) */
+            /* the title gets all the room: the #ID is flush right, and while the pointer is over a desktop row the x takes the place of the ID (touch: swipe the row instead) */
             fit_text(lab, w - 36 + ol - (tg[0] ? 10 : 0) - (tx - (x + 20 + orr)) - tgw, 14);
             text(tx, yy + 5, 14, isc ? TXT : DIM, lab);
             if (tg[0] && !hv) text_right(x + w - 16 + ox, yy + 5, 14, VC[1], tg);      /* #ID */
             int xhv = hit(x + w - 38, yy + 2, 26, rh - 6);
             if (!g_mobile) {
                 if (hv) {               /* the buttons sit on their own background (the title may reach under them) */
-                    rrect(x + w - 72, yy + 1, 62, rh - 4, 8, CARD); rrect(x + w - 72, yy + 1, 62, rh - 4, 8, isc ? alpha(VC[0], 0.16f) : alpha(EDGE, 0.25f));
+                    rrect(x + w - 46, yy + 1, 36, rh - 4, 8, CARD); rrect(x + w - 46, yy + 1, 36, rh - 4, 8, isc ? alpha(VC[0], 0.16f) : alpha(EDGE, 0.25f));
                     if (xhv) rrect(x + w - 38, yy + 3, 26, rh - 8, 6, alpha(WARN, 0.22f));
                     text(x + w - 31, yy + 5, 15, xhv ? WARN : alpha(WARN, 0.55f), "\xd7");
                 }
                 if (hv && xhv && click && clickx >= x + w - 38 && clickx < x + w - 12 && clicky >= yy && clicky < yy + rh) { pl_remove(i); click = 0; break; }
-#ifndef __EMSCRIPTEN__
-                {                       /* the information sign: the Specs of this entry, left of the x */
-                    int ihv = hit(x + w - 66, yy + 2, 26, rh - 6);
-                    if (hv) draw_info_sign(x + w - 53, yy + 2 + (rh - 6) * 0.5f, 8.0f, ihv);
-                    if (hv && ihv && click && clickx >= x + w - 66 && clickx < x + w - 40 && clicky >= yy && clicky < yy + rh) { specs_open_entry(i); click = 0; }
-                }
-#endif
             }
             if (rclick && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {
                 ctx_idx = i; rclick = 0;
@@ -2603,8 +2574,6 @@ static void draw_ui(double t) {
         while (tsize > 15 && text_width(title, tsize) > tmax) tsize -= 1;
         fit_text(title, tmax, tsize);
         text(ax + 22, hy + 10, tsize, TXT, title);
-        float ichip = ax + 22 + text_width(title, tsize) + 12;                  /* the Specs button right of the title */
-        if (g_song) draw_specs_chip(ichip, hy + 10 + tsize * 0.5f - 11);
         fit_text(sub, tmax, 14);
         if (!g_error[0]) text(ax + 22, hy + 14 + tsize + 2, 14, DIM, sub);
         float bend = ax + 22;                              /* right end of the badges, for centring the card */
@@ -2638,7 +2607,6 @@ static void draw_ui(double t) {
         }
         if (chw > 0) {                                     /* the sound card sits in the middle between the title / badges and the time */
             float tl = ax + 22 + fmaxf(text_width(title, tsize), text_width(sub, 14)), tr = ax + haw - 22 - rw;
-            if (ichip + 28 > tl) tl = ichip + 28;
             if (bend > tl) tl = bend;
             float x0 = 0.5f * (tl + tr) - chw / 2;
             if (x0 < tl + 8) x0 = tl + 8;
@@ -2884,8 +2852,6 @@ static void draw_ui_portrait(float W, float H) {
             text(M + 16, hy + 10, tsize, TXT, title);
             tw1 = text_width(title, tsize);
         }
-        float ichip = M + 16 + (t2[0] ? tw2 : tw1) + 10;                        /* the Specs button right of the title (of its last line) */
-        if (g_song && !g_duo) draw_specs_chip(ichip, (t2[0] ? tline2 : hy + 10) + tsize * 0.5f - 11);   /* the Duo has the info sign in the wide bar */
         fit_text(sub, tmax, 13);
         if (g_error[0]) text(M + 16, ysub, 12, WARN, g_error);
         else text(M + 16, ysub, 13, DIM, sub);
@@ -2909,7 +2875,6 @@ static void draw_ui_portrait(float W, float H) {
                 if (unit > 0 && unit * chh > 96 * k) chh = 96 * k / unit;
                 float chw = chips_width(chh), rightE = M + aw - 60, x0 = rightE - chw;                  /* narrow: may cover part of the time while it turns */
                 float tl = M + 16 + fmaxf(fmaxf(tw1, tw2), text_width(sub, 13)), tr = M + aw - 16 - text_width(tb, 28);
-                if (ichip + 28 > tl) tl = ichip + 28;
                 if (cx > tl) tl = cx;
                 if (tr - tl >= 40) { x0 = 0.5f * (tl + tr) - chw / 2; if (x0 < tl + 4) x0 = tl + 4; }   /* centred between the title and the time; on a phone it may reach into the time, not into the title */
                 else if (x0 < cx + 6) x0 = cx + 6;                                          /* a very long title: lower right, may cover part of the time */
@@ -3531,7 +3496,7 @@ static void cover_render(int dw, int dh) {
     snprintf(title, sizeof title, "%s", tt[0] ? tt : (cur >= 0 && cur < npl ? pl[cur].label : "ngPlayer"));
     unsigned hs = 2166136261u; for (const char *q = title; *q; q++) hs = (hs ^ (unsigned char)*q) * 16777619u;
     col acc = hue_col((float)(hs % 360) / 360.0f);
-    if (kind > 0) { c3_setup(kind - 1); c3_render(kind - 1, 0.0f, c3gl[kind - 1].color2, dw, dh); }       /* the card, front on, into the picture the Specs window uses too */
+    if (kind > 0) { c3_setup(kind - 1); c3_render(kind - 1, 0.0f, c3gl[kind - 1].color2, dw, dh); }       /* the card, front on, into the picture the Info page uses too */
     if (!cv_tex) cv_tex = gfx_tex_create(COVER_PX, COVER_PX, GFX_RGBA8, NULL, GFX_TARGET);
     if (!gfx_target_begin(cv_tex, BG0.r, BG0.g, BG0.b, 1)) return;
     gfx_set_params(COVER_PX, COVER_PX, 1.0f); gfx_set_texture(fonttex);
@@ -3677,69 +3642,7 @@ static void info_open(int idx) {
 #endif
 }
 
-/* ---- Specs window: the 3D sound card as the head, then title, tracker, voices and the technical details of the file ---- */
-static int specs_idx = -1;                               /* the list entry the Specs window shows (for its Mod Archive link) */
-static int specs_just, specs_test; static int specs_on, specs_kind = -1; static SongInfo specs_info; static char specs_label[128];
-static void specs_fill(const Song *s, const char *label) {
-    song_info(s, &specs_info);
-    snprintf(specs_label, sizeof specs_label, "%s", specs_info.title[0] ? specs_info.title : label);
-    specs_kind = chip_kind_of(song_format(s), song_channels(s)); specs_on = 1;
-}
-static void specs_show_entry(int idx) {                  /* any entry of the list: the playing one, else the file is opened just for its header */
-    if (idx < 0 || idx >= npl) return;
-    specs_idx = idx;
-    if (idx == cur && g_song) { specs_fill(g_song, pl[idx].label); return; }
-    char err[160]; Song *t = song_open(pl[idx].path, 44100, err, sizeof err);
-    if (!t) { snprintf(toast_txt, sizeof toast_txt, "Info not available"); toast_t = 2.0f; return; }
-    specs_fill(t, pl[idx].label); song_close(t);
-}
-static void specs_open_entry(int idx) { specs_show_entry(idx); specs_just = 1; }
-static void specs_geom(float *x, float *y, float *w, float *h) {
-    float chh = view_h - 24 < 440 ? 84.0f : 110.0f;
-    float need = 14 + chh * 1.12f + 10 + 36 + 12 + 3 * 26 + 6 + 12 + specs_info.nextra * 22 + 52;     /* the window is as high as its content */
-    *w = g_duo ? view_w - 120 : (view_w - 24 < 540 ? view_w - 24 : 540); *h = need < view_h - 24 ? need : view_h - 24;        /* Duo opened: big, over both pages */
-    *x = (view_w - *w) / 2; *y = (view_h - *h) / 2;
-}
-/* the small "i" next to the title: opens the Specs of the playing song */
-static void draw_specs_chip(float x, float y) {
-    const float d = 22;
-    int hv = hit(x, y, d, d);
-    draw_info_sign(x + d / 2, y + d / 2, 10.0f, hv || specs_on);
-    if (clicked(x, y, d, d)) { if (specs_on) specs_on = 0; else if (g_song && cur >= 0) { specs_idx = cur; specs_fill(g_song, pl[cur].label); specs_just = 1; } click = 0; }
-}
-static void draw_specs_window(void) {
-    if (!specs_on) return;
-    float x, y, w, h; specs_geom(&x, &y, &w, &h);
-    rect(0, 0, view_w, view_h, C(0, 0, 0, 0.62f));
-    card(x, y, w, h, 0);
-    float chh = view_h - 24 < 440 ? 84.0f : 110.0f, cw = chips_width_k(specs_kind, chh);
-    chip_swing = 1; draw_chip_k(specs_kind, x + (w - cw) / 2, y + 14, chh, 0.0f); chip_swing = 0;
-    float cx = x + w - 38, cy = y + 14; int hv = hit(cx, cy, 24, 24);            /* close button */
-    rrect(cx, cy, 24, 24, 12, alpha(hv ? WARN : EDGE, hv ? 0.5f : 0.35f));
-    text(cx + (24 - text_width("x", 15)) / 2, cy + 3.5f, 15, hv ? TXT : DIM, "x");
-    float ty = y + 14 + chh * 1.12f + 10;
-    char title[128]; snprintf(title, sizeof title, "%s", specs_label); fit_text(title, w - 56, 22);
-    text(x + 28, ty, 22, TXT, title);
-    ty += 36; rect(x + 28, ty, w - 56, 1, alpha(EDGE, 0.5f)); ty += 12;
-    char vb[64]; snprintf(vb, sizeof vb, "%d %s", specs_info.voices, specs_info.voice_unit);
-    const char *lab[3] = { "TRACKER", "FORMAT", "VOICES" }, *val[3] = { specs_info.tracker, specs_info.format, vb };
-    for (int i = 0; i < 3; i++) {
-        text(x + 28, ty + 2, 11, FAINT, lab[i]);
-        char v[96]; snprintf(v, sizeof v, "%s", val[i]); fit_text(v, w - 56 - 96, 14);
-        text(x + 28 + 96, ty, 14, TXT, v); ty += 26;
-    }
-    ty += 6; rect(x + 28, ty, w - 56, 1, alpha(EDGE, 0.5f)); ty += 12;
-    for (int i = 0; i < specs_info.nextra; i++) {
-        char v[96]; snprintf(v, sizeof v, "%s", specs_info.extra[i]); fit_text(v, w - 56, 13);
-        text(x + 28, ty, 13, i == 0 ? VC[0] : DIM, v); ty += 22;
-    }
-    text(x + 28, y + h - 28, 11, FAINT, "Esc or a click outside closes");
-    if (specs_idx >= 0 && specs_idx < npl && pl[specs_idx].ma_id) {                 /* a Mod Archive entry: the link to its page there */
-        float lw = text_width("Mod Archive page", 12); int lh = hit(x + w - 28 - lw - 8, y + h - 34, lw + 16, 26);
-        text(x + w - 28 - lw, y + h - 29, 12, lh ? TXT : VC[0], "Mod Archive page");
-    }
-}
-/* ---- Apple TV: the Info page, one of the views (the same content as the Specs window, laid out to fill the visualisation card) ---- */
+/* ---- the Info page, one of the views: the sound card (swinging) on the left, title, tracker, format, voices and the technical details of the file on the right ---- */
 static void draw_info_tv(float x, float y, float w, float h) {
     card(x, y, w, h, 0);
     view_switch(x, y, w);
@@ -3751,7 +3654,7 @@ static void draw_info_tv(float x, float y, float w, float h) {
         ikind = chip_kind_of(song_format(g_song), song_channels(g_song));
     }
     { const char *tc = getenv("NGPLAYER_TEST_CHIP"); if (tc) ikind = atoi(tc); }          /* test hook: another card kind (0 = Paula strip, 1 .. 5 the 3D cards) */
-    /* the room: the sound card (swinging, as in the Specs window) takes the left part at the largest size that fits, the text column the rest, centred in the height */
+    /* the room: the sound card (swinging) takes the left part at the largest size that fits, the text column the rest, centred in the height */
     const float top = 40;
     float boxw = fminf(w * 0.46f, w - 400.0f), boxh = h - top - 16;           /* the cards differ in width (a flat strip, wide expansion cards, a compact computer): the column is as wide as the text on the right allows */
     if (boxw < w * 0.34f) boxw = w * 0.34f;                                   /* (all sizes here are view units: this card is about 757 wide on the Apple TV) */
@@ -3776,6 +3679,12 @@ static void draw_info_tv(float x, float y, float w, float h) {
     for (int i = 0; i < isi.nextra && ty < y + h - 22 * k; i++) {
         char v[96]; snprintf(v, sizeof v, "%s", isi.extra[i]); fit_text(v, rw, 15 * k);
         text(rx, ty, 15 * k, i == 0 ? VC[0] : DIM, v); ty += 25 * k;
+    }
+    if (!NG_TV && cur >= 0 && cur < npl && pl[cur].ma_id) {                       /* a Mod Archive entry: the link to its page there (the Apple TV has no pointer) */
+        float lw = text_width("Mod Archive page", 13), lx = x + w - 24 - lw, ly = y + h - 30;
+        int lh = hit(lx - 8, ly - 5, lw + 16, 26);
+        text(lx, ly, 13, lh ? TXT : VC[0], "Mod Archive page");
+        if (clicked(lx - 8, ly - 5, lw + 16, 26)) { info_open(cur); click = 0; }
     }
 }
 
@@ -4107,8 +4016,8 @@ static void iter(void) {
                 switch (e.key.keysym.sym) {
                 case SDLK_o: ma_show(1); break;
                 case SDLK_v: { int t = 0; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % NVIEW]; view_persist(); } break;
-                case SDLK_ESCAPE: if (specs_on) specs_on = 0; else running = 0; break;
-                case SDLK_i: if (specs_on) specs_on = 0; else if (g_song && cur >= 0) { specs_idx = cur; specs_fill(g_song, pl[cur].label); specs_just = 1; } break;
+                case SDLK_ESCAPE: running = 0; break;
+                case SDLK_i: g_vmode = 4; view_persist(); break;                 /* the Info view */
                 case SDLK_SPACE: g_paused = !g_paused; break;
                 case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) > 0) play_index_sub(cur, song_subsong(g_song) - 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
                 case SDLK_RIGHT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0++; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) + 1 < song_subsongs(g_song)) play_index_sub(cur, song_subsong(g_song) + 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) + 1); break;
@@ -4246,27 +4155,12 @@ static void iter(void) {
             float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;     /* touch: current pointer (the event coordinates are not reliable on iOS) */
             if (cmx >= ctx_x && cmx < ctx_x + CTX_W && cmy >= ctx_y && cmy < ctx_y + CTX_H(ctx_idx) && ctx_idx < npl) {
                 int act[4], na = ctx_acts(ctx_idx, act), jj = (int)((cmy - ctx_y - 1) / CTX_ROW);
-                int j = jj >= 0 && jj < na ? act[jj] : -1;                                 /* 0 Share, 1 Info, 2 Specs, 3 Remove */
-                if (j == 0) share_link(ctx_idx); else if (j == 2) specs_show_entry(ctx_idx); else if (j == 3) pl_remove(ctx_idx);
+                int j = jj >= 0 && jj < na ? act[jj] : -1;                                 /* 0 Share, 3 Remove */
+                if (j == 0) share_link(ctx_idx); else if (j == 3) pl_remove(ctx_idx);
             }
             ctx_idx = -1; click = 0; lp_swallow = 1;
         }
         if (rclick && ctx_idx >= 0) ctx_idx = -1;
-        if (specs_on && !specs_just) {                       /* the Specs window is modal: it takes every click */
-            if (click) {
-                float sx, sy, sw, sh; specs_geom(&sx, &sy, &sw, &sh);
-                float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;
-                int inside = cmx >= sx && cmx < sx + sw && cmy >= sy && cmy < sy + sh;
-                int on_x = cmx >= sx + sw - 38 && cmx < sx + sw - 14 && cmy >= sy + 14 && cmy < sy + 38;
-                float llw = text_width("Mod Archive page", 12);
-                int on_link = specs_idx >= 0 && specs_idx < npl && pl[specs_idx].ma_id && cmx >= sx + sw - 28 - llw - 8 && cmx < sx + sw - 12 && cmy >= sy + sh - 34 && cmy < sy + sh - 8;
-                if (on_link) info_open(specs_idx);
-                else if (!inside || on_x) specs_on = 0;
-                click = 0; lp_swallow = 1;
-            }
-            rclick = 0;
-        }
-        specs_just = 0;
 
         Uint64 now = SDL_GetPerformanceCounter();
         double dt = (double)(now - tlast) / freq;
@@ -4281,8 +4175,7 @@ static void iter(void) {
         if (!shot) song_end_advance();
 
         if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
-        if (g_vmode == 4 && g_song && (getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) > 0) card3d_frame_swing((getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) - 1, dw, dh);      /* Apple TV: the Info page swings the card as the Specs window does */
-        else if (specs_on && specs_kind > 0) card3d_frame_swing(specs_kind - 1, dw, dh);      /* the card of the Specs window swings to and fro and shows its front only */
+        if (g_vmode == 4 && g_song && (getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) > 0) card3d_frame_swing((getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) - 1, dw, dh);      /* Apple TV: the Info page swings the card on its own */
 #if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
         if (cover_pending && g_song) { cover_pending = 0; cover_render(dw, dh); }      /* the cover of the new song, drawn off screen (after the card of the song was rendered) */
 #endif
@@ -4292,9 +4185,7 @@ static void iter(void) {
         gfx_set_texture(fonttex);
         ma_poll();
         draw_ui((double)(now - t0) / freq);
-        if (specs_test && g_song && cur >= 0 && frame > 20) { specs_idx = cur; specs_fill(g_song, pl[cur].label); specs_test = 0; }
         draw_ma_dialog((double)(now - t0) / freq);
-        draw_specs_window();
         draw_dice_big(view_w, view_h);
         draw_ctx_menu();
         set_additive(0);
@@ -4302,7 +4193,7 @@ static void iter(void) {
         if (shot && ++frame >= shot_frames) { save_screenshot(shot, dw, dh); running = 0; }
 #if defined(__APPLE__) && TARGET_OS_IPHONE
         {   /* the AirPlay button: view units -> points (the safe area offset vpx / vpy is in pixels, GL counts the bottom inset as y) */
-            int show = g_ap_seen && !specs_on && !ma_open && ww > 0 && wh > 0;
+            int show = g_ap_seen && !ma_open && ww > 0 && wh > 0;
             if (show) ios_airplay_place(win, (((float)vpx + g_ap_x * view_scale) * ww / fdw), ((((float)(fdh - dh - vpy)) + g_ap_y * view_scale) * wh / fdh), 2 * g_ap_r * view_scale * ww / fdw, 1);
             else ios_airplay_place(win, 0, 0, 0, 0);
             g_ap_seen = 0;
@@ -4440,7 +4331,6 @@ int main(int argc, char **argv) {
     g_mobile = 1;                                              /* iOS: the touch layout */
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
-    if (getenv("NGPLAYER_TEST_SPECS")) specs_test = 1;       /* test hook: open the Specs window of the first song */
     if (getenv("NGPLAYER_TEST_PLOPEN")) g_plopen = 1;        /* test hook: playlist overlay open (phone layout) */
     if (getenv("NGPLAYER_TEST_ORB")) g_vmode = 1;                  /* test hook: orb view */
     if (getenv("NGPLAYER_TEST_SCOPES")) g_vmode = 3;               /* test hook: scopes view */
