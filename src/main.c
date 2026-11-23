@@ -2715,13 +2715,14 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
         if (sw_axis) moved = 1;
         if (sw_axis == 2) { list_scroll = ls0 + (py0 - my) / rh; if (sw_idx >= 0) sw_close(); }
     } else if (pd) { pd = 0; if (sw_axis == 1) sw_release(); else if (!moved && !lp_swallow) tap = 1; lp_swallow = 0; sw_axis = 0; }
-    float cbx = x + w - 92, cby = y + 8;
+    const float wh = w - g_sa_r;                                  /* the closed Duo: CLOSE and the tabs stay left of the status column (clock, Wi-Fi), the rows below it use the whole width */
+    float cbx = x + wh - 92, cby = y + 8;
     int hvc = hit(cbx, cby, 78, 28);
     rrect(cbx, cby, 78, 28, 8, alpha(hvc ? VC[0] : EDGE, 0.35f));
     text(cbx + (78 - text_width("CLOSE", 12)) / 2, cby + 7, 12, TXT, "CLOSE");
     if (tap && mx >= cbx && mx < cbx + 78 && my >= cby && my < cby + 28) { g_plopen = 0; was_open = 0; return; }
     pl_build_vis();
-    if (npl) pl_tabs(x, y + 46, w, 1, tap);
+    if (npl) pl_tabs(x, y + 46, wh, 1, tap);
     float ry = y + (npl ? 80 : 48), area = h - (npl ? 80 : 48) - 8;
     int vis_rows = (int)(area / rh), maxscroll = nvis > vis_rows ? nvis - vis_rows : 0;
     if (list_follow && cvis >= 0) {
@@ -2911,7 +2912,7 @@ static void draw_ui_portrait(float W, float H) {
     overview_update((float)g_dt);
     if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "PTM") || !strcmp(song_format(g_song), "ULT") || !strcmp(song_format(g_song), "669") || !strcmp(song_format(g_song), "MED") || !strcmp(song_format(g_song), "PSM") || !strcmp(song_format(g_song), "IT") || !strcmp(song_format(g_song), "AMD") || !strcmp(song_format(g_song), "RAD"));
     if (g_plopen) {
-        draw_playlist_overlay(M, cy0, aw, sy + sh - cy0);   /* the transport bar below (LIST) still gets its click */
+        draw_playlist_overlay(M, cy0, awf, sy + sh - cy0);  /* the transport bar below (LIST) still gets its click; the whole width (the header row keeps clear of the status column itself) */
     } else {
         draw_overview(M, cy0, aw, oh);
 #ifdef __APPLE__
@@ -2942,6 +2943,7 @@ static void draw_ui_portrait(float W, float H) {
         float vuw = 130, spw = aw - vuw - M;
         if (!nosp) { draw_spectrum(M, sy, spw, sh); draw_level(M + spw + M, sy, vuw, sh); }
     }
+    aw = awf;                                                              /* the bar runs over the whole width, too */
     /* ---------------- Transport */
     if (!g_duo && !NG_TV) {
         float bx = M, bw = aw;
@@ -4109,7 +4111,7 @@ static void iter(void) {
                 tv_inset_px[0] = l; tv_inset_px[1] = t; tv_inset_px[2] = r; tv_inset_px[3] = b;      /* the picture (background) keeps the whole screen, only the cards keep this distance */
 #else
                 if (l + r < fdw / 3 && t + b < fdh / 3) { vpx = l; vpy = b; dw = fdw - l - r; dh = fdh - t - b; }      /* GL counts from below, so the bottom inset is the y offset */
-                if (dw > 0 && r - l > (int)(40 * kx) && b > 0) { dc_r = r; dc_b = b - (int)(0.4f * (float)b); }       /* a side status column (the closed Duo): the layout is made for the rest, then widened over it */
+                if (dw > 0 && r - l > (int)(40 * kx) && b > 0) { dc_r = r; dc_b = b - (int)(0.2f * (float)b); }       /* a side status column (the closed Duo): the layout is made for the rest, then widened over it */
 #endif
             }
         }
