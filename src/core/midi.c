@@ -482,7 +482,17 @@ static void hw_resync(Midi *m) {
         }
         for (size_t j = 0; j < m->setup_end; j++) {                              /* the SysEx messages before the first note: the set-up of the file */
             const Ev *e = &m->ev[j];
-            if (e->type == EV_SYSEX) { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); midi_hw_send(g_hw, p + 2, n, t); t += sx_gap_msg(p + 2, n); }
+            if (e->type == EV_SYSEX) {
+                const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8), dup = 0;
+                for (size_t k = 0; k < m->syx_len && !dup; k++) {                /* the same message was in the .syx already: not again */
+                    if (m->syx[k] != 0xF0) continue;
+                    size_t q = k + 1; while (q < m->syx_len && m->syx[q] != 0xF7) q++;
+                    if (q < m->syx_len && (int)(q - k + 1) == n && !memcmp(m->syx + k, p + 2, (size_t)n)) dup = 1;
+                    k = q;
+                }
+                if (dup) continue;
+                midi_hw_send(g_hw, p + 2, n, t); t += sx_gap_msg(p + 2, n);
+            }
         }
         m->hw_setup_done = 1; t += 0.1; m->hw_setup_end = t;
     }
