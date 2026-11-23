@@ -188,6 +188,7 @@ static void view_persist(void);       /* remembers the view (web: localStorage, 
 #endif
 #define NVIEW 5                       /* Pattern, Scopes, Orb, Voxel, Info */
 static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes, 4 = Info (key V / buttons); the tab order is VIEW_ORDER */
+static float g_sa_r;                                        /* iPhone Duo closed: the width (view units) of the system status column on the right (clock, Wi-Fi, camera); the top cards stay left of it, the rest runs over the full width */
 static int g_duo;                                           /* iPhone Duo opened: two pages, the left one is the phone layout, the right one shows the pattern */
 static const int VIEW_ORDER[5] = { 0, 3, 1, 2, 4 };   /* PATTERN, SCOPES, ORB, VOXEL */
 static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
@@ -554,11 +555,13 @@ static float chip(float x, float y, const char *label, col c, int lit) {
     else { rrect(x, y, w, 20, 6, alpha(FAINT, 0.18f)); text(x + 7, y + 3, 12, alpha(FAINT, 0.9f), label); }
     return w + 5;
 }
+static float g_card_r = 14;                                  /* the corner radius of the next card(); the cards in the corners of the Duo follow the rounded corners of its display */
 static void card(float x, float y, float w, float h, int hover) {
-    shadow(x, y + 6, w, h, 14, 22, C(0, 0, 0, 0.5f));
-    rrect(x, y, w, h, 14, alpha(EDGE, hover ? 0.75f : 0.45f));
-    rrect(x + 1, y + 1, w - 2, h - 2, 13, hover ? CARDHI : CARD);
+    shadow(x, y + 6, w, h, g_card_r, 22, C(0, 0, 0, 0.5f));
+    rrect(x, y, w, h, g_card_r, alpha(EDGE, hover ? 0.75f : 0.45f));
+    rrect(x + 1, y + 1, w - 2, h - 2, g_card_r - 1, hover ? CARDHI : CARD);
 }
+static void card_r(float x, float y, float w, float h, float r) { g_card_r = r; card(x, y, w, h, 0); g_card_r = 14; }
 static void mmss(char *buf, size_t cap, double sec) { int s = (int)sec; snprintf(buf, cap, "%d:%02d", s / 60, s % 60); }
 
 static float glow_l, glow_r;
@@ -768,7 +771,7 @@ static void draw_scopes(float x, float y, float w, float h) {
 
 
 static void draw_pattern(float x, float y, float w, float h) {
-    if (!(g_duo && g_ox > 0)) card(x, y, w, h, 0);              /* (the Duo draws the wide card itself, the content is narrower than the card) */
+    if (!(g_duo && g_ox > 0)) card_r(x, y, w, h, g_duo ? 30.0f : 14.0f);              /* (the Duo draws the wide card itself, the content is narrower than the card; its corner follows the display) */
     if (!g_portrait) text(x + 18, y + 12, 12, DIM, "PATTERN");
     view_switch(x, y, w);
     if (!g_song) { text(x + 18, y + 44, 14, FAINT, "No song loaded."); return; }
@@ -804,13 +807,15 @@ static void draw_pattern(float x, float y, float w, float h) {
     lvl = tryl < 3 ? tryl : 2;      /* passt nichts komplett: kompakteste Stufe, damit moeglichst viele Stimmen sichtbar sind */
     cw = wn + wi + (lvl < 1 ? wv : 0) + (lvl < 2 ? wf : 0) + gap * (4 - lvl) + 6;
     vis = (int)(avail / cw);
+    const int duo_pat = g_duo && g_ox > 0;                     /* the pattern card of the opened Duo: wide, full height */
+    if (duo_pat && vis < nch) { int v2 = (int)(avail / (cw - 4)); if (v2 > vis) { vis = v2 > nch ? nch : v2; cw = avail / (float)vis; } }       /* one more column when the padding may shrink a little: the columns fill the card */
     if (vis < 1) vis = 1;
     if (vis > nch) vis = nch;
     pat_visch = vis;
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     {                                                         /* iOS (iPhone, iPad, Duo): a finger moves the columns sideways (the number bar above stays for taps = mute) */
         static int pd, ch_start; static float px0;
-        int inside = mx >= x && mx < x + w && my >= y + 34 + 26 && my < y + h;
+        int inside = mx >= x && mx < x + w && my >= y + 34 + (duo_pat ? 52 : 0) + 26 && my < y + h;
         if (mouse_down) {
             if (!pd && inside) { pd = 1; px0 = mx; ch_start = pat_ch0; }
             if (pd) pat_ch0 = ch_start - (int)lroundf((mx - px0) / cw);
@@ -822,11 +827,11 @@ static void draw_pattern(float x, float y, float w, float h) {
 #endif
     if (pat_ch0 > nch - vis) pat_ch0 = nch - vis;
     if (pat_ch0 < 0) pat_ch0 = 0;
-    float used = cw * vis, ox = ax0 + (avail - used) / 2;
+    float used = cw * vis, ox = (duo_pat && nch > vis) ? ax0 : ax0 + (avail - used) / 2;       /* Duo, more channels than columns: the first column sits next to the row numbers */
 
     /* Kanalkoepfe (Scope + Panning je Stimme). Passen nicht alle Stimmen in die Pattern-Spalten, bekommen ALLE Stimmen
      * ein Kopf-Raster mit je max. 16 pro Zeile (oben), das Pattern darunter scrollt mit Nummernleiste. */
-    float hy = y + 34, hh = 0;                 /* the PATTERN view shows the notes only; the scopes have their own tab (SCOPES) */
+    float hy = y + 34 + (duo_pat ? 52.0f : 0.0f), hh = 0;       /* the PATTERN view shows the notes only; the scopes have their own tab (SCOPES); Duo: below the time and Wi-Fi of the system */
     int strip = nch > vis;
     float labh = 16;
     {   /* number bar of the visible columns: click = mute, Ctrl+click = solo */
@@ -1133,8 +1138,9 @@ static void overview_update(float dt) {
     }
 }
 
+static float g_ov_fullw;                                              /* the closed Duo: the full width of the channels card (its content keeps clear of the status column) */
 static void draw_overview(float x, float y, float w, float h) {
-    card(x, y, w, h, 0);
+    card(x, y, g_sa_r > 0 ? g_ov_fullw : w, h, 0);
     if (!g_song) return;
     int nch = song_channels(g_song);
     if (nch > 64) nch = 64;
@@ -2263,7 +2269,7 @@ static void draw_duo_bar(float W, float H) {
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     const float M = 10, BH = 64;
     float by = H - M - BH, cy = by + BH / 2, r = 20, fold = W / 2;
-    card(M, by, W - 2 * M, BH, 0);
+    card_r(M, by, W - 2 * M, BH, 28.0f);                                        /* the corners follow the rounded corners of the Duo display */
     /* left half: previous, play / pause, next, the order slider (nothing over the fold) */
     float bxs[3] = { M + 12, M + 62, M + 112 };
     for (int i = 0; i < 3; i++) {
@@ -2285,29 +2291,24 @@ static void draw_duo_bar(float W, float H) {
             click = 0;
         }
     }
-    /* the order slider fills the left half up to the fold; right behind the fold: the volume, then LIST and the dice; at the right edge: AirPlay, open, import */
-    float ri = W - M - 16;
-    float hash_cx = ri - 22, fold_cx = hash_cx - 14 - 8 - 14, air_cx = fold_cx - 14 - 10 - 18;
-    float vx = fold + 8, lw = 58;
-    float room = (air_cx - 18 - 12) - (26 + 12 + lw + 16) - vx;                /* what is left up to the AirPlay button, for the volume (and RPT / RND) */
-    int chips = room - 92 >= 96;                                               /* RPT and RND (two chips of 38 and the gaps) next to the dice, when the bar is wide enough */
-    float vw = chips ? room - 92 : room;
-    if (vw > 168) vw = 168; if (vw < 96) vw = 96;
+    /* the order slider fills the left half up to the fold; right of the fold seven things are spread evenly: LIST, the dice, RPT, RND, AirPlay, open, import (no volume slider on iOS: the device has its buttons) */
+    float ri = W - M - 16, start = fold + 16;
+    const float wl = 58, wd = 26, wc = 38, wa = 36, wb = 28;
+    int chips = 1, nit = 7;
+    float gap = (ri - start - (wl + wd + 2 * wc + wa + 2 * wb)) / (float)(nit - 1);
+    if (gap < 8) { chips = 0; nit = 5; gap = (ri - start - (wl + wd + wa + 2 * wb)) / (float)(nit - 1); }        /* a narrow bar: no RPT / RND here */
     if (g_song && song_norders(g_song) > 1) draw_seek_row(M + 164, cy - 36.0f / 2 + 3, (fold - 8) - (M + 164));      /* 36 = SEEK_ROW */
-    rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
-    rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
-    float kx = vx + 3 + (vw - 6) * g_vol;
-    rrect(kx - 9, cy - 9, 18, 18, 9, TXT);
-    if (!mouse_down) vol_drag = 0;
-    else if (hit(vx - 12, cy - 18, vw + 24, 36) || (click && clicked(vx - 12, cy - 18, vw + 24, 36))) vol_drag = 1;
-    if (vol_drag) { g_vol = (mx - vx - 3) / (vw - 6); if (g_vol < 0) g_vol = 0; if (g_vol > 1) g_vol = 1; }
-    float lx = vx + vw + 16;
-    int hv = hit(lx, cy - 16, lw, 32);
-    rrect(lx, cy - 16, lw, 32, 9, alpha(g_plopen ? VC[2] : (hv ? VC[0] : EDGE), g_plopen ? 0.28f : 0.35f));
-    text(lx + (lw - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
-    if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; if (g_plopen) list_follow = 1; click = 0; }
-    draw_dice(lx + lw + 12 + 13, cy, 13.0f);
-    if (chips) { float qx = lx + lw + 12 + 26 + 10; draw_rpt_chip(qx, cy - 11, 38); draw_rand_chip(qx + 44, cy - 11, 38); }
+    float px = start;
+    float lx = px; px += wl + gap;
+    int hv = hit(lx, cy - 16, wl, 32);
+    rrect(lx, cy - 16, wl, 32, 9, alpha(g_plopen ? VC[2] : (hv ? VC[0] : EDGE), g_plopen ? 0.28f : 0.35f));
+    text(lx + (wl - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
+    if (clicked(lx, cy - 16, wl, 32)) { g_plopen = !g_plopen; if (g_plopen) list_follow = 1; click = 0; }
+    draw_dice(px + wd / 2, cy, 13.0f); px += wd + gap;
+    if (chips) { draw_rpt_chip(px, cy - 11, wc); px += wc + gap; draw_rand_chip(px, cy - 11, wc); px += wc + gap; }
+    float air_cx = px + wa / 2; px += wa + gap;
+    float fold_cx = px + wb / 2; px += wb + gap;
+    float hash_cx = px + wb / 2;
     draw_import_btn(hash_cx, cy, 14, 1);
     draw_import_btn(fold_cx, cy, 14, 0);
     draw_apple_corner(air_cx, cy, 18);
@@ -2324,8 +2325,8 @@ static void draw_ui_duo(float W, float H) {
     float ox = pw, mx0 = mx;
     int cl0 = clickx, rcl0 = rclickx;
     g_ox = ox; mx -= ox; clickx -= (int)ox; rclickx -= (int)ox;     /* the right page works in its own coordinates */
-    card(0, M, pw - M, Hc - 2 * M, 0);                  /* the pattern card starts at the page edge: the distance to the left cards is the normal 10 */
-    draw_pattern(0, M, pw - M - 84, Hc - 2 * M);          /* 84 free on the right: time and Wi-Fi lie over the card there, the columns end before them */
+    card_r(0, M, pw - M, Hc - 2 * M, 30.0f);            /* the pattern card starts at the page edge: the distance to the left cards is the normal 10; the top right corner follows the display */
+    draw_pattern(0, M, pw - M, Hc - 2 * M);               /* the whole card: time and Wi-Fi lie over its top right corner, so the number bar and the rows start below them (draw_pattern) */
     g_ox = 0; mx = mx0; clickx = cl0; rclickx = rcl0;
     draw_duo_bar(W, H);
 #else
@@ -2677,6 +2678,7 @@ static void draw_ui(double t) {
             text(bx + 190, cy - 20, 12, FAINT, l1);
             text(bx + 190, cy + 2, 12, FAINT, l2);
         }
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)                /* no volume slider on iOS: the device has its buttons */
         text(vx - 44, cy - 8, 12, DIM, "VOL");
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
         rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
@@ -2689,6 +2691,7 @@ static void draw_ui(double t) {
             if (g_vol < 0) g_vol = 0;
             if (g_vol > 1) g_vol = 1;
         }
+#endif
     }
 }
 
@@ -2713,13 +2716,14 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
         if (sw_axis) moved = 1;
         if (sw_axis == 2) { list_scroll = ls0 + (py0 - my) / rh; if (sw_idx >= 0) sw_close(); }
     } else if (pd) { pd = 0; if (sw_axis == 1) sw_release(); else if (!moved && !lp_swallow) tap = 1; lp_swallow = 0; sw_axis = 0; }
-    float cbx = x + w - 92, cby = y + 8;
+    const float wh = w - g_sa_r;                                  /* the closed Duo: CLOSE and the tabs stay left of the status column (clock, Wi-Fi), the rows below it use the whole width */
+    float cbx = x + wh - 92, cby = y + 8;
     int hvc = hit(cbx, cby, 78, 28);
     rrect(cbx, cby, 78, 28, 8, alpha(hvc ? VC[0] : EDGE, 0.35f));
     text(cbx + (78 - text_width("CLOSE", 12)) / 2, cby + 7, 12, TXT, "CLOSE");
     if (tap && mx >= cbx && mx < cbx + 78 && my >= cby && my < cby + 28) { g_plopen = 0; was_open = 0; return; }
     pl_build_vis();
-    if (npl) pl_tabs(x, y + 46, w, 1, tap);
+    if (npl) pl_tabs(x, y + 46, wh, 1, tap);
     float ry = y + (npl ? 80 : 48), area = h - (npl ? 80 : 48) - 8;
     int vis_rows = (int)(area / rh), maxscroll = nvis > vis_rows ? nvis - vis_rows : 0;
     if (list_follow && cvis >= 0) {
@@ -2809,10 +2813,12 @@ static void draw_seek_row(float bx, float ty, float bw) {
 
 static void draw_ui_portrait(float W, float H) {
     const float M = 10, BOT = (g_duo || NG_TV) ? 0.0f : 64.0f;          /* iPhone Duo opened: the transport bar is the wide one over both pages (draw_duo_bar) */
-    float aw = W - 2 * M;
+    const float awf = W - 2 * M - (g_sa_r > 0 ? 8.0f : 0.0f);          /* the width of all the cards; the closed Duo keeps 8 more at the right, clear of the rounded corner of the display */
+    float aw = W - g_sa_r - 2 * M;                                         /* the content of the top cards (header, channels) stays left of the status column of the closed Duo; the cards themselves have the full width */
+    g_ov_fullw = awf;
     /* ---------------- Kopf */
     float hy = M, hh = 92;
-    card(M, hy, aw, hh, 0);
+    card_r(M, hy, g_sa_r > 0 ? awf : aw, hh, (g_duo || g_sa_r > 0) ? 30.0f : 14.0f);          /* the Duo (open and closed): the corner follows the rounded corner of the display; closed: the card is as wide as the others, the status column lies over its right end */
     {
         char title[160], sub[200];
         if (g_song) {
@@ -2908,7 +2914,7 @@ static void draw_ui_portrait(float W, float H) {
     overview_update((float)g_dt);
     if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "PTM") || !strcmp(song_format(g_song), "ULT") || !strcmp(song_format(g_song), "669") || !strcmp(song_format(g_song), "MED") || !strcmp(song_format(g_song), "PSM") || !strcmp(song_format(g_song), "IT") || !strcmp(song_format(g_song), "AMD") || !strcmp(song_format(g_song), "RAD"));
     if (g_plopen) {
-        draw_playlist_overlay(M, cy0, aw, sy + sh - cy0);   /* the transport bar below (LIST) still gets its click */
+        draw_playlist_overlay(M, cy0, awf, sy + sh - cy0);  /* the transport bar below (LIST) still gets its click; the whole width (the header row keeps clear of the status column itself) */
     } else {
         draw_overview(M, cy0, aw, oh);
 #ifdef __APPLE__
@@ -2922,6 +2928,7 @@ static void draw_ui_portrait(float W, float H) {
 #else
         draw_seal(M + aw - 12, cy0 + 6, 21, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
 #endif
+        aw = awf;                                                         /* everything below runs over the full width */
         if (!novis) {
             if (g_duo && g_vmode == 0) g_vmode = 3;                       /* the pattern is on the right page */
             if (g_vmode == 1) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
@@ -2931,15 +2938,18 @@ static void draw_ui_portrait(float W, float H) {
             else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
         }
         float chy = novis ? cy0 + oh - 34 : cy0 + oh + M + (avail - oh - M) - 34;   /* without the visualisation the chips sit in the lower right corner of the channels card */
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)           /* iOS has them in the bar (they were hidden with the list open) */
         if (!NG_TV) { draw_rand_chip(M + aw - 56, chy, 44);
         draw_rpt_chip(M + aw - 106, chy, 44); }       /* RND (and RPT left of it) in the lower right corner of the pattern / orb card */
+#endif
         float vuw = 130, spw = aw - vuw - M;
         if (!nosp) { draw_spectrum(M, sy, spw, sh); draw_level(M + spw + M, sy, vuw, sh); }
     }
+    aw = awf;                                                              /* the bar runs over the whole width, too */
     /* ---------------- Transport */
     if (!g_duo && !NG_TV) {
         float bx = M, bw = aw;
-        card(bx, by, bw, botH, 0);
+        card_r(bx, by, bw, botH, g_sa_r > 0 ? 32.0f : 14.0f);        /* closed Duo: the bottom corners follow the display */
         float cy = by + botH - BOT / 2, r = 20;
         if (has_seek) draw_seek_row(bx, by + 6, bw);
         float bxs[3] = { bx + 12, bx + 62, bx + 112 };
@@ -2969,7 +2979,11 @@ static void draw_ui_portrait(float W, float H) {
             text(lx + (lw - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
             if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; click = 0; }
         }
-        draw_dice(bx + 266, cy, 13.0f);           /* random dice (portrait: between LIST and the volume slider), big enough for a finger */
+        draw_dice(bx + 266, cy, 13.0f);           /* random dice (portrait: right of LIST), big enough for a finger */
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        draw_rpt_chip(bx + 296, cy - 11, 38); draw_rand_chip(bx + 340, cy - 11, 38);       /* RPT and RND in the bar (the room of the volume slider): reachable with the list open, too */
+#endif
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)                /* no volume slider on iOS: the device has its buttons */
         float vx = bx + 306, vw = bw - 306 - 22;
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
         rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
@@ -2982,6 +2996,7 @@ static void draw_ui_portrait(float W, float H) {
             if (g_vol < 0) g_vol = 0;
             if (g_vol > 1) g_vol = 1;
         }
+#endif
     }
 }
 
@@ -4081,6 +4096,7 @@ static void iter(void) {
         SDL_GetWindowSize(win, &ww, &wh);
         gfx_drawable_size(win, &dw, &dh);
         int fdw = dw, fdh = dh, vpx = 0, vpy = 0;      /* the whole framebuffer; dw/dh become the part the UI is laid out in */
+        int dc_r = 0, dc_b = 0;                          /* iPhone Duo closed: the right inset (status column) and the part of the bottom inset the layout may use */
 #if defined(__APPLE__) && TARGET_OS_IPHONE
         g_duo = ios_hinge_status(win) >= 2 && ww > wh;               /* iPhone Duo opened: the hinge is open and the picture is wide; it uses the whole window (time and Wi-Fi lie over it) */
         {   /* iOS: keep the UI out of the notch / Dynamic Island, the home bar and the rounded corners (insets in points, from ios_glue.m: SDL2 has no safe-area API) */
@@ -4097,6 +4113,7 @@ static void iter(void) {
                 tv_inset_px[0] = l; tv_inset_px[1] = t; tv_inset_px[2] = r; tv_inset_px[3] = b;      /* the picture (background) keeps the whole screen, only the cards keep this distance */
 #else
                 if (l + r < fdw / 3 && t + b < fdh / 3) { vpx = l; vpy = b; dw = fdw - l - r; dh = fdh - t - b; }      /* GL counts from below, so the bottom inset is the y offset */
+                if (dw > 0 && r - l > (int)(40 * kx) && b > 0) { dc_r = r; dc_b = b - (int)(0.2f * (float)b); }       /* a side status column (the closed Duo): the layout is made for the rest, then widened over it */
 #endif
             }
         }
@@ -4120,6 +4137,13 @@ static void iter(void) {
             if ((float)dh / 860.0f < view_scale) view_scale = (float)dh / 860.0f;
             if (view_scale < 0.5f) view_scale = 0.5f;
         }
+        g_sa_r = 0;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        if (dc_r > 0 && g_portrait && !g_duo) {        /* the closed Duo: the scale stays as it is, the picture runs over the status column and down to the home bar; the top cards keep clear of the column */
+            dw += dc_r; dh += dc_b; vpy -= dc_b;
+            g_sa_r = (float)dc_r / view_scale;
+        }
+#endif
         view_w = (float)dw / view_scale;
         view_h = (float)dh / view_scale;
 #if defined(__APPLE__) && TARGET_OS_TV
@@ -4295,6 +4319,9 @@ int main(int argc, char **argv) {
     gfx_window_attrs();
 #ifndef __EMSCRIPTEN__
     if (!shot) { settings_load(); ma_list_load(); }
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    g_vol = 1.0f;                                                  /* iOS: no slider, the volume is the device's (the buttons, the control centre) */
+#endif
 #if defined(__APPLE__) && TARGET_OS_TV
     g_rand = 1; g_rpt = 0;                                     /* Apple TV: random mode only */
 #endif
