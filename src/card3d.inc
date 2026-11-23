@@ -23,13 +23,17 @@ static const C3Model C3M[C3_N] = {
     /* the MIDI sound module: a rack module lying flat, seen from above like the Amiga */
     { c3_MODULE_v, c3_MODULE_vc, c3_MODULE_pal, c3_MODULE_i, C3_MODULE_NV, C3_MODULE_NT, c3_MODULE_tv, c3_MODULE_tuv, c3_MODULE_ti, C3_MODULE_NTT, C3_MODULE_NTV, c3_MODULE_tex, C3_MODULE_TW, C3_MODULE_TH, 2.2f, c3_MODULE_bv, c3_MODULE_buv, c3_MODULE_bi, C3_MODULE_NBV, C3_MODULE_NBT, c3_MODULE_bpal, c3_MODULE_bpix, C3_MODULE_BW, C3_MODULE_BH, 0.50f, 0.50f },
     /* the MT-32 style module: wider and flatter (305 x 45 x 247) */
-    { c3_MODULEMT_v, c3_MODULEMT_vc, c3_MODULEMT_pal, c3_MODULEMT_i, C3_MODULEMT_NV, C3_MODULEMT_NT, c3_MODULEMT_tv, c3_MODULEMT_tuv, c3_MODULEMT_ti, C3_MODULEMT_NTT, C3_MODULEMT_NTV, c3_MODULEMT_tex, C3_MODULEMT_TW, C3_MODULEMT_TH, 2.6f, c3_MODULEMT_bv, c3_MODULEMT_buv, c3_MODULEMT_bi, C3_MODULEMT_NBV, C3_MODULEMT_NBT, c3_MODULEMT_bpal, c3_MODULEMT_bpix, C3_MODULEMT_BW, C3_MODULEMT_BH, 0.50f, 0.48f },
+    { c3_MODULEMT_v, c3_MODULEMT_vc, c3_MODULEMT_pal, c3_MODULEMT_i, C3_MODULEMT_NV, C3_MODULEMT_NT, c3_MODULEMT_tv, c3_MODULEMT_tuv, c3_MODULEMT_ti, C3_MODULEMT_NTT, C3_MODULEMT_NTV, c3_MODULEMT_tex, C3_MODULEMT_TW, C3_MODULEMT_TH, 2.6f, c3_MODULEMT_bv, c3_MODULEMT_buv, c3_MODULEMT_bi, C3_MODULEMT_NBV, C3_MODULEMT_NBT, c3_MODULEMT_bpal, c3_MODULEMT_bpix, C3_MODULEMT_BW, C3_MODULEMT_BH, 0.50f, 0.62f },
 #endif
 };
+#define MT_LCD_X0 0.1344f                                  /* the display of the MT-32 module in its front picture (fractions of the picture, see tools/make_module_panel_mt.py) */
+#define MT_LCD_X1 0.4063f
+#define MT_LCD_Y0 0.3771f
+#define MT_LCD_Y1 0.6441f
 #define C3_BOX 0.80f                                        /* box aspect = model aspect * this: head room for the edge-on view */
 static float c3_box_aspect(int mi) { return C3M[mi].aspect * C3_BOX; }
 
-typedef struct { gfx_mesh *mesh[3]; gfx_tex *tex, *btex, *color, *color2; int ready, w, h; } C3Gl;   /* the second target (…2) is the picture of the Specs window: the card swings there instead of turning */
+typedef struct { gfx_mesh *mesh[3]; gfx_tex *tex, *btex, *color, *color2, *lcd; int ready, w, h; } C3Gl;   /* the second target (…2) is the picture of the Specs window: the card swings there instead of turning */
 static C3Gl c3gl[C3_N];
 static float c3_ang;
 static int c3_first = 1;
@@ -58,7 +62,7 @@ static void c3_setup(int mi) {
             const int16_t *s = p == 2 ? m->bv : (p ? m->tv : m->v);
             V3 *o = &vb3[i];
             o->x = s[3 * i] * Q; o->y = s[3 * i + 1] * Q; o->z = s[3 * i + 2] * Q + (p == 1 ? 0.0002f : 0.0f);   /* the front texture sits a hair above the board (the back quad is baked a hair below) */
-            { const uint16_t *uv = p == 2 ? m->buv : m->tuv; o->u = p ? uv[2 * i] / 65535.0f : 0; o->v = p ? uv[2 * i + 1] / 65535.0f : 0; }
+            { const uint16_t *uv = p == 2 ? m->buv : m->tuv; o->u = p ? uv[2 * i] / 65535.0f : 0; o->v = p ? uv[2 * i + 1] / 65535.0f : 0; if (p == 1 && mi == 6) o->v = 1.0f - o->v; }       /* the MT-32 module: its front is a render target (title in the display), which is stored the other way up */
             if (p) { o->r = o->g = o->b = 255; } else { const uint8_t *pl = m->pal + 3 * m->vc[i]; o->r = pl[0]; o->g = pl[1]; o->b = pl[2]; }
             o->a = 255;
         }
@@ -100,7 +104,7 @@ static void c3_render(int mi, float ang, gfx_tex *target, int fw, int fh) {
     C3Gl *g = &c3gl[mi]; const C3Model *m = &C3M[mi];
     float mvp[16], mv[16];
     c3_matrices(ang, m->tilt > 0 ? m->tilt : 0.17f, m->fit > 0 ? m->fit : 0.95f, (float)g->w / (float)g->h, mvp, mv);
-    gfx_card_render(target, mvp, mv, g->mesh[0], g->mesh[1], g->tex, g->mesh[2], g->btex);
+    gfx_card_render(target, mvp, mv, g->mesh[0], g->mesh[1], g->lcd ? g->lcd : g->tex, g->mesh[2], g->btex);       /* the MT-32 module: the front with the title in its display (module_lcd_update) */
 }
 /* once per frame, before the 2D pass: advance the turn and draw the card into its texture (only while a card is shown) */
 static void card3d_frame(int mi, int fw, int fh) {

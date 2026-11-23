@@ -23,11 +23,9 @@ sx = W / 1525.0                                                    # the positio
 d.rectangle((int(130 * sx), 4, int(770 * sx), H - 20), fill=(24, 24, 27)); d.rectangle((int(130 * sx) + 6, 10, int(770 * sx) - 6, H - 26), fill=(32, 32, 36))
 label(int(450 * sx), 28, 'MIDI SOUND MODULE', f_b, (230, 230, 235))
 lx0, lx1, ly0, ly1 = int(205 * sx), int(620 * sx), int(85 * sx), int(140 * sx) + 6
-d.rounded_rectangle((lx0, ly0, lx1, ly1), 4, fill=(178, 196, 178))
-for y in range(ly0, ly1):
-    k = 1.0 - 0.10 * (y - ly0) / (ly1 - ly0); d.line([(lx0 + 2, y), (lx1 - 2, y)], fill=(int(184 * k), int(204 * k), int(180 * k)))
-lcd = font(MONO, 24); ink = (46, 62, 46)
-d.text((lx0 + 12, ly0 + 5), 'MIDI sound module', font=lcd, fill=ink); d.text((lx0 + 12, ly0 + 30), 'Part 1   Piano', font=lcd, fill=ink)
+d.rounded_rectangle((lx0, ly0, lx1, ly1), 4, fill=(24, 62, 10))
+for y in range(ly0, ly1):                                             # the LCD: a dark green base; the player lights the character cells and writes the title of the MIDI file into them at run time
+    k = 1.0 - 0.10 * (y - ly0) / (ly1 - ly0); d.line([(lx0 + 2, y), (lx1 - 2, y)], fill=(int(30 * k), int(78 * k), int(12 * k)))
 d.ellipse((int(690 * sx) - 5, 108, int(690 * sx) + 5, 118), fill=(64, 90, 56)); label(int(690 * sx), 78, 'MIDI', f_s)
 # the buttons: five parts and the rhythm part, then group / sound and level / master
 def button(x0, y0, x1, y1, text, tcol=LAB, above=None, ac=BLUE):
