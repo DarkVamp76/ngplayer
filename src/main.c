@@ -1555,19 +1555,6 @@ static void draw_seal(float cx, float cy, float r, const char *label) {
    Gezeichnet mit den vorhandenen Primitiven (Koordinaten im 320x200-Raster, Chip um 160,100). */
 #define BEATC C(0.133f, 0.827f, 0.933f, 1)      /* Akzentfarbe des Beat-Pulses (Cyan wie das Logo) */
 static float chip_tsz(float fs, float k) { float z = fs * k; return z < 7.0f ? 7.0f : z; }
-/* MIDI files: a 5-pin DIN socket in the place of the Paula chip (h = the height of the slot) */
-static void midi_plug(float cx, float cy, float d, float beat) {
-    col metal = mix(C(0.62f, 0.65f, 0.70f, 1), BEATC, 0.5f * beat), dark = C(0.07f, 0.07f, 0.08f, 1);
-    rrect(cx - d / 2 - 1, cy - d / 2 - 1, d + 2, d + 2, d / 2 + 1, dark);
-    rrect(cx - d / 2, cy - d / 2, d, d, d / 2, C(0.30f, 0.31f, 0.34f, 1));
-    rrect(cx - d * 0.43f, cy - d * 0.43f, d * 0.86f, d * 0.86f, d * 0.43f, C(0.10f, 0.105f, 0.12f, 1));
-    rect(cx - d * 0.06f, cy - d * 0.46f, d * 0.12f, d * 0.12f, C(0.30f, 0.31f, 0.34f, 1));          /* the key notch at the top */
-    for (int i = 0; i < 5; i++) {
-        float a = 3.14159265f * (1.0f - i / 4.0f), px = cx + cosf(a) * d * 0.30f, py = cy + 0.05f * d - sinf(a) * d * 0.30f, r = d * 0.06f;
-        rrect(px - r, py - r, 2 * r, 2 * r, r, metal);
-    }
-    float z = d * 0.20f; text(cx - text_width("MIDI", z) / 2, cy + d * 0.20f, z, C(0.62f, 0.65f, 0.70f, 1), "MIDI");
-}
 static void chip_dip(float x, float y, float h, float beat) {            /* Paula, DIP-48 (MOS 8364R7); h = Hoehe, Breite = 5 * h */
     float k = h / 100.0f;
     col pin = mix(C(0.62f, 0.65f, 0.70f, 1), BEATC, 0.55f * beat), body = C(0.23f, 0.24f, 0.255f, 1), ink = mix(C(0.79f, 0.80f, 0.83f, 1), C(1, 1, 1, 1), 0.5f * beat), dimple = C(0.09f, 0.095f, 0.10f, 1);
@@ -1589,7 +1576,7 @@ static void chip_dip(float x, float y, float h, float beat) {            /* Paul
 /* Which chip: 5 = the Amiga 500 (TFMX, AHX, SoundFX, MOD and MED up to 4 channels; the drawn Paula chip, kind 0, is not used any more), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices),
  * 4 = the AdLib Gold card (the FM formats, Yamaha OPL3) */
 static int chip_kind_of(const char *f, int n) {
-    if (!strcmp(f, "MIDI")) return 0;                                  /* the MIDI socket (see midi_plug) */
+    if (!strcmp(f, "MIDI")) return 6;                                  /* the MIDI sound module */
     if (!strcmp(f, "AMD") || !strcmp(f, "MAD") || !strcmp(f, "A2M") || !strcmp(f, "HERAD") || !strcmp(f, "RAD") || !strcmp(f, "LDS")) return 4;
     if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || !strcmp(f, "SFX") || ((!strcmp(f, "MOD") || !strcmp(f, "MED")) && n <= 4)) {     /* the Amiga formats that run on the four Paula voices */
         return 5;                                                      /* the Amiga 500 (desktop and web) */
@@ -1618,8 +1605,7 @@ static void draw_chip_k(int k, float x, float y, float h, float beat) {
     if (k > 0) c3_px[chip_swing ? 1 : 0] = cw * sc * view_scale;           /* how large the card is shown, in pixels (the off-screen picture is made to fit) */
     float hh = h * sc;                                    /* leicht wachsen, um die Mitte */
     float xx = x - (cw * sc - cw) / 2, yy = y - (hh - h) / 2;
-    if (k == 0 && g_song && song_is_midi(g_song)) midi_plug(xx + cw * sc / 2, yy + hh / 2, hh * 0.78f, beat);
-    else if (k == 0) chip_dip(xx, yy + hh * 0.25f, hh * 0.5f, beat);            /* the chip is half as high as the slot: centred in it */
+    if (k == 0) chip_dip(xx, yy + hh * 0.25f, hh * 0.5f, beat);            /* the chip is half as high as the slot: centred in it */
     else { float b = 1.0f + 0.30f * beat; tex_quad(chip_swing ? c3_texture_swing(k - 1) : c3_texture(k - 1), xx, yy + hh * 0.57f - hh * 0.56f, cw * sc, hh * 1.12f, C(b, b, b, 1)); }
 }
 static void draw_chips(float x, float y, float h) {
@@ -2782,7 +2768,7 @@ static void draw_ui(double t) {
             if (bend > tl) tl = bend;
             float x0 = 0.5f * (tl + tr) - chw / 2;
             if (x0 < tl + 8) x0 = tl + 8;
-            { static const float lift[6] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
+            { static const float lift[7] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f, 0.0f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
         }
     }
 
@@ -3056,7 +3042,7 @@ static void draw_ui_portrait(float W, float H) {
                 if (cx > tl) tl = cx;
                 if (tr - tl >= 40) { x0 = 0.5f * (tl + tr) - chw / 2; if (x0 < tl + 4) x0 = tl + 4; }   /* centred between the title and the time; on a phone it may reach into the time, not into the title */
                 else if (x0 < cx + 6) x0 = cx + 6;                                          /* a very long title: lower right, may cover part of the time */
-                if (chw > 0 && x0 + chw <= M + aw - 6) { static const float lift[6] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f };               /* the same lift per model as in the landscape header */
+                if (chw > 0 && x0 + chw <= M + aw - 6) { static const float lift[7] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f, 0.0f };               /* the same lift per model as in the landscape header */
                     draw_chips(x0, chip_kind() == 0 ? hy + hh / 2 - chh / 2 : hy + (hh - chh) / 2 - lift[chip_kind()] * chh, chh); }   /* centred in the title card at every width */
             }
         }
