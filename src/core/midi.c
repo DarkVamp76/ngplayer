@@ -105,6 +105,9 @@ struct Midi {
     double length;
     MidiInfo info;
     int notes_ch[NCH];
+    int sx_mt32, sx_gs, sx_xg, sx_gm, sx_gm2;                            /* SysEx messages of each kind found in the file (what the file was written for) */
+    char lcd[24];
+    uint8_t *syx; size_t syx_len; char syx_name[48]; int syx_msgs;      /* the .syx file next to the MIDI file */
     unsigned mute;
     int prog[NCH], bank[NCH], vol[NCH], pan[NCH];
     float lvl[NCH];
@@ -271,6 +274,28 @@ static void apply(Midi *m, const Ev *e, int with_notes) {
     }
 }
 
+/* which standard a SysEx message (the bytes after F0, ending with F7) says the file was written for: Roland MT-32 / GS, Yamaha XG, General MIDI (1 / 2); the display text of the MT-32 / Sound Canvas */
+static void sysex_note(Midi *m, const uint8_t *d, uint32_t sl) {
+    if (sl < 5) return;
+    if (d[0] == 0x41 && sl >= 6) {
+        if (d[2] == 0x16) m->sx_mt32++;                                 /* the MT-32 has its own model id */
+        else if (d[2] == 0x42 || d[2] == 0x45) m->sx_gs++;              /* Sound Canvas (GS) and its display */
+        if (d[2] == 0x16 && d[3] == 0x12 && sl >= 10 && d[4] == 0x20 && d[5] == 0 && d[6] == 0 && !m->lcd[0]) textcpy(m->lcd, sizeof m->lcd, d + 7, sl - 9 > 20 ? 20 : sl - 9);        /* the MT-32 display message */
+        else if (d[2] == 0x45 && d[3] == 0x12 && sl >= 10 && d[4] == 0x10 && d[5] == 0 && d[6] == 0 && !m->lcd[0]) textcpy(m->lcd, sizeof m->lcd, d + 7, sl - 9 > 23 ? 23 : sl - 9);   /* the Sound Canvas display message */
+    } else if (d[0] == 0x7E && d[2] == 0x09) { if (d[3] == 0x01) m->sx_gm++; else if (d[3] == 0x03) m->sx_gm2++; }
+    else if (d[0] == 0x43 && d[2] == 0x4C) m->sx_xg++;
+}
+/* a .syx file that belongs to the MIDI file (the same name next to it): its messages come first (the MT-32 and GS setups live there) */
+void midi_add_syx(Midi *m, const char *name, const uint8_t *b, size_t n) {
+    free(m->syx); m->syx = (uint8_t *)malloc(n ? n : 1); memcpy(m->syx, b, n); m->syx_len = n; m->lcd[0] = 0;       /* its display text wins */
+    snprintf(m->syx_name, sizeof m->syx_name, "%s", name); m->syx_msgs = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (b[i] != 0xF0) continue;
+        size_t j = i + 1; while (j < n && b[j] != 0xF7) j++;
+        if (j < n) { sysex_note(m, b + i + 1, (uint32_t)(j - i)); m->syx_msgs++; i = j; }
+    }
+}
+
 /* ---------------------------------------------------------------- open */
 Midi *midi_open(const uint8_t *buf, size_t total, int rate, char *err, size_t errcap) {
     size_t n; const uint8_t *b = smf_start(buf, total, &n);
@@ -304,6 +329,7 @@ Midi *midi_open(const uint8_t *buf, size_t total, int rate, char *err, size_t er
             } else if (st == 0xF0 || st == 0xF7) {
                 uint32_t sl; if (!vlq(b, end, &q, &sl) || q + sl > end) break;
                 const uint8_t *d = b + q;
+                if (st == 0xF0) sysex_note(m, d, sl);
                 if (st == 0xF0) {                                                       /* the resets: General MIDI / GM2, Roland GS, Yamaha XG */
                     if ((sl >= 5 && d[0] == 0x7E && d[2] == 0x09 && (d[3] == 0x01 || d[3] == 0x03)) ||
                         (sl >= 10 && d[0] == 0x41 && d[2] == 0x42 && d[3] == 0x12 && d[4] == 0x40 && d[5] == 0x00 && d[6] == 0x7F) ||
@@ -378,7 +404,7 @@ void midi_close(Midi *m) {
     if (m->f) tsf_close(m->f);
     if (m->rev.comb[0][0].buf) reverb_free(&m->rev);
     if (m->cho.buf[0]) chorus_free(&m->cho);
-    free(m->ev); free(m->frame); free(m->tm_tick); free(m->tm_sec); free(m->tm_us); free(m->notes); free(m);
+    free(m->syx); free(m->ev); free(m->frame); free(m->tm_tick); free(m->tm_sec); free(m->tm_us); free(m->notes); free(m);
 }
 
 /* ---------------------------------------------------------------- play */
@@ -458,7 +484,14 @@ int midi_notes_in(const Midi *m, double t0, double t1, MidiNote *out, int max) {
     return n;
 }
 double midi_position(const Midi *m) { return (double)m->pos / m->rate; }
-void midi_info(const Midi *m, MidiInfo *out) { *out = m->info; }
+void midi_hint_mt32(Midi *m) { m->sx_mt32++; }
+void midi_info(const Midi *m, MidiInfo *out) {
+    *out = m->info;
+    const char *s = m->sx_mt32 ? "MT-32" : m->sx_gs ? "GS" : m->sx_xg ? "XG" : m->sx_gm2 ? "GM2" : "GM";
+    snprintf(out->standard, sizeof out->standard, "%s", s);
+    out->standard_known = m->sx_mt32 || m->sx_gs || m->sx_xg || m->sx_gm2 || m->sx_gm;
+    snprintf(out->lcd, sizeof out->lcd, "%s", m->lcd); snprintf(out->syx, sizeof out->syx, "%s", m->syx_name); out->syx_msgs = m->syx_msgs;
+}
 int  midi_chan_program(const Midi *m, int c) { return m->prog[c & 15]; }
 int  midi_chan_bank(const Midi *m, int c) { return m->bank[c & 15]; }
 int  midi_chan_is_drum(int c) { return c == 9; }
@@ -478,6 +511,8 @@ void midi_seek(Midi *m, double s) { (void)m; (void)s; }
 double midi_length(const Midi *m) { (void)m; return 0; }
 double midi_position(const Midi *m) { (void)m; return 0; }
 void midi_info(const Midi *m, MidiInfo *o) { (void)m; (void)o; }
+void midi_hint_mt32(Midi *m) { (void)m; }
+void midi_add_syx(Midi *m, const char *n, const uint8_t *b, size_t l) { (void)m; (void)n; (void)b; (void)l; }
 int midi_chan_program(const Midi *m, int c) { (void)m; (void)c; return 0; }
 int midi_chan_bank(const Midi *m, int c) { (void)m; (void)c; return 0; }
 int midi_chan_is_drum(int c) { return c == 9; }

@@ -149,6 +149,29 @@ static int open_tfmx(Song *s, const char *path, const uint8_t *b, long n, int ra
     return 0;
 }
 
+#ifndef __EMSCRIPTEN__
+#include <dirent.h>
+#endif
+/* the .syx file that belongs to a MIDI file: the same name, any case, in the same folder (NAME.mid / NAME.m32 + NAME.syx) */
+static int find_syx(const char *path, char *out, size_t cap, char *name, size_t ncap) {
+#ifdef __EMSCRIPTEN__
+    (void)path; (void)out; (void)cap; (void)name; (void)ncap; return 0;
+#else
+    char dir[512], stem[256]; const char *sl = strrchr(path, '/');
+    if (sl) { size_t n = (size_t)(sl - path); if (n >= sizeof dir) return 0; memcpy(dir, path, n); dir[n] = 0; } else strcpy(dir, ".");
+    snprintf(stem, sizeof stem, "%s", sl ? sl + 1 : path);
+    char *dt = strrchr(stem, '.'); if (dt) *dt = 0;
+    DIR *d = opendir(dir); if (!d) return 0;
+    struct dirent *e; int found = 0;
+    while ((e = readdir(d))) {
+        const char *x = strrchr(e->d_name, '.'); if (!x || strcasecmp(x, ".syx")) continue;
+        size_t n = (size_t)(x - e->d_name);
+        if (n == strlen(stem) && !strncasecmp(e->d_name, stem, n)) { snprintf(out, cap, "%s/%s", dir, e->d_name); snprintf(name, ncap, "%s", e->d_name); found = 1; break; }
+    }
+    closedir(d); return found;
+#endif
+}
+
 Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errcap) {
     static int inited;
     if (!inited) { ngp_it_tables_init(); inited = 1; }
@@ -186,6 +209,12 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
         s->mi = midi_open(b, (size_t)n, rate, err, errcap);
         if (!s->mi) { free(b); song_close(s); return NULL; }
         MidiInfo mi; midi_info(s->mi, &mi);
+        if (dot && !strcasecmp(dot, ".m32")) midi_hint_mt32(s->mi);          /* .m32: written for the MT-32 */
+        {   /* a .syx file with the same name next to the MIDI file: it comes first */
+            char sp[700], nm[96];
+            if (find_syx(path, sp, sizeof sp, nm, sizeof nm)) { FILE *sf = fopen(sp, "rb"); if (sf) { fseek(sf, 0, SEEK_END); long sn = ftell(sf); fseek(sf, 0, SEEK_SET); if (sn > 0 && sn < (4L << 20)) { uint8_t *sb = (uint8_t *)malloc((size_t)sn); if (sb && fread(sb, 1, (size_t)sn, sf) == (size_t)sn) midi_add_syx(s->mi, nm, sb, (size_t)sn); free(sb); } fclose(sf); } }
+        }
+        midi_info(s->mi, &mi);
         s->kind = K_MIDI; s->fmt = "MIDI"; snprintf(s->title, sizeof s->title, "%s", mi.title);
         s->nch = 16; s->nord = midi_measures(s->mi);                 /* no patterns: the orders are 4/4 measures of 16 rows */
     } else if (rad_probe(b, (size_t)n)) {
@@ -946,6 +975,13 @@ void song_info(const Song *s, SongInfo *o) {
         snprintf(o->format, sizeof o->format, "Standard MIDI file (format %d)", mi.format);
         snprintf(o->tracker, sizeof o->tracker, "%s", mi.copyright[0] ? mi.copyright : "MIDI sequencer");
         o->voices = 16; snprintf(o->voice_unit, sizeof o->voice_unit, "channels");
+        if (!strcmp(mi.standard, "MT-32")) info_add(o, "Made for the MT-32: its instruments differ from General MIDI");
+        else if (!strcmp(mi.standard, "GS")) info_add(o, "Made for the Sound Canvas (General MIDI with GS extensions)");
+        else if (!strcmp(mi.standard, "XG")) info_add(o, "General MIDI with the Yamaha XG extensions");
+        else if (!strcmp(mi.standard, "GM2")) info_add(o, "General MIDI 2");
+        else info_add(o, mi.standard_known ? "General MIDI" : "No standard named in the file: played as General MIDI");
+        if (mi.syx[0]) info_add(o, "Setup file: %s (%d messages), read first", mi.syx, mi.syx_msgs);
+        if (mi.lcd[0]) info_add(o, "Display text: \"%s\"", mi.lcd);
         info_add(o, "%d tracks, %d ticks per quarter note", mi.ntracks, mi.division & 0x8000 ? 0 : mi.division);
         info_add(o, "%d notes, tempo %d bpm at the start", mi.notes, mi.tempo_bpm);
         const char *sf = midi_soundfont_path(); const char *bn = sf ? strrchr(sf, '/') : NULL;
@@ -1049,4 +1085,11 @@ int song_midi_seek_by(Song *s, double delta, double *sec) {
     return 1;
 }
 const char *song_midi_program_name(int program, int drum) { return midi_gm_name(program, drum); }
+const char *song_midi_standard(const Song *s, int *known) {
+    static char b[12]; MidiInfo mi; b[0] = 0;
+    if (known) *known = 0;
+    if (!s || !s->mi) return b;
+    midi_info(s->mi, &mi); snprintf(b, sizeof b, "%s", mi.standard); if (known) *known = mi.standard_known;
+    return b;
+}
 

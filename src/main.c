@@ -203,7 +203,7 @@ static int is_mod_name(const char *n) {
     if (!d) return 0;
     static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".med", ".psm", ".far", ".mdl", ".mmd0", ".mmd1", ".mmd2", ".mmd3", ".xm", ".it", ".dmf", ".amf", ".dsm", ".sfx", ".ahx", ".dbm", ".dtm", ".amd", ".mad", ".a2m", ".a2t", ".hsq", ".sqx", ".sdb", ".agd", ".ha2", ".rad", ".lds", ".ld0", NULL };
     for (int i = 0; ext[i]; i++) if (!strcasecmp(d, ext[i])) return 1;
-    if (NG_MIDI && (!strcasecmp(d, ".mid") || !strcasecmp(d, ".midi") || !strcasecmp(d, ".kar") || !strcasecmp(d, ".rmi"))) return 1;      /* MIDI files (through the SoundFont) */
+    if (NG_MIDI && (!strcasecmp(d, ".mid") || !strcasecmp(d, ".midi") || !strcasecmp(d, ".kar") || !strcasecmp(d, ".rmi") || !strcasecmp(d, ".m32"))) return 1;      /* MIDI files (through the SoundFont) */
     return 0;
 }
 
@@ -2743,6 +2743,7 @@ static void draw_ui(double t) {
             cx += chip(cx, cy, b, VC[2], 1);
             snprintf(b, sizeof b, song_is_midi(g_song) ? "%d BARS" : "%d ORDERS", song_norders(g_song));
             cx += chip(cx, cy, b, DIM, 0);
+            if (song_is_midi(g_song)) { int known; const char *st = song_midi_standard(g_song, &known); cx += chip(cx, cy, st, !strcmp(st, "MT-32") ? WARN : VC[1], known); }        /* what the file was written for (the MT-32 in orange: the SoundFont plays it as General MIDI) */
             int pf = song_paula_filter(g_song);
             if (pf >= 0) cx += chip(cx, cy, "PAULA-FILTER", pf ? VC[1] : DIM, pf);
             if (song_subsongs(g_song) > 1) { char sb[24]; snprintf(sb, sizeof sb, "SONG %d/%d", song_subsong(g_song) + 1, song_subsongs(g_song)); cx += chip(cx, cy, sb, VC[2], 1); }
