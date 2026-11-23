@@ -2324,7 +2324,7 @@ static void draw_ui_duo(float W, float H) {
     float ox = pw, mx0 = mx;
     int cl0 = clickx, rcl0 = rclickx;
     g_ox = ox; mx -= ox; clickx -= (int)ox; rclickx -= (int)ox;     /* the right page works in its own coordinates */
-    card(0, M, pw - M, Hc - 2 * M, 0);                  /* the pattern card starts at the page edge: the distance to the left cards is the normal 10 */
+    card_r(0, M, pw - M, Hc - 2 * M, 30.0f);            /* the pattern card starts at the page edge: the distance to the left cards is the normal 10; the top right corner follows the display */
     draw_pattern(0, M, pw - M, Hc - 2 * M);               /* the whole card: time and Wi-Fi lie over its top right corner, so the number bar and the rows start below them (draw_pattern) */
     g_ox = 0; mx = mx0; clickx = cl0; rclickx = rcl0;
     draw_duo_bar(W, H);
