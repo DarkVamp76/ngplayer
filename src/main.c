@@ -2285,23 +2285,14 @@ static void draw_duo_bar(float W, float H) {
             click = 0;
         }
     }
-    /* the order slider fills the left half up to the fold; right behind the fold: the volume, then LIST and the dice; at the right edge: AirPlay, open, import */
+    /* the order slider fills the left half up to the fold; right behind the fold: LIST, the dice, RPT and RND; at the right edge: AirPlay, open, import */
     float ri = W - M - 16;
     float hash_cx = ri - 22, fold_cx = hash_cx - 14 - 8 - 14, air_cx = fold_cx - 14 - 10 - 18;
     float vx = fold + 8, lw = 58;
-    float room = (air_cx - 18 - 12) - (26 + 12 + lw + 16) - vx;                /* what is left up to the AirPlay button, for the volume (and RPT / RND) */
-    int chips = room - 92 >= 72;                                               /* RPT and RND (two chips of 38 and the gaps) next to the dice, when the bar is wide enough (the volume keeps 72 at least) */
-    float vw = chips ? room - 92 : room;
-    if (vw > 168) vw = 168; if (vw < (chips ? 72 : 96)) vw = chips ? 72 : 96;
+    float room = (air_cx - 18 - 12) - (26 + 12 + lw + 16) - vx;                /* what is left up to the AirPlay button (no volume slider on iOS: the device has its buttons) */
+    int chips = room >= 92;                                                    /* RPT and RND (two chips of 38 and the gaps) next to the dice, when the bar is wide enough */
     if (g_song && song_norders(g_song) > 1) draw_seek_row(M + 164, cy - 36.0f / 2 + 3, (fold - 8) - (M + 164));      /* 36 = SEEK_ROW */
-    rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
-    rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
-    float kx = vx + 3 + (vw - 6) * g_vol;
-    rrect(kx - 9, cy - 9, 18, 18, 9, TXT);
-    if (!mouse_down) vol_drag = 0;
-    else if (hit(vx - 12, cy - 18, vw + 24, 36) || (click && clicked(vx - 12, cy - 18, vw + 24, 36))) vol_drag = 1;
-    if (vol_drag) { g_vol = (mx - vx - 3) / (vw - 6); if (g_vol < 0) g_vol = 0; if (g_vol > 1) g_vol = 1; }
-    float lx = vx + vw + 16;
+    float lx = vx + 8;
     int hv = hit(lx, cy - 16, lw, 32);
     rrect(lx, cy - 16, lw, 32, 9, alpha(g_plopen ? VC[2] : (hv ? VC[0] : EDGE), g_plopen ? 0.28f : 0.35f));
     text(lx + (lw - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
@@ -2677,6 +2668,7 @@ static void draw_ui(double t) {
             text(bx + 190, cy - 20, 12, FAINT, l1);
             text(bx + 190, cy + 2, 12, FAINT, l2);
         }
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)                /* no volume slider on iOS: the device has its buttons */
         text(vx - 44, cy - 8, 12, DIM, "VOL");
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
         rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
@@ -2689,6 +2681,7 @@ static void draw_ui(double t) {
             if (g_vol < 0) g_vol = 0;
             if (g_vol > 1) g_vol = 1;
         }
+#endif
     }
 }
 
@@ -2969,7 +2962,8 @@ static void draw_ui_portrait(float W, float H) {
             text(lx + (lw - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
             if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; click = 0; }
         }
-        draw_dice(bx + 266, cy, 13.0f);           /* random dice (portrait: between LIST and the volume slider), big enough for a finger */
+        draw_dice(bx + 266, cy, 13.0f);           /* random dice (portrait: right of LIST), big enough for a finger */
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)                /* no volume slider on iOS: the device has its buttons */
         float vx = bx + 306, vw = bw - 306 - 22;
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
         rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
@@ -2982,6 +2976,7 @@ static void draw_ui_portrait(float W, float H) {
             if (g_vol < 0) g_vol = 0;
             if (g_vol > 1) g_vol = 1;
         }
+#endif
     }
 }
 
@@ -4295,6 +4290,9 @@ int main(int argc, char **argv) {
     gfx_window_attrs();
 #ifndef __EMSCRIPTEN__
     if (!shot) { settings_load(); ma_list_load(); }
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    g_vol = 1.0f;                                                  /* iOS: no slider, the volume is the device's (the buttons, the control centre) */
+#endif
 #if defined(__APPLE__) && TARGET_OS_TV
     g_rand = 1; g_rpt = 0;                                     /* Apple TV: random mode only */
 #endif
