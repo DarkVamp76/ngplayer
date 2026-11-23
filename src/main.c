@@ -756,8 +756,8 @@ static void draw_scopes(float x, float y, float w, float h) {
     if (!g_song) { text(x + 18, y + 44, 14, FAINT, "No song loaded."); return; }
     int nch = song_channels(g_song);
     if (nch > 64) nch = 64;
-    int show[64], nshow = 0;                              /* MIDI: only the channels that the file uses, so that the tiles are larger */
-    for (int c = 0; c < nch; c++) { SongMidiChan mc; if (song_is_midi(g_song)) { song_midi_chan(g_song, c, &mc); if (!mc.used) continue; } show[nshow++] = c; }
+    int show[64], nshow = 0;                              /* all the channels, MIDI too (16: the grid stays the same from file to file, like the channel list) */
+    for (int c = 0; c < nch; c++) show[nshow++] = c;
     nch = nshow;
     float ax = x + 14, ay = y + 40, aw = w - 28, ah = h - 40 - 12;
     if (aw < 60 || ah < 40 || nch < 1) return;
