@@ -62,7 +62,7 @@ static void c3_setup(int mi) {
             const int16_t *s = p == 2 ? m->bv : (p ? m->tv : m->v);
             V3 *o = &vb3[i];
             o->x = s[3 * i] * Q; o->y = s[3 * i + 1] * Q; o->z = s[3 * i + 2] * Q + (p == 1 ? 0.0002f : 0.0f);   /* the front texture sits a hair above the board (the back quad is baked a hair below) */
-            { const uint16_t *uv = p == 2 ? m->buv : m->tuv; o->u = p ? uv[2 * i] / 65535.0f : 0; o->v = p ? uv[2 * i + 1] / 65535.0f : 0; if (p == 1 && mi == 6) o->v = 1.0f - o->v; }       /* the MT-32 module: its front is a render target (title in the display), which is stored the other way up */
+            { const uint16_t *uv = p == 2 ? m->buv : m->tuv; o->u = p ? uv[2 * i] / 65535.0f : 0; o->v = p ? uv[2 * i + 1] / 65535.0f : 0; if (p == 1 && (mi == 5 || mi == 6)) o->v = 1.0f - o->v; }       /* the MT-32 module: its front is a render target (title in the display), which is stored the other way up */
             if (p) { o->r = o->g = o->b = 255; } else { const uint8_t *pl = m->pal + 3 * m->vc[i]; o->r = pl[0]; o->g = pl[1]; o->b = pl[2]; }
             o->a = 255;
         }
