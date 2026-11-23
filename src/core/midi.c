@@ -474,7 +474,8 @@ static void hw_resync(Midi *m) {
     double t = midi_hw_time(g_hw) + 0.06;
     m->hw_pos0 = (double)m->pos / m->rate; m->hw_sx_free = 0;
     if (!m->hw_setup_done) {
-        if (!m->sx_mt32) { static const unsigned char gm[6] = { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 }; midi_hw_send(g_hw, gm, 6, t); t += sx_gap_base() + 0.08; }
+        if (m->sx_mt32) { static const unsigned char rs[11] = { 0xF0, 0x41, 0x10, 0x16, 0x12, 0x7F, 0x00, 0x00, 0x01, 0x00, 0xF7 }; midi_hw_send(g_hw, rs, 11, t); t += sx_gap_msg(rs, 11); }      /* an MT-32: reset all parameters first, so that it starts clean (and the set-up that follows is all it has) */
+        else { static const unsigned char gm[6] = { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 }; midi_hw_send(g_hw, gm, 6, t); t += sx_gap_base() + 0.08; }
         for (size_t k = 0; k < m->syx_len; k++) {
             if (m->syx[k] != 0xF0) continue;
             size_t j = k + 1; while (j < m->syx_len && m->syx[j] != 0xF7) j++;
