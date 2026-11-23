@@ -114,7 +114,7 @@ static void audio_cb(void *ud, Uint8 *stream, int len) {
     int16_t *o = (int16_t *)stream;
     int n = len / 4;
     if (!g_song || g_paused || g_ended || g_hold) { if (g_song) song_midi_idle(g_song); memset(stream, 0, (size_t)len); g_resync = 1; return; }
-    int done = 0;
+    int done = 0, hwmute = song_is_midi(g_song) && midi_hardware_on();
     while (done < n) {
         int k = n - done < 32 ? n - done : 32;
         int got = song_render(g_song, o + done * 2, k);
@@ -123,7 +123,8 @@ static void audio_cb(void *ud, Uint8 *stream, int len) {
             int16_t *p = o + (done + i) * 2;
             float l = p[0] * g_vol, r = p[1] * g_vol;
             p[0] = (int16_t)l; p[1] = (int16_t)r;
-            float fl = l / 32768.0f, fr = r / 32768.0f;
+            float fl = l / 32768.0f, fr = r / 32768.0f;       /* (the picture gets the mix) */
+            if (hwmute) p[0] = p[1] = 0;                         /* MIDI hardware: the SoundFont synth runs for the pictures only, the sound comes from the device */
             ringL[ringpos % RING] = fl; ringR[ringpos % RING] = fr;
 #if defined(__APPLE__) && TARGET_OS_IPHONE
             dringL[ringpos % DRING] = fl; dringR[ringpos % DRING] = fr;
