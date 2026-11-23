@@ -16,5 +16,6 @@ void    midi_hw_close(MidiHw *h);
 const char *midi_hw_name(const MidiHw *h);              /* the client name of the port that is in use */
 double  midi_hw_time(const MidiHw *h);                  /* the time of the output queue in seconds (a real-time clock) */
 void    midi_hw_send(MidiHw *h, const unsigned char *msg, int len, double at);      /* one MIDI message (or a whole SysEx F0 .. F7) at the queue time `at`; at < 0: at once */
+int     midi_hw_activity(const MidiHw *h, double window);   /* 1 when a message was sent within the last `window` seconds (time stamp of the queue) */
 void    midi_hw_drop(MidiHw *h);                        /* forget everything that is scheduled but not sent yet */
 void    midi_hw_panic(MidiHw *h);                       /* all sound off + all notes off + reset controllers on the 16 channels, at once */

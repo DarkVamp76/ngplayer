@@ -443,6 +443,13 @@ int midi_hardware_on(void) {
     return 0;
 #endif
 }
+int midi_activity(void) {                      /* the MIDI lamp: 1 while the hardware gets a message */
+#if NG_HWMIDI
+    return g_hw ? midi_hw_activity(g_hw, 0.06) : 0;
+#else
+    return 0;
+#endif
+}
 const char *midi_output_name(void) {
 #if NG_HWMIDI
     if (g_hw) return midi_hw_name(g_hw);
@@ -663,6 +670,7 @@ void midi_hint_mt32(Midi *m) { (void)m; }
 int midi_set_hardware(int on, const char *w) { (void)on; (void)w; return 0; }
 int midi_hardware_on(void) { return 0; }
 const char *midi_output_name(void) { return "SoundFont"; }
+int midi_activity(void) { return 0; }
 void midi_idle(Midi *m) { (void)m; }
 void midi_add_syx(Midi *m, const char *n, const uint8_t *b, size_t l) { (void)m; (void)n; (void)b; (void)l; }
 int midi_chan_program(const Midi *m, int c) { (void)m; (void)c; return 0; }
