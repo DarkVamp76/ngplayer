@@ -40,11 +40,11 @@ label(152, 306, 'MIDI IN', f_m)
 d.ellipse((268, 236, 332, 300), fill=(24, 24, 27)); d.ellipse((276, 244, 324, 292), fill=(10, 10, 12)); label(300, 316, 'PHONES')
 # the display: an amber panel with the parameters at the left and a 16 channel bar graph
 d.rounded_rectangle((440, 58, 1062, 292), 10, fill=(18, 18, 20))
-d.rounded_rectangle((456, 70, 1046, 280), 4, fill=(232, 168, 26))
+d.rounded_rectangle((456, 70, 1046, 280), 4, fill=(255, 196, 44))
 lcd = ImageDraw.Draw(img)
 for y in range(70, 280):
-    k = 1.0 - 0.12 * (y - 70) / 210; lcd.line([(456, y), (1046, y)], fill=(int(236 * k), int(172 * k), int(24 * k)))
-ink = (74, 44, 8)
+    k = 1.0 - 0.07 * (y - 70) / 210; lcd.line([(456, y), (1046, y)], fill=(int(255 * k), int(201 * k), int(48 * k)))      # a brighter amber (the lamp of the display)
+ink = (64, 36, 4)
 f_l, f_lb = font(MONO, 26), font(FONT, 14)
 lcd.text((470, 76), '1-1', font=f_l, fill=ink); lcd.text((640, 76), 'MIDI sound module', font=f_l, fill=ink)
 lcd.text((470, 108), 'PART', font=f_lb, fill=ink); lcd.text((560, 108), 'INSTRUMENT', font=f_lb, fill=ink)
@@ -61,7 +61,7 @@ for c in range(16):
     for s in range(14):
         yy = by1 - 10 - s * 9
         on = s < heights[c]
-        lcd.rectangle((x + 2, yy - 6, x + cw - 4, yy), fill=ink if on else (222, 160, 22))
+        lcd.rectangle((x + 2, yy - 6, x + cw - 4, yy), fill=ink if on else (244, 186, 38))
     lcd.text((x + cw / 2, by1 + 2), str(c + 1), font=font(FONT, 11), fill=ink, anchor='ma')
 # the middle: all / mute
 d.rectangle((1112, 16, 1290, 336), fill=(30, 30, 33))

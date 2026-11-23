@@ -1593,6 +1593,32 @@ static int chip_kind(void) { return chip_kind_song(g_song); }
 #include "card3d.inc"
 /* The display of the MT-32 module: the title of the MIDI file in its 2 x 20 character LCD. The front picture of the module (the baked panel with an empty green display) is drawn into a render
  * target and the characters on top of it, in the cells of a character LCD; the 3D card uses that target as its front picture instead of the baked one. Done again when the title changes. */
+/* the Sound Canvas style module: the 16 channel bar graph of its display runs with the real levels of the MIDI channels (the rest of the front is the baked picture) */
+static void module_bars_update(void) {
+#if NG_MIDI
+    if (!g_song || !song_is_midi(g_song) || chip_kind() != 6) return;
+    const int mi = 5; c3_setup(mi);
+    C3Gl *g = &c3gl[mi]; const C3Model *m = &C3M[mi];
+    int seg[16]; for (int c = 0; c < 16; c++) { SongMidiChan mc; song_midi_chan(g_song, c, &mc); float l = mc.level > 1 ? 1 : mc.level; seg[c] = (int)(powf(l, 0.55f) * 14.0f + 0.5f); }
+    static int shown[16]; static int have;
+    if (g->lcd && have && !memcmp(shown, seg, sizeof seg)) return;
+    if (!g->lcd) g->lcd = gfx_tex_create(m->tw, m->th, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET);
+    if (!g->lcd || !gfx_target_begin(g->lcd, 0, 0, 0, 1)) return;
+    gfx_set_params((float)m->tw, (float)m->th, 1.0f); gfx_set_texture(fonttex);
+    set_additive(0);
+    tex_quad(g->tex, 0, 0, (float)m->tw, (float)m->th, C(1, 1, 1, 1));                              /* the baked front */
+    const float kx = (float)m->tw / 1744.0f, ky = (float)m->th / 352.0f;                              /* the bar graph of tools/make_module_panel.py (1744 x 352): x 668 .. 1030, 14 segments of 9 px, bottom at 262 - 10 */
+    const float bx0 = 668.0f, cw = (1030.0f - 668.0f) / 16.0f;
+    const col on = C(64 / 255.0f, 36 / 255.0f, 4 / 255.0f, 1), off = C(244 / 255.0f, 186 / 255.0f, 38 / 255.0f, 1);
+    for (int c = 0; c < 16; c++) for (int k = 0; k < 14; k++) {
+        float x = bx0 + c * cw, yy = 262.0f - 10.0f - k * 9.0f;
+        rect((x + 2) * kx, (yy - 6) * ky, (cw - 6) * kx, 6.0f * ky + 1.0f, k < seg[c] ? on : off);
+    }
+    flush();
+    gfx_target_end(g->lcd);
+    memcpy(shown, seg, sizeof seg); have = 1;
+#endif
+}
 static void module_lcd_update(void) {
 #if NG_MIDI
     if (!g_song || !song_is_midi(g_song) || chip_kind() != 7) return;
@@ -4430,6 +4456,7 @@ static void iter(void) {
         if (!shot) song_end_advance();
 
         module_lcd_update();                                                         /* the title in the display of the MT-32 module */
+        module_bars_update();                                                        /* the bars in the display of the Sound Canvas module */
         if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
         if (g_vmode == 4 && g_song && (getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) > 0) card3d_frame_swing((getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) - 1, dw, dh);      /* Apple TV: the Info page swings the card on its own */
 #if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
