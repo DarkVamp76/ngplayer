@@ -973,7 +973,10 @@ void song_info(const Song *s, SongInfo *o) {
     if (s->mi) {
         MidiInfo mi; midi_info(s->mi, &mi);
         snprintf(o->format, sizeof o->format, "Standard MIDI file (format %d)", mi.format);
-        snprintf(o->tracker, sizeof o->tracker, "%s", mi.copyright[0] ? mi.copyright : "MIDI sequencer");
+        {   /* what the file is made for, always named in full (the subtitle of the header and the first line of the Info page) */
+            const char *nm = !strcmp(mi.standard, "MT-32") ? "MT-32 Multi Timbre" : !strcmp(mi.standard, "GS") ? "Roland Sound Canvas" : !strcmp(mi.standard, "XG") ? "Yamaha XG" : !strcmp(mi.standard, "GM2") ? "General MIDI 2" : "General MIDI";
+            snprintf(o->tracker, sizeof o->tracker, "%s", nm);
+        }
         o->voices = 16; snprintf(o->voice_unit, sizeof o->voice_unit, "channels");
         if (!strcmp(mi.standard, "MT-32")) info_add(o, "Made for the MT-32: its instruments differ from General MIDI");
         else if (!strcmp(mi.standard, "GS")) info_add(o, "Made for the Sound Canvas (General MIDI with GS extensions)");
@@ -982,6 +985,7 @@ void song_info(const Song *s, SongInfo *o) {
         else info_add(o, mi.standard_known ? "General MIDI" : "No standard named in the file: played as General MIDI");
         if (mi.syx[0]) info_add(o, "Setup file: %s (%d messages), read first", mi.syx, mi.syx_msgs);
         if (mi.lcd[0]) info_add(o, "Display text: \"%s\"", mi.lcd);
+        if (mi.copyright[0]) info_add(o, "%s", mi.copyright);
         info_add(o, "%d tracks, %d ticks per quarter note", mi.ntracks, mi.division & 0x8000 ? 0 : mi.division);
         info_add(o, "%d notes, tempo %d bpm at the start", mi.notes, mi.tempo_bpm);
         const char *sf = midi_soundfont_path(); const char *bn = sf ? strrchr(sf, '/') : NULL;
