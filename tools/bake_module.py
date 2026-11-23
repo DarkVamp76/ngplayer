@@ -2,14 +2,18 @@
 # assets/models/module-front.png (drawn by tools/make_module_panel.py). Same data layout as tools/bake_a500.py / bake_card3d.py (no back side):
 #  - the parts with a plain material get a palette colour (the Kd of the .mtl);
 #  - the part with the picture (material with map_Kd: the front) is the textured mesh, the picture is scaled to TW x TH (RGB565).
-# usage: python3 tools/bake_module.py > src/module_data.h        (needs numpy and Pillow)
+# usage: python3 tools/bake_module.py > src/module_data.h           (the Sound Canvas style module, assets/models/midi-module.obj + module-front.png)
+#        python3 tools/bake_module.py mt > src/module_mt_data.h     (the MT-32 style module, midi-module-mt.obj + module-mt-front.png; needs numpy and Pillow)
 import os, sys, numpy as np
 from PIL import Image
 here = os.path.dirname(os.path.abspath(__file__))
 MD = os.path.join(here, '..', 'assets', 'models')
-TAG = 'MODULE'
+VARIANT = sys.argv[1] if len(sys.argv) > 1 else ''
+TAG = 'MODULEMT' if VARIANT == 'mt' else 'MODULE'
+OBJ = 'midi-module-mt' if VARIANT == 'mt' else 'midi-module'
+PNG = 'module-mt-front.png' if VARIANT == 'mt' else 'module-front.png'
 Q = 20000.0
-TW, TH = 1280, 256
+TW, TH = (1280, 192) if VARIANT == 'mt' else (1280, 256)
 def arr(name, ctype, vals, per=16):
     s = 'static const %s %s[%d] = {\n' % (ctype, name, len(vals)); line = []
     for v in vals:
@@ -19,7 +23,7 @@ def arr(name, ctype, vals, per=16):
     return s + '};\n'
 # materials
 mats = {}; cur = None
-for ln in open(os.path.join(MD, 'midi-module.mtl')):
+for ln in open(os.path.join(MD, OBJ + '.mtl')):
     t = ln.split()
     if not t: continue
     if t[0] == 'newmtl': cur = t[1]; mats[cur] = {'kd': (0.7, 0.7, 0.7), 'tex': False}
@@ -27,7 +31,7 @@ for ln in open(os.path.join(MD, 'midi-module.mtl')):
     elif t[0] == 'map_Kd': mats[cur]['tex'] = True
 # the model: v / vt / f with v/vt/vn, grouped by usemtl
 P = []; T = []; faces = []; mat = None
-for ln in open(os.path.join(MD, 'midi-module.obj')):
+for ln in open(os.path.join(MD, OBJ + '.obj')):
     t = ln.split()
     if not t: continue
     if t[0] == 'v': P.append([float(x) for x in t[1:4]])
@@ -58,12 +62,12 @@ for m, *tri in faces:
 V = np.array(V); TV = np.array(TV); TUV = np.array(TUV)
 allp = np.vstack([V, TV]); lo = allp.min(0); hi = allp.max(0); c0 = (lo + hi) / 2; half = (hi[0] - lo[0]) / 2
 def quant(Pp): return np.round((Pp - c0) / half * Q).astype(int).flatten()
-im = Image.open(os.path.join(MD, 'module-front.png')).convert('RGB').resize((TW, TH), Image.LANCZOS)
+im = Image.open(os.path.join(MD, PNG)).convert('RGB').resize((TW, TH), Image.LANCZOS)
 a = np.asarray(im).astype(np.uint16); t565 = ((a[:, :, 0] >> 3) << 11) | ((a[:, :, 1] >> 2) << 5) | (a[:, :, 2] >> 3)
 w, h, d = hi - lo
-print('MODULE: verts', len(V), 'tris', len(I) // 3, 'colours', len(cols), 'texverts', len(TV), 'textris', len(TI) // 3, 'size', w.round(1), h.round(1), d.round(1), file=sys.stderr)
+print(TAG + ': verts', len(V), 'tris', len(I) // 3, 'colours', len(cols), 'texverts', len(TV), 'textris', len(TI) // 3, 'size', w.round(1), h.round(1), d.round(1), file=sys.stderr)
 assert len(V) < 65536 and len(TV) < 65536 and len(cols) <= 255
-s = '/* The MIDI sound module (a rack module), baked from assets/models/midi-module.obj and module-front.png by tools/bake_module.py (same layout as the cards of card3d_data.h, no back side) */\n#include <stdint.h>\n'
+s = '/* A MIDI sound module (a rack module), baked from assets/models/%s.obj and %s by tools/bake_module.py (same layout as the cards of card3d_data.h, no back side) */\n#include <stdint.h>\n' % (OBJ, PNG)
 s += '#define C3_%s_NV %d\n#define C3_%s_NT %d\n#define C3_%s_NTV %d\n#define C3_%s_NTT %d\n#define C3_%s_TW %d\n#define C3_%s_TH %d\n' % (TAG, len(V), TAG, len(I) // 3, TAG, len(TV), TAG, len(TI) // 3, TAG, TW, TAG, TH)
 s += '#define C3_%s_ASPECT %.4ff            /* width / depth */\n' % (TAG, w / d)
 s += '#define C3_%s_HEIGHT %.4ff            /* height of the model in units of half the width */\n#define C3_%s_DEPTH %.4ff             /* depth of the model in units of half the width */\n' % (TAG, h / half, TAG, d / half)

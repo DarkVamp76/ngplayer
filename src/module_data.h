@@ -1,4 +1,4 @@
-/* The MIDI sound module (a rack module), baked from assets/models/midi-module.obj and module-front.png by tools/bake_module.py (same layout as the cards of card3d_data.h, no back side) */
+/* A MIDI sound module (a rack module), baked from assets/models/midi-module.obj and module-front.png by tools/bake_module.py (same layout as the cards of card3d_data.h, no back side) */
 #include <stdint.h>
 #define C3_MODULE_NV 4654
 #define C3_MODULE_NT 2050
