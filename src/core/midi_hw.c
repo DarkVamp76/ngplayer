@@ -71,6 +71,8 @@ double midi_hw_time(const MidiHw *h) {
 }
 void midi_hw_send(MidiHw *h, const unsigned char *msg, int len, double at) {
     snd_seq_event_t ev;
+    static int logging = -1; if (logging < 0) logging = getenv("NGPLAYER_MIDI_LOG") != NULL;       /* NGPLAYER_MIDI_LOG=1: every message that goes out, on stderr (queue time, bytes) */
+    if (logging) { fprintf(stderr, "%9.3f %s%3d:", at < 0 ? midi_hw_time(h) : at, at < 0 ? "now " : "    ", len); for (int i = 0; i < len && i < 24; i++) fprintf(stderr, " %02X", msg[i]); if (len > 24) fprintf(stderr, " ..."); fputc('\n', stderr); }
     snd_midi_event_reset_encode(h->enc);
     for (int i = 0; i < len; ) {
         snd_seq_ev_clear(&ev);

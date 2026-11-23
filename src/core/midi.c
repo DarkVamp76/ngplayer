@@ -110,7 +110,7 @@ struct Midi {
     char lcd[24];
     uint8_t *syx; size_t syx_len; char syx_name[48]; int syx_msgs;      /* the .syx file next to the MIDI file */
     uint8_t *sxp; size_t sxn, sxcap;                                     /* every SysEx message of the file as it is (2 bytes length, then F0 .. F7): for the hardware output */
-    int hw_ready, hw_mode; double hw_base, hw_pos0;                      /* the hardware output: the queue time of the song time hw_pos0 */
+    int hw_ready, hw_mode; double hw_base, hw_pos0, hw_sx_free;                      /* the hardware output: the queue time of the song time hw_pos0 */
     unsigned mute;
     int prog[NCH], bank[NCH], vol[NCH], pan[NCH];
     float lvl[NCH];
@@ -455,27 +455,40 @@ void midi_idle(Midi *m) {
 #endif
 }
 #if NG_HWMIDI
-/* what the hardware needs before the notes (the GM reset, the .syx), the state of the channels when the song is not at its start, then the time of the song in the queue */
+/* a SysEx message takes its time on the wire (31250 baud: 0.32 ms per byte) and the device needs a moment to store it (the MT-32 drops what comes too fast), so the messages
+ * are spaced by their own length plus a pause */
+static double sx_gap(int len) { return (double)len * 0.00032 + 0.02; }
+static void hw_short(Midi *m, const Ev *e, double t) {
+    unsigned char b[3];
+    if (e->type == EV_PROG) { b[0] = (unsigned char)(0xC0 | e->ch); b[1] = e->a; midi_hw_send(g_hw, b, 2, t); }
+    else if (e->type == EV_CC) { b[0] = (unsigned char)(0xB0 | e->ch); b[1] = e->a; b[2] = e->b; midi_hw_send(g_hw, b, 3, t); }
+    else if (e->type == EV_BEND) { b[0] = (unsigned char)(0xE0 | e->ch); b[1] = e->a; b[2] = e->b; midi_hw_send(g_hw, b, 3, t); }
+    (void)m;
+}
+/* what the hardware needs before the notes (the GM reset, the .syx, the set-up messages of the file), the state of the channels when the song is not at its start, then the time of the song in the queue */
 static void hw_resync(Midi *m) {
     midi_hw_drop(g_hw); midi_hw_panic(g_hw);
     double t = midi_hw_time(g_hw) + 0.06, pos0 = (double)m->pos / m->rate;
-    m->hw_pos0 = pos0;
+    m->hw_pos0 = pos0; m->hw_sx_free = 0;
     size_t i = 0;
     if (m->pos == 0) {                                                          /* the start: General MIDI gets its reset (not the MT-32), then the .syx next to the file comes first */
-        if (!m->sx_mt32) { static const unsigned char gm[6] = { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 }; midi_hw_send(g_hw, gm, 6, t); t += 0.1; }
+        if (!m->sx_mt32) { static const unsigned char gm[6] = { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 }; midi_hw_send(g_hw, gm, 6, t); t += sx_gap(6) + 0.08; }
         for (size_t k = 0; k < m->syx_len; k++) {
             if (m->syx[k] != 0xF0) continue;
             size_t j = k + 1; while (j < m->syx_len && m->syx[j] != 0xF7) j++;
-            if (j < m->syx_len) { midi_hw_send(g_hw, m->syx + k, (int)(j - k + 1), t); t += 0.05; k = j; }
+            if (j < m->syx_len) { midi_hw_send(g_hw, m->syx + k, (int)(j - k + 1), t); t += sx_gap((int)(j - k + 1)); k = j; }
+        }
+        for (; i < m->nev && m->ev[i].type != EV_NOTEON; i++) {                 /* everything before the first note is set-up: in order, spaced, and the song waits for it */
+            const Ev *e = &m->ev[i];
+            if (e->type == EV_SYSEX) { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); midi_hw_send(g_hw, p + 2, n, t); t += sx_gap(n); }
+            else if (e->type == EV_PROG || e->type == EV_CC || e->type == EV_BEND) { hw_short(m, e, t); t += 0.002; }
         }
         t += 0.1;
     } else {                                                                    /* a seek / a resume: the state of the channels up to here (no notes) */
         for (; i < m->nev && m->frame[i] < m->pos; i++) {
-            const Ev *e = &m->ev[i]; unsigned char b[3];
-            if (e->type == EV_PROG) { b[0] = (unsigned char)(0xC0 | e->ch); b[1] = e->a; midi_hw_send(g_hw, b, 2, t); t += 0.002; }
-            else if (e->type == EV_CC) { b[0] = (unsigned char)(0xB0 | e->ch); b[1] = e->a; b[2] = e->b; midi_hw_send(g_hw, b, 3, t); t += 0.002; }
-            else if (e->type == EV_BEND) { b[0] = (unsigned char)(0xE0 | e->ch); b[1] = e->a; b[2] = e->b; midi_hw_send(g_hw, b, 3, t); t += 0.002; }
-            else if (e->type == EV_SYSEX) { const uint8_t *p = m->sxp + e->val; midi_hw_send(g_hw, p + 2, p[0] | (p[1] << 8) | 0, t); t += 0.05; }
+            const Ev *e = &m->ev[i];
+            if (e->type == EV_SYSEX) { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); midi_hw_send(g_hw, p + 2, n, t); t += sx_gap(n); }
+            else if (e->type == EV_PROG || e->type == EV_CC || e->type == EV_BEND) { hw_short(m, e, t); t += 0.002; }
         }
         t += 0.05;
     }
@@ -490,13 +503,14 @@ static void hw_event(Midi *m, size_t i) {
     case EV_PROG: b[0] = (unsigned char)(0xC0 | e->ch); b[1] = e->a; midi_hw_send(g_hw, b, 2, at); break;
     case EV_CC: b[0] = (unsigned char)(0xB0 | e->ch); b[1] = e->a; b[2] = e->b; midi_hw_send(g_hw, b, 3, at); break;
     case EV_BEND: b[0] = (unsigned char)(0xE0 | e->ch); b[1] = e->a; b[2] = e->b; midi_hw_send(g_hw, b, 3, at); break;
-    case EV_SYSEX: { const uint8_t *p = m->sxp + e->val; midi_hw_send(g_hw, p + 2, p[0] | (p[1] << 8), at); break; }
+    case EV_SYSEX: { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); if (at < m->hw_sx_free) at = m->hw_sx_free; midi_hw_send(g_hw, p + 2, n, at); m->hw_sx_free = at + sx_gap(n); break; }
     default: break;                                                             /* the resets are in the SysEx messages themselves, the tempo is in the times */
     }
 }
 /* the player's audio callback asks for frames: nothing is rendered, the song time runs on and the events go to the hardware a little ahead of their time */
 static int render_hw(Midi *m, int16_t *out, int frames) {
     if (!m->hw_ready) hw_resync(m);
+    if (midi_hw_time(g_hw) < m->hw_base - 0.12) { memset(out, 0, (size_t)frames * 4); return frames; }     /* the set-up is still on its way: the song does not run yet */
     double ahead = ((double)m->pos + frames) / m->rate + 0.12;
     while (m->next < m->nev && (double)m->frame[m->next] / m->rate <= ahead) { hw_event(m, m->next); m->next++; }
     int n = frames;
