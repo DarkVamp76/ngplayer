@@ -989,7 +989,8 @@ void song_info(const Song *s, SongInfo *o) {
         info_add(o, "%d tracks, %d ticks per quarter note", mi.ntracks, mi.division & 0x8000 ? 0 : mi.division);
         info_add(o, "%d notes, tempo %d bpm at the start", mi.notes, mi.tempo_bpm);
         const char *sf = midi_soundfont_path(); const char *bn = sf ? strrchr(sf, '/') : NULL;
-        info_add(o, "SoundFont: %s", sf ? (bn ? bn + 1 : sf) : "none");
+        if (midi_hardware_on()) info_add(o, "Output: %s (MIDI hardware), key H switches to the SoundFont", midi_output_name());
+        else info_add(o, "SoundFont: %s%s", sf ? (bn ? bn + 1 : sf) : "none", NG_HWMIDI ? ", key H: MIDI hardware" : "");
         return;
     }
     int k = -1; for (int i = 0; FMT_INFO[i].f; i++) if (!strcmp(FMT_INFO[i].f, s->fmt)) { k = i; break; }
@@ -1096,4 +1097,5 @@ const char *song_midi_standard(const Song *s, int *known) {
     midi_info(s->mi, &mi); snprintf(b, sizeof b, "%s", mi.standard); if (known) *known = mi.standard_known;
     return b;
 }
+void song_midi_idle(Song *s) { if (s && s->mi) midi_idle(s->mi); }
 

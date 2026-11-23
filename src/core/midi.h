@@ -4,6 +4,7 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include "midi_hw.h"
 
 #ifdef __APPLE__
 #include <TargetConditionals.h>
@@ -41,6 +42,11 @@ int   midi_chan_volume(const Midi *m, int ch);                       /* CC 7 */
 int   midi_chan_pan(const Midi *m, int ch);                          /* CC 10: 0..127 */
 int   midi_chan_notes(const Midi *m, int ch);                        /* notes in the file on this channel (0 = unused channel) */
 void  midi_set_mute(Midi *m, unsigned mask);
+/* the output: the SoundFont (default) or real MIDI hardware through ALSA (Linux; NG_HWMIDI). Switch with the audio device locked. */
+int   midi_set_hardware(int on, const char *want);                   /* on: connect to the hardware port `want` (NULL: the first one); returns 1 when the hardware is the output now */
+int   midi_hardware_on(void);
+const char *midi_output_name(void);                                  /* "SoundFont" or the name of the MIDI device */
+void  midi_idle(Midi *m);                                            /* the player does not render (pause, end): the hardware gets a panic and the next render starts again from here */
 void  midi_set_scope(Midi *m, float *buf, int len);                  /* scope rings: buf[channel * len + position], len a power of two (the voices of each channel, dry) */
 unsigned midi_scope_pos(const Midi *m);                              /* frames written so far (write position = pos & (len - 1)) */
 /* time grid (4/4 measures of division * 4 ticks, sixteen rows each: the same grid the tracker views use) and the notes for the roll */
