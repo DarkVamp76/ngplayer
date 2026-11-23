@@ -576,9 +576,10 @@ static void draw_pattern(float x, float y, float w, float h);
 static void draw_voxel(float x, float y, float w, float h);
 static void draw_info_tv(float x, float y, float w, float h);
 /* Umschalter Pattern | Orb oben in der Karte (auch per Touch/Klick) */
+static float view_cw(void) { return g_portrait && !NG_TV ? 56 : 62; }      /* width of one tab (5 of them: on a phone they must leave room for the ORD / ROW text on the left) */
 static void view_switch(float x, float y, float w) {
     if (g_duo && g_ox > 0) return;                              /* Duo opened: the tabs sit on the left page only */
-    float cw = 62, bx = NG_TV ? x + w / 2 - NVIEW * cw / 2.0f : g_portrait ? x + w - 14 - NVIEW * cw + 4 : x + w / 2 - NVIEW * cw / 2.0f, by = y + 8;
+    float cw = view_cw(), bx = NG_TV ? x + w / 2 - NVIEW * cw / 2.0f : g_portrait ? x + w - 14 - NVIEW * cw + 4 : x + w / 2 - NVIEW * cw / 2.0f, by = y + 8;
     static const char *const NAME[5] = { "PATTERN", "ORB", "VOXEL", "SCOPES", "INFO" };
     for (int t = 0; t < NVIEW; t++) {
         int i = VIEW_ORDER[t];
@@ -889,9 +890,10 @@ static void draw_pattern(float x, float y, float w, float h) {
     char hb[64];
     snprintf(hb, sizeof hb, "ORD %02d  PAT %02d  ROW %02d/%02d", sp.order + 1, sp.pattern, sp.row, sp.nrows);
     if (g_portrait) {   /* room: info on the left, the switch on the right: the text gets shorter until it fits left of the tabs (they start 258 from the right edge) */
-        float room = w - 258 - 18 - 8;
+        float room = w - (NVIEW * view_cw() - 4 + 14) - 18 - 8;           /* the tabs start (NVIEW * width - 4 + 14) from the right edge */
         if (text_width(hb, 12) > room) snprintf(hb, sizeof hb, "ORD %02d  ROW %02d/%02d", sp.order + 1, sp.row, sp.nrows);
         if (text_width(hb, 12) > room) snprintf(hb, sizeof hb, "ROW %02d/%02d", sp.row, sp.nrows);
+        if (text_width(hb, 12) > room) snprintf(hb, sizeof hb, "%02d/%02d", sp.row, sp.nrows);       /* a narrow phone with 5 tabs: only the row */
         text(x + 18, y + 12, 12, DIM, hb);
     }
     else text_right(x + w - 18, y + 12, 12, DIM, hb);
