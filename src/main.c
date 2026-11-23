@@ -2946,8 +2946,8 @@ static void draw_ui_portrait(float W, float H) {
     aw = awf;                                                              /* the bar runs over the whole width, too */
     /* ---------------- Transport */
     if (!g_duo && !NG_TV) {
-        float bx = M, bw = aw;
-        card_r(bx, by, bw, botH, g_sa_r > 0 ? 28.0f : 14.0f);        /* closed Duo: the bottom corners follow the display */
+        float bx = M, bw = aw - (g_sa_r > 0 ? 26.0f : 0.0f);         /* closed Duo: the right end stays clear of the strongly rounded bottom right corner of the display */
+        card_r(bx, by, bw, botH, g_sa_r > 0 ? 32.0f : 14.0f);        /* closed Duo: the bottom corners follow the display */
         float cy = by + botH - BOT / 2, r = 20;
         if (has_seek) draw_seek_row(bx, by + 6, bw);
         float bxs[3] = { bx + 12, bx + 62, bx + 112 };
