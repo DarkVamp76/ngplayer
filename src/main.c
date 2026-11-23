@@ -188,6 +188,7 @@ static void view_persist(void);       /* remembers the view (web: localStorage, 
 #endif
 #define NVIEW 5                       /* Pattern, Scopes, Orb, Voxel, Info */
 static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes, 4 = Info (key V / buttons); the tab order is VIEW_ORDER */
+static float g_sa_r;                                        /* iPhone Duo closed: the width (view units) of the system status column on the right (clock, Wi-Fi, camera); the top cards stay left of it, the rest runs over the full width */
 static int g_duo;                                           /* iPhone Duo opened: two pages, the left one is the phone layout, the right one shows the pattern */
 static const int VIEW_ORDER[5] = { 0, 3, 1, 2, 4 };   /* PATTERN, SCOPES, ORB, VOXEL */
 static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
@@ -2802,7 +2803,8 @@ static void draw_seek_row(float bx, float ty, float bw) {
 
 static void draw_ui_portrait(float W, float H) {
     const float M = 10, BOT = (g_duo || NG_TV) ? 0.0f : 64.0f;          /* iPhone Duo opened: the transport bar is the wide one over both pages (draw_duo_bar) */
-    float aw = W - 2 * M;
+    const float awf = W - 2 * M;
+    float aw = awf - g_sa_r;                                              /* the top cards (header, channels) stay left of the status column of the closed Duo */
     /* ---------------- Kopf */
     float hy = M, hh = 92;
     card(M, hy, aw, hh, 0);
@@ -2915,6 +2917,7 @@ static void draw_ui_portrait(float W, float H) {
 #else
         draw_seal(M + aw - 12, cy0 + 6, 21, SEAL_TEXT);              /* portrait: on the top-right corner of the channels card */
 #endif
+        aw = awf;                                                         /* everything below runs over the full width */
         if (!novis) {
             if (g_duo && g_vmode == 0) g_vmode = 3;                       /* the pattern is on the right page */
             if (g_vmode == 1) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
@@ -4081,6 +4084,7 @@ static void iter(void) {
         SDL_GetWindowSize(win, &ww, &wh);
         gfx_drawable_size(win, &dw, &dh);
         int fdw = dw, fdh = dh, vpx = 0, vpy = 0;      /* the whole framebuffer; dw/dh become the part the UI is laid out in */
+        int dc_r = 0, dc_b = 0;                          /* iPhone Duo closed: the right inset (status column) and the part of the bottom inset the layout may use */
 #if defined(__APPLE__) && TARGET_OS_IPHONE
         g_duo = ios_hinge_status(win) >= 2 && ww > wh;               /* iPhone Duo opened: the hinge is open and the picture is wide; it uses the whole window (time and Wi-Fi lie over it) */
         {   /* iOS: keep the UI out of the notch / Dynamic Island, the home bar and the rounded corners (insets in points, from ios_glue.m: SDL2 has no safe-area API) */
@@ -4097,6 +4101,7 @@ static void iter(void) {
                 tv_inset_px[0] = l; tv_inset_px[1] = t; tv_inset_px[2] = r; tv_inset_px[3] = b;      /* the picture (background) keeps the whole screen, only the cards keep this distance */
 #else
                 if (l + r < fdw / 3 && t + b < fdh / 3) { vpx = l; vpy = b; dw = fdw - l - r; dh = fdh - t - b; }      /* GL counts from below, so the bottom inset is the y offset */
+                if (dw > 0 && r - l > (int)(40 * kx) && b > 0) { dc_r = r; dc_b = b - (int)(0.4f * (float)b); }       /* a side status column (the closed Duo): the layout is made for the rest, then widened over it */
 #endif
             }
         }
@@ -4120,6 +4125,13 @@ static void iter(void) {
             if ((float)dh / 860.0f < view_scale) view_scale = (float)dh / 860.0f;
             if (view_scale < 0.5f) view_scale = 0.5f;
         }
+        g_sa_r = 0;
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        if (dc_r > 0 && g_portrait && !g_duo) {        /* the closed Duo: the scale stays as it is, the picture runs over the status column and down to the home bar; the top cards keep clear of the column */
+            dw += dc_r; dh += dc_b; vpy -= dc_b;
+            g_sa_r = (float)dc_r / view_scale;
+        }
+#endif
         view_w = (float)dw / view_scale;
         view_h = (float)dh / view_scale;
 #if defined(__APPLE__) && TARGET_OS_TV
