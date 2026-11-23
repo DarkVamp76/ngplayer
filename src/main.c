@@ -68,6 +68,7 @@ static SDL_AudioDeviceID g_dev;
 static Song *g_song;
 static int g_paused, g_ended;
 static float g_vol = 0.8f;
+static int g_midi_hw;                       /* MIDI files: 1 = the output is real MIDI hardware (key H; Linux), saved in the settings */
 static int vol_drag;                 /* a finger / the pointer holds the volume slider */
 static volatile unsigned long long g_frames;
 static float g_lag_ms = 46.0f;                 /* A/V sync: how long the picture is held back behind the rendered sound (iOS: the latency of the output route) */
@@ -112,7 +113,7 @@ static void audio_cb(void *ud, Uint8 *stream, int len) {
     (void)ud;
     int16_t *o = (int16_t *)stream;
     int n = len / 4;
-    if (!g_song || g_paused || g_ended || g_hold) { memset(stream, 0, (size_t)len); g_resync = 1; return; }
+    if (!g_song || g_paused || g_ended || g_hold) { if (g_song) song_midi_idle(g_song); memset(stream, 0, (size_t)len); g_resync = 1; return; }
     int done = 0;
     while (done < n) {
         int k = n - done < 32 ? n - done : 32;
@@ -1748,6 +1749,18 @@ static void seek_order(int target) {
     song_close(old);
     ov_reset = 1; view_reset = 1; pat_ch0 = pat_ch0;
 }
+/* MIDI output: the SoundFont or real MIDI hardware (ALSA, Linux); NGPLAYER_MIDI_OUT = a part of the device name or client:port, else the first hardware port */
+static void midi_toggle_output(void) {
+    if (!NG_HWMIDI) { snprintf(toast_txt, sizeof toast_txt, "MIDI hardware output: Linux only"); toast_t = 2.0f; return; }
+    int want_on = !midi_hardware_on(), on;
+    if (g_dev) SDL_LockAudioDevice(g_dev);
+    on = midi_set_hardware(want_on, getenv("NGPLAYER_MIDI_OUT"));
+    if (g_dev) SDL_UnlockAudioDevice(g_dev);
+    g_midi_hw = on;
+    if (want_on && !on) snprintf(toast_txt, sizeof toast_txt, "No MIDI hardware found");
+    else snprintf(toast_txt, sizeof toast_txt, "MIDI output: %s", midi_output_name());
+    toast_t = 2.5f;
+}
 /* MIDI: seek by seconds (Left / Right: 10 s, the last bar of a file goes on to the next one) */
 static void seek_midi_by(double d) {
     if (!g_song || !song_is_midi(g_song)) return;
@@ -2824,7 +2837,7 @@ static void draw_ui(double t) {
         float hmax = (vx - 56) - (bx + 190);        /* free room for the hints, left of the VOL label */
         {
             char l1[160] = "Space pause  \xb7  Left/Right seek (subsong)  \xb7  Up/Down track  \xb7  Shift+arrows channels", l2[160];
-            if (g_song && song_is_midi(g_song)) snprintf(l1, sizeof l1, "Space pause  \xb7  Left/Right \xb1" "10 s  \xb7  Up/Down track");
+            if (g_song && song_is_midi(g_song)) snprintf(l1, sizeof l1, "Space pause  \xb7  Left/Right \xb1" "10 s  \xb7  Up/Down track  \xb7  H %s", midi_hardware_on() ? "SoundFont" : "hardware");
 #ifdef __EMSCRIPTEN__
             snprintf(l2, sizeof l2, "O Mod Archive  \xb7  V view  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms", g_lag_ms);
 #else
@@ -3200,6 +3213,7 @@ static void settings_load(void) {
         else if (sscanf(line, "window_h=%d", &v) == 1 && v >= 480 && v <= 16384) g_win_h = v;
         else if (sscanf(line, "orb=%d", &v) == 1) g_vmode = v != 0;                  /* older settings files */
         else if (sscanf(line, "view=%d", &v) == 1 && v >= 0 && v < NVIEW) g_vmode = v;
+        else if (sscanf(line, "midi_hw=%d", &v) == 1) g_midi_hw = v != 0;
         else if (sscanf(line, "random=%d", &v) == 1) g_rand = v != 0;
         else if (sscanf(line, "repeat=%d", &v) == 1) { g_rpt = v == 1 || v == 2 ? v : 0; if (g_rpt) g_rand = 0; }
         else if (sscanf(line, "window_x=%d", &v) == 1) g_win_x = v;
@@ -3263,7 +3277,7 @@ static void settings_save(void) {
         SDL_GetWindowPosition(win, &px, &py);
         if ((px || py) && (px & 0xFFFF0000) != 0x2FFF0000 && (px & 0xFFFF0000) != 0x1FFF0000) { g_win_x = px; g_win_y = py; }      /* Wayland has no window position (SDL returns 0,0 or the "centered" flag): then keep the old value */
     }
-    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\nview=%d\nrandom=%d\nrepeat=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_vmode, g_rand ? 1 : 0, g_rpt);
+    fprintf(f, "window_w=%d\nwindow_h=%d\nwindow_x=%d\nwindow_y=%d\nview=%d\nrandom=%d\nrepeat=%d\nmidi_hw=%d\n", g_win_w, g_win_h, g_win_x, g_win_y, g_vmode, g_rand ? 1 : 0, g_rpt, g_midi_hw);
     fclose(f);
 }
 #endif
@@ -4192,6 +4206,7 @@ static void iter(void) {
 #endif
                 switch (e.key.keysym.sym) {
                 case SDLK_o: ma_show(1); break;
+                case SDLK_h: midi_toggle_output(); break;                              /* MIDI files: the SoundFont or the MIDI hardware */
                 case SDLK_v: { int t = 0; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % NVIEW]; view_persist(); } break;
                 case SDLK_ESCAPE: running = 0; break;
                 case SDLK_i: g_vmode = 4; view_persist(); break;                 /* the Info view */
@@ -4475,6 +4490,7 @@ int main(int argc, char **argv) {
     gfx_window_attrs();
 #ifndef __EMSCRIPTEN__
     if (!shot) { settings_load(); ma_list_load(); }
+    if ((g_midi_hw || getenv("NGPLAYER_MIDI_HW")) && !midi_set_hardware(1, getenv("NGPLAYER_MIDI_OUT"))) g_midi_hw = 0;           /* the last session played MIDI files on hardware: connect again (not found: the SoundFont) */
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     g_vol = 1.0f;                                                  /* iOS: no slider, the volume is the device's (the buttons, the control centre) */
 #endif

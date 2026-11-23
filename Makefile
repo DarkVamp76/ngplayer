@@ -4,8 +4,8 @@ CFLAGS  ?= -O2
 SDL_CFLAGS ?= $(shell sdl2-config --cflags)
 SDL_LIBS   ?= $(shell sdl2-config --libs)
 CFLAGS  += -w -Isrc -Isrc/core -Ibuild $(SDL_CFLAGS)
-LIBS     = $(SDL_LIBS) -lm
-CORE     = $(addprefix src/core/,replay.c mod_load.c s3m_load.c stm_load.c ptm_load.c ult_load.c s669_load.c mtm_load.c asylum_load.c amf_load.c dsm_load.c sfx_load.c ahx.c med_load.c psm_load.c far_load.c mdl_load.c xm_load.c dbm_load.c xm_replay.c it_load.c dtm_load.c opl_replay.c opl/opl3.c ym7128b/YM7128B_emu.c adgold.c a2m_unpack.c a2m_load.c a2m_replay.c herad.c rad.c lds.c it_replay.c it_unpack.c period.c dmf_load.c dmf_replay.c tfmx_load.c tfmx_replay.c midi.c)
+LIBS     = $(SDL_LIBS) -lm $(if $(filter Linux,$(shell uname -s)),-lasound)
+CORE     = $(addprefix src/core/,replay.c mod_load.c s3m_load.c stm_load.c ptm_load.c ult_load.c s669_load.c mtm_load.c asylum_load.c amf_load.c dsm_load.c sfx_load.c ahx.c med_load.c psm_load.c far_load.c mdl_load.c xm_load.c dbm_load.c xm_replay.c it_load.c dtm_load.c opl_replay.c opl/opl3.c ym7128b/YM7128B_emu.c adgold.c a2m_unpack.c a2m_load.c a2m_replay.c herad.c rad.c lds.c it_replay.c it_unpack.c period.c dmf_load.c dmf_replay.c tfmx_load.c tfmx_replay.c midi.c midi_hw.c)
 SRC      = src/main.c src/gfx_gl.c src/song.c src/net.c $(CORE)
 PREFIX  ?= /usr/local
 
