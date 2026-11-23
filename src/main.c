@@ -1590,6 +1590,43 @@ static int chip_kind_song(const Song *sg) {                    /* MIDI: the blac
 }
 static int chip_kind(void) { return chip_kind_song(g_song); }
 #include "card3d.inc"
+/* The display of the MT-32 module: the title of the MIDI file in its 2 x 20 character LCD. The front picture of the module (the baked panel with an empty green display) is drawn into a render
+ * target and the characters on top of it, in the cells of a character LCD; the 3D card uses that target as its front picture instead of the baked one. Done again when the title changes. */
+static void module_lcd_update(void) {
+#if NG_MIDI
+    if (!g_song || !song_is_midi(g_song) || chip_kind() != 7) return;
+    const int mi = 6; c3_setup(mi);
+    C3Gl *g = &c3gl[mi]; const C3Model *m = &C3M[mi];
+    char t[160]; const char *tt = song_title(g_song);
+    snprintf(t, sizeof t, "%s", tt[0] ? tt : (cur >= 0 && cur < npl ? pl[cur].label : "MT-32"));
+    enum { cols = 20 }; int n = (int)strlen(t);
+    char vis[cols + 1];                                                                               /* what the 20 cells show: the title, centred; a longer one runs through as a marquee */
+    int off = 0;
+    if (n <= cols) { memset(vis, ' ', cols); memcpy(vis + (cols - n) / 2, t, (size_t)n); }
+    else { off = (int)(SDL_GetTicks() / 280) % (n + 4); for (int i = 0; i < cols; i++) { int k = (off + i) % (n + 4); vis[i] = k < n ? t[k] : ' '; } }
+    vis[cols] = 0;
+    static char shown[cols + 1];
+    if (g->lcd && !strcmp(shown, vis)) return;
+    if (!g->lcd) g->lcd = gfx_tex_create(m->tw, m->th, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET);
+    if (!g->lcd || !gfx_target_begin(g->lcd, 0, 0, 0, 1)) return;
+    gfx_set_params((float)m->tw, (float)m->th, 1.0f); gfx_set_texture(fonttex);
+    set_additive(0);
+    tex_quad(g->tex, 0, 0, (float)m->tw, (float)m->th, C(1, 1, 1, 1));                              /* the baked panel (the card model flips the picture, a render target is stored the other way up) */
+    const float lx = MT_LCD_X0 * (float)m->tw, ly = MT_LCD_Y0 * (float)m->th, lw = (MT_LCD_X1 - MT_LCD_X0) * (float)m->tw, lh = (MT_LCD_Y1 - MT_LCD_Y0) * (float)m->th;
+    const float pad = lw * 0.02f, cw = (lw - 2 * pad) / cols, rowh = lh - 4.0f;                      /* ONE line of 20 cells, as on the device */
+    const col ink = C(0.757f, 0.984f, 0.224f, 1), cellc = C(0.38f, 0.66f, 0.10f, 1);                 /* the backlit green LCD, the colours measured on a photo of the device: lime characters (193, 251, 57) in lit cells (about 96, 168, 26) */
+    for (int i = 0; i < cols; i++) rect(lx + pad + i * cw + 0.6f, ly + 2.0f + 0.6f, cw - 1.2f, rowh - 1.2f, cellc);
+    const float emw = text_width("H", 100.0f) / 100.0f;                                               /* the characters are as wide as their cell allows ... */
+    const float fs = cw * 0.86f / emw, sy = (rowh * 0.80f) / (fs * 0.73f);                            /* ... and stretched in height to fill the cell (tall and narrow like the LCD characters) */
+    for (int i = 0; i < cols; i++) {
+        char ch[2] = { vis[i], 0 }; if (ch[0] == ' ') continue;
+        text_tall(lx + pad + i * cw + (cw - text_width(ch, fs)) / 2, ly + 2.0f + rowh * 0.10f - fs * 0.21f * sy, fs, sy, ink, ch);
+    }
+    flush();
+    gfx_target_end(g->lcd);
+    snprintf(shown, sizeof shown, "%s", vis);
+#endif
+}
 static float chips_width_k(int k, float h) {
     if (k == 0) return 5.0f * h * 0.5f;                            /* Paula: a flat strip (5:1), at half height */
     return 1.12f * h * c3_box_aspect(k - 1);                       /* the rotating 3D sound card */
@@ -4379,6 +4416,7 @@ static void iter(void) {
         /* Songende -> naechster Titel */
         if (!shot) song_end_advance();
 
+        module_lcd_update();                                                         /* the title in the display of the MT-32 module */
         if (g_song && chip_kind() > 0) card3d_frame(chip_kind() - 1, dw, dh);       /* the 3D sound card renders into its own texture before the 2D pass */
         if (g_vmode == 4 && g_song && (getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) > 0) card3d_frame_swing((getenv("NGPLAYER_TEST_CHIP") ? atoi(getenv("NGPLAYER_TEST_CHIP")) : chip_kind()) - 1, dw, dh);      /* Apple TV: the Info page swings the card on its own */
 #if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)

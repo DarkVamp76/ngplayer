@@ -151,6 +151,25 @@ static float text(float x, float y, float size, col c, const char *s) {
     return x - x0;
 }
 
+/* text with the glyphs stretched in height by sy (the characters of a character LCD are tall and narrow); x, y as for text(), the height of the glyphs and their offsets scale with sy */
+static float text_tall(float x, float y, float size, float sy, col c, const char *s) {
+    float sc = size / FONT_PX, x0 = x;
+    for (; *s; s++) {
+        int gi = glyph_idx[(unsigned char)*s];
+        if (gi < 0) continue;
+        const font_glyph *g = &font_glyphs[gi];
+        if (g->w && g->h) {
+            float gx = x + g->xoff * sc, gy = y + g->yoff * sc * sy, gw = g->w * sc, gh = g->h * sc * sy;
+            float u0 = (float)g->x / FONT_ATLAS_W, v0 = (float)g->y / FONT_ATLAS_H;
+            float u1 = (float)(g->x + g->w) / FONT_ATLAS_W, v1 = (float)(g->y + g->h) / FONT_ATLAS_H;
+            V(gx, gy, u0, v0, c, 1, 0, 0, 0); V(gx + gw, gy, u1, v0, c, 1, 0, 0, 0); V(gx, gy + gh, u0, v1, c, 1, 0, 0, 0);
+            V(gx + gw, gy, u1, v0, c, 1, 0, 0, 0); V(gx + gw, gy + gh, u1, v1, c, 1, 0, 0, 0); V(gx, gy + gh, u0, v1, c, 1, 0, 0, 0);
+        }
+        x += g->adv * sc;
+    }
+    return x - x0;
+}
+
 /* text rotated by ang (radians, clockwise on screen) around the pivot (ox, oy); x, y as for text() */
 static void text_rot(float ox, float oy, float ang, float x, float y, float size, col c, const char *s) {
     float sc = size / FONT_PX, ca = cosf(ang), sa = sinf(ang);
