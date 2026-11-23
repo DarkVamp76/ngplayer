@@ -2911,7 +2911,13 @@ static void draw_ui(double t) {
         float hmax = (vx - 56) - (bx + 190);        /* free room for the hints, left of the VOL label */
         {
             char l1[160] = "Space pause  \xb7  Left/Right seek (subsong)  \xb7  Up/Down track  \xb7  Shift+arrows channels", l2[160];
-            if (g_song && song_is_midi(g_song)) snprintf(l1, sizeof l1, "Space pause  \xb7  Left/Right \xb1" "10 s  \xb7  Up/Down track  \xb7  H %s", midi_hardware_on() ? "SoundFont" : "hardware");
+            if (g_song && song_is_midi(g_song)) {
+#if NG_HWMIDI
+                snprintf(l1, sizeof l1, "Space pause  \xb7  Left/Right \xb1" "10 s  \xb7  Up/Down track  \xb7  H %s", midi_hardware_on() ? "SoundFont" : "hardware");
+#else
+                snprintf(l1, sizeof l1, "Space pause  \xb7  Left/Right \xb1" "10 s  \xb7  Up/Down track");        /* no MIDI hardware output here (web, macOS for now) */
+#endif
+            }
 #ifdef __EMSCRIPTEN__
             snprintf(l2, sizeof l2, "O Mod Archive  \xb7  V view  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms", g_lag_ms);
 #else

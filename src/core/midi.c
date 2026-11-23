@@ -162,8 +162,9 @@ static int exists(const char *p) { return p && p[0] && access(p, R_OK) == 0; }
 static void exe_dir(char *out, size_t cap) {
     out[0] = 0;
 #ifdef __EMSCRIPTEN__
-    (void)cap; return;
-#elif defined(__APPLE__)
+    (void)cap;                                                                  /* the web player has no executable: the page puts the SoundFont into /soundfont/ */
+#else
+#ifdef __APPLE__
     char b[1024]; uint32_t n = sizeof b;
     if (_NSGetExecutablePath(b, &n) != 0) return;
 #else
@@ -172,6 +173,7 @@ static void exe_dir(char *out, size_t cap) {
 #endif
     char *s = strrchr(b, '/'); if (s) *s = 0;
     snprintf(out, cap, "%s", b);
+#endif
 }
 const char *midi_soundfont_path(void) {
     if (g_sf_found[0]) return g_sf_found;
