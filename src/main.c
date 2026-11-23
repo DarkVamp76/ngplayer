@@ -1138,8 +1138,9 @@ static void overview_update(float dt) {
     }
 }
 
+static float g_ov_fullw;                                              /* the closed Duo: the full width of the channels card (its content keeps clear of the status column) */
 static void draw_overview(float x, float y, float w, float h) {
-    card(x, y, w, h, 0);
+    card(x, y, g_sa_r > 0 ? g_ov_fullw : w, h, 0);
     if (!g_song) return;
     int nch = song_channels(g_song);
     if (nch > 64) nch = 64;
@@ -2812,11 +2813,12 @@ static void draw_seek_row(float bx, float ty, float bw) {
 
 static void draw_ui_portrait(float W, float H) {
     const float M = 10, BOT = (g_duo || NG_TV) ? 0.0f : 64.0f;          /* iPhone Duo opened: the transport bar is the wide one over both pages (draw_duo_bar) */
-    const float awf = W - 2 * M;
-    float aw = awf - g_sa_r;                                              /* the top cards (header, channels) stay left of the status column of the closed Duo */
+    const float awf = W - 2 * M - (g_sa_r > 0 ? 24.0f : 0.0f);         /* the width of all the cards; the closed Duo keeps 24 more at the right, clear of the rounded corner of the display */
+    float aw = W - g_sa_r - 2 * M;                                         /* the content of the top cards (header, channels) stays left of the status column of the closed Duo; the cards themselves have the full width */
+    g_ov_fullw = awf;
     /* ---------------- Kopf */
     float hy = M, hh = 92;
-    card_r(M, hy, aw, hh, (g_duo || g_sa_r > 0) ? 30.0f : 14.0f);          /* the Duo (open and closed): the corner follows the rounded corner of the display */
+    card_r(M, hy, g_sa_r > 0 ? awf : aw, hh, (g_duo || g_sa_r > 0) ? 30.0f : 14.0f);          /* the Duo (open and closed): the corner follows the rounded corner of the display; closed: the card is as wide as the others, the status column lies over its right end */
     {
         char title[160], sub[200];
         if (g_song) {
@@ -2946,7 +2948,7 @@ static void draw_ui_portrait(float W, float H) {
     aw = awf;                                                              /* the bar runs over the whole width, too */
     /* ---------------- Transport */
     if (!g_duo && !NG_TV) {
-        float bx = M, bw = aw - (g_sa_r > 0 ? 26.0f : 0.0f);         /* closed Duo: the right end stays clear of the strongly rounded bottom right corner of the display */
+        float bx = M, bw = aw;
         card_r(bx, by, bw, botH, g_sa_r > 0 ? 32.0f : 14.0f);        /* closed Duo: the bottom corners follow the display */
         float cy = by + botH - BOT / 2, r = 20;
         if (has_seek) draw_seek_row(bx, by + 6, bw);
