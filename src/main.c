@@ -555,11 +555,13 @@ static float chip(float x, float y, const char *label, col c, int lit) {
     else { rrect(x, y, w, 20, 6, alpha(FAINT, 0.18f)); text(x + 7, y + 3, 12, alpha(FAINT, 0.9f), label); }
     return w + 5;
 }
+static float g_card_r = 14;                                  /* the corner radius of the next card(); the cards in the corners of the Duo follow the rounded corners of its display */
 static void card(float x, float y, float w, float h, int hover) {
-    shadow(x, y + 6, w, h, 14, 22, C(0, 0, 0, 0.5f));
-    rrect(x, y, w, h, 14, alpha(EDGE, hover ? 0.75f : 0.45f));
-    rrect(x + 1, y + 1, w - 2, h - 2, 13, hover ? CARDHI : CARD);
+    shadow(x, y + 6, w, h, g_card_r, 22, C(0, 0, 0, 0.5f));
+    rrect(x, y, w, h, g_card_r, alpha(EDGE, hover ? 0.75f : 0.45f));
+    rrect(x + 1, y + 1, w - 2, h - 2, g_card_r - 1, hover ? CARDHI : CARD);
 }
+static void card_r(float x, float y, float w, float h, float r) { g_card_r = r; card(x, y, w, h, 0); g_card_r = 14; }
 static void mmss(char *buf, size_t cap, double sec) { int s = (int)sec; snprintf(buf, cap, "%d:%02d", s / 60, s % 60); }
 
 static float glow_l, glow_r;
@@ -769,7 +771,7 @@ static void draw_scopes(float x, float y, float w, float h) {
 
 
 static void draw_pattern(float x, float y, float w, float h) {
-    if (!(g_duo && g_ox > 0)) card(x, y, w, h, 0);              /* (the Duo draws the wide card itself, the content is narrower than the card) */
+    if (!(g_duo && g_ox > 0)) card_r(x, y, w, h, g_duo ? 30.0f : 14.0f);              /* (the Duo draws the wide card itself, the content is narrower than the card; its corner follows the display) */
     if (!g_portrait) text(x + 18, y + 12, 12, DIM, "PATTERN");
     view_switch(x, y, w);
     if (!g_song) { text(x + 18, y + 44, 14, FAINT, "No song loaded."); return; }
@@ -805,13 +807,15 @@ static void draw_pattern(float x, float y, float w, float h) {
     lvl = tryl < 3 ? tryl : 2;      /* passt nichts komplett: kompakteste Stufe, damit moeglichst viele Stimmen sichtbar sind */
     cw = wn + wi + (lvl < 1 ? wv : 0) + (lvl < 2 ? wf : 0) + gap * (4 - lvl) + 6;
     vis = (int)(avail / cw);
+    const int duo_pat = g_duo && g_ox > 0;                     /* the pattern card of the opened Duo: wide, full height */
+    if (duo_pat && vis < nch) { int v2 = (int)(avail / (cw - 4)); if (v2 > vis) { vis = v2 > nch ? nch : v2; cw = avail / (float)vis; } }       /* one more column when the padding may shrink a little: the columns fill the card */
     if (vis < 1) vis = 1;
     if (vis > nch) vis = nch;
     pat_visch = vis;
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     {                                                         /* iOS (iPhone, iPad, Duo): a finger moves the columns sideways (the number bar above stays for taps = mute) */
         static int pd, ch_start; static float px0;
-        int inside = mx >= x && mx < x + w && my >= y + 34 + 26 && my < y + h;
+        int inside = mx >= x && mx < x + w && my >= y + 34 + (duo_pat ? 52 : 0) + 26 && my < y + h;
         if (mouse_down) {
             if (!pd && inside) { pd = 1; px0 = mx; ch_start = pat_ch0; }
             if (pd) pat_ch0 = ch_start - (int)lroundf((mx - px0) / cw);
@@ -823,11 +827,11 @@ static void draw_pattern(float x, float y, float w, float h) {
 #endif
     if (pat_ch0 > nch - vis) pat_ch0 = nch - vis;
     if (pat_ch0 < 0) pat_ch0 = 0;
-    float used = cw * vis, ox = ax0 + (avail - used) / 2;
+    float used = cw * vis, ox = (duo_pat && nch > vis) ? ax0 : ax0 + (avail - used) / 2;       /* Duo, more channels than columns: the first column sits next to the row numbers */
 
     /* Kanalkoepfe (Scope + Panning je Stimme). Passen nicht alle Stimmen in die Pattern-Spalten, bekommen ALLE Stimmen
      * ein Kopf-Raster mit je max. 16 pro Zeile (oben), das Pattern darunter scrollt mit Nummernleiste. */
-    float hy = y + 34, hh = 0;                 /* the PATTERN view shows the notes only; the scopes have their own tab (SCOPES) */
+    float hy = y + 34 + (duo_pat ? 52.0f : 0.0f), hh = 0;       /* the PATTERN view shows the notes only; the scopes have their own tab (SCOPES); Duo: below the time and Wi-Fi of the system */
     int strip = nch > vis;
     float labh = 16;
     {   /* number bar of the visible columns: click = mute, Ctrl+click = solo */
@@ -2264,7 +2268,7 @@ static void draw_duo_bar(float W, float H) {
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     const float M = 10, BH = 64;
     float by = H - M - BH, cy = by + BH / 2, r = 20, fold = W / 2;
-    card(M, by, W - 2 * M, BH, 0);
+    card_r(M, by, W - 2 * M, BH, 28.0f);                                        /* the corners follow the rounded corners of the Duo display */
     /* left half: previous, play / pause, next, the order slider (nothing over the fold) */
     float bxs[3] = { M + 12, M + 62, M + 112 };
     for (int i = 0; i < 3; i++) {
@@ -2286,20 +2290,24 @@ static void draw_duo_bar(float W, float H) {
             click = 0;
         }
     }
-    /* the order slider fills the left half up to the fold; right behind the fold: LIST, the dice, RPT and RND; at the right edge: AirPlay, open, import */
-    float ri = W - M - 16;
-    float hash_cx = ri - 22, fold_cx = hash_cx - 14 - 8 - 14, air_cx = fold_cx - 14 - 10 - 18;
-    float vx = fold + 8, lw = 58;
-    float room = (air_cx - 18 - 12) - (26 + 12 + lw + 16) - vx;                /* what is left up to the AirPlay button (no volume slider on iOS: the device has its buttons) */
-    int chips = room >= 92;                                                    /* RPT and RND (two chips of 38 and the gaps) next to the dice, when the bar is wide enough */
+    /* the order slider fills the left half up to the fold; right of the fold seven things are spread evenly: LIST, the dice, RPT, RND, AirPlay, open, import (no volume slider on iOS: the device has its buttons) */
+    float ri = W - M - 16, start = fold + 16;
+    const float wl = 58, wd = 26, wc = 38, wa = 36, wb = 28;
+    int chips = 1, nit = 7;
+    float gap = (ri - start - (wl + wd + 2 * wc + wa + 2 * wb)) / (float)(nit - 1);
+    if (gap < 8) { chips = 0; nit = 5; gap = (ri - start - (wl + wd + wa + 2 * wb)) / (float)(nit - 1); }        /* a narrow bar: no RPT / RND here */
     if (g_song && song_norders(g_song) > 1) draw_seek_row(M + 164, cy - 36.0f / 2 + 3, (fold - 8) - (M + 164));      /* 36 = SEEK_ROW */
-    float lx = vx + 8;
-    int hv = hit(lx, cy - 16, lw, 32);
-    rrect(lx, cy - 16, lw, 32, 9, alpha(g_plopen ? VC[2] : (hv ? VC[0] : EDGE), g_plopen ? 0.28f : 0.35f));
-    text(lx + (lw - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
-    if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; if (g_plopen) list_follow = 1; click = 0; }
-    draw_dice(lx + lw + 12 + 13, cy, 13.0f);
-    if (chips) { float qx = lx + lw + 12 + 26 + 10; draw_rpt_chip(qx, cy - 11, 38); draw_rand_chip(qx + 44, cy - 11, 38); }
+    float px = start;
+    float lx = px; px += wl + gap;
+    int hv = hit(lx, cy - 16, wl, 32);
+    rrect(lx, cy - 16, wl, 32, 9, alpha(g_plopen ? VC[2] : (hv ? VC[0] : EDGE), g_plopen ? 0.28f : 0.35f));
+    text(lx + (wl - text_width("LIST", 12)) / 2, cy - 8, 12, g_plopen ? VC[2] : TXT, "LIST");
+    if (clicked(lx, cy - 16, wl, 32)) { g_plopen = !g_plopen; if (g_plopen) list_follow = 1; click = 0; }
+    draw_dice(px + wd / 2, cy, 13.0f); px += wd + gap;
+    if (chips) { draw_rpt_chip(px, cy - 11, wc); px += wc + gap; draw_rand_chip(px, cy - 11, wc); px += wc + gap; }
+    float air_cx = px + wa / 2; px += wa + gap;
+    float fold_cx = px + wb / 2; px += wb + gap;
+    float hash_cx = px + wb / 2;
     draw_import_btn(hash_cx, cy, 14, 1);
     draw_import_btn(fold_cx, cy, 14, 0);
     draw_apple_corner(air_cx, cy, 18);
@@ -2317,7 +2325,7 @@ static void draw_ui_duo(float W, float H) {
     int cl0 = clickx, rcl0 = rclickx;
     g_ox = ox; mx -= ox; clickx -= (int)ox; rclickx -= (int)ox;     /* the right page works in its own coordinates */
     card(0, M, pw - M, Hc - 2 * M, 0);                  /* the pattern card starts at the page edge: the distance to the left cards is the normal 10 */
-    draw_pattern(0, M, pw - M - 84, Hc - 2 * M);          /* 84 free on the right: time and Wi-Fi lie over the card there, the columns end before them */
+    draw_pattern(0, M, pw - M, Hc - 2 * M);               /* the whole card: time and Wi-Fi lie over its top right corner, so the number bar and the rows start below them (draw_pattern) */
     g_ox = 0; mx = mx0; clickx = cl0; rclickx = rcl0;
     draw_duo_bar(W, H);
 #else
@@ -2807,7 +2815,7 @@ static void draw_ui_portrait(float W, float H) {
     float aw = awf - g_sa_r;                                              /* the top cards (header, channels) stay left of the status column of the closed Duo */
     /* ---------------- Kopf */
     float hy = M, hh = 92;
-    card(M, hy, aw, hh, 0);
+    card_r(M, hy, aw, hh, (g_duo || g_sa_r > 0) ? 30.0f : 14.0f);          /* the Duo (open and closed): the corner follows the rounded corner of the display */
     {
         char title[160], sub[200];
         if (g_song) {
@@ -2937,7 +2945,7 @@ static void draw_ui_portrait(float W, float H) {
     /* ---------------- Transport */
     if (!g_duo && !NG_TV) {
         float bx = M, bw = aw;
-        card(bx, by, bw, botH, 0);
+        card_r(bx, by, bw, botH, g_sa_r > 0 ? 28.0f : 14.0f);        /* closed Duo: the bottom corners follow the display */
         float cy = by + botH - BOT / 2, r = 20;
         if (has_seek) draw_seek_row(bx, by + 6, bw);
         float bxs[3] = { bx + 12, bx + 62, bx + 112 };
