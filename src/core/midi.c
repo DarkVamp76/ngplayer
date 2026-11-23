@@ -1,0 +1,486 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Standard MIDI file reader + player on TinySoundFont (src/core/tsf.h, MIT). Desktop only, see midi.h. */
+#include "midi.h"
+#if NG_MIDI
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+#define TSF_IMPLEMENTATION
+#include "tsf.h"
+
+#define NCH 16
+#define MIDI_BLOCK 512
+#define TAIL_SEC 6.0                      /* after the last event the release of the notes may ring on for at most this long */
+
+enum { EV_RESET = 1, EV_TEMPO, EV_NOTEOFF, EV_PROG, EV_CC, EV_BEND, EV_NOTEON };      /* in the order they are handled at one tick (see prio) */
+typedef struct { uint32_t tick, seq, val; uint8_t type, ch, a, b; } Ev;
+
+/* ---------------------------------------------------------------- the reverb and the chorus
+ * TinySoundFont has no effects, so the patched tsf.h hands every channel's CC 91 / 93 share of the voices to two extra buses.
+ * Reverb: Freeverb (Jezar at Dreampoint, public domain): 8 parallel low-pass comb filters + 4 all-pass filters per side.
+ * Chorus: three slowly modulated delay lines per side. */
+#define FR_NCOMB 8
+#define FR_NAP 4
+typedef struct { float *buf; int n, i; float store; } FrComb;
+typedef struct { float *buf; int n, i; } FrAp;
+typedef struct { FrComb comb[2][FR_NCOMB]; FrAp ap[2][FR_NAP]; float feedback, damp; } Reverb;
+typedef struct { float *buf[2]; int n, w; float ph[3]; float rate; } Chorus;
+static const int FR_COMB_T[FR_NCOMB] = { 1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617 }, FR_AP_T[FR_NAP] = { 556, 441, 341, 225 };
+static void reverb_init(Reverb *r, int rate, float room, float damp) {
+    r->feedback = room * 0.28f + 0.7f; r->damp = damp * 0.4f;
+    for (int c = 0; c < 2; c++) {
+        for (int i = 0; i < FR_NCOMB; i++) { FrComb *k = &r->comb[c][i]; k->n = (int)((FR_COMB_T[i] + c * 23) * (double)rate / 44100.0); k->buf = (float *)calloc((size_t)k->n, sizeof(float)); k->i = 0; k->store = 0; }
+        for (int i = 0; i < FR_NAP; i++) { FrAp *k = &r->ap[c][i]; k->n = (int)((FR_AP_T[i] + c * 23) * (double)rate / 44100.0); k->buf = (float *)calloc((size_t)k->n, sizeof(float)); k->i = 0; }
+    }
+}
+static void reverb_free(Reverb *r) {
+    for (int c = 0; c < 2; c++) { for (int i = 0; i < FR_NCOMB; i++) free(r->comb[c][i].buf); for (int i = 0; i < FR_NAP; i++) free(r->ap[c][i].buf); }
+}
+static void reverb_clear(Reverb *r) {
+    for (int c = 0; c < 2; c++) {
+        for (int i = 0; i < FR_NCOMB; i++) { memset(r->comb[c][i].buf, 0, (size_t)r->comb[c][i].n * sizeof(float)); r->comb[c][i].store = 0; }
+        for (int i = 0; i < FR_NAP; i++) memset(r->ap[c][i].buf, 0, (size_t)r->ap[c][i].n * sizeof(float));
+    }
+}
+/* in: interleaved stereo send bus, out: interleaved stereo wet signal (the caller scales it) */
+static void reverb_process(Reverb *r, const float *in, float *out, int n) {
+    const float width = 0.5f, w1 = width * 0.5f + 0.5f, w2 = (1.0f - width) * 0.5f;
+    for (int t = 0; t < n; t++) {
+        float x = (in[2 * t] + in[2 * t + 1]) * 0.015f * 3.0f, o[2];
+        for (int c = 0; c < 2; c++) {
+            float acc = 0;
+            for (int i = 0; i < FR_NCOMB; i++) {
+                FrComb *k = &r->comb[c][i]; float y = k->buf[k->i];
+                k->store = y * (1.0f - r->damp) + k->store * r->damp;
+                k->buf[k->i] = x + k->store * r->feedback; if (++k->i >= k->n) k->i = 0;
+                acc += y;
+            }
+            for (int i = 0; i < FR_NAP; i++) {
+                FrAp *k = &r->ap[c][i]; float b = k->buf[k->i], y = -acc + b;
+                k->buf[k->i] = acc + b * 0.5f; if (++k->i >= k->n) k->i = 0;
+                acc = y;
+            }
+            o[c] = acc;
+        }
+        out[2 * t] = o[0] * w1 + o[1] * w2; out[2 * t + 1] = o[1] * w1 + o[0] * w2;
+    }
+}
+static void chorus_init(Chorus *c, int rate) {
+    c->n = (int)(0.06 * rate); c->w = 0; c->rate = 0.8f;
+    for (int i = 0; i < 2; i++) c->buf[i] = (float *)calloc((size_t)c->n, sizeof(float));
+    c->ph[0] = 0.0f; c->ph[1] = 0.33f; c->ph[2] = 0.66f;
+}
+static void chorus_free(Chorus *c) { free(c->buf[0]); free(c->buf[1]); }
+static void chorus_clear(Chorus *c) { memset(c->buf[0], 0, (size_t)c->n * sizeof(float)); memset(c->buf[1], 0, (size_t)c->n * sizeof(float)); }
+static void chorus_process(Chorus *c, const float *in, float *out, int n, int rate) {
+    for (int t = 0; t < n; t++) {
+        c->buf[0][c->w] = in[2 * t]; c->buf[1][c->w] = in[2 * t + 1];
+        float l = 0, r = 0;
+        for (int v = 0; v < 3; v++) {
+            c->ph[v] += c->rate / (float)rate; if (c->ph[v] >= 1.0f) c->ph[v] -= 1.0f;
+            float d = (0.012f + 0.004f * sinf(6.2831853f * c->ph[v])) * (float)rate, rp = (float)c->w - d; if (rp < 0) rp += (float)c->n;
+            int i0 = (int)rp, i1 = i0 + 1 >= c->n ? 0 : i0 + 1; float fr = rp - (float)i0;
+            float a = c->buf[0][i0] * (1 - fr) + c->buf[0][i1] * fr, b = c->buf[1][i0] * (1 - fr) + c->buf[1][i1] * fr;
+            if (v == 1) { l += b; r += a; } else { l += a; r += b; }                          /* the middle line swaps the sides */
+        }
+        out[2 * t] = l * 0.33f; out[2 * t + 1] = r * 0.33f;
+        if (++c->w >= c->n) c->w = 0;
+    }
+}
+
+
+struct Midi {
+    tsf *f;
+    int rate;
+    Ev *ev; size_t nev;
+    uint64_t *frame;                      /* the time of each event in output frames */
+    size_t next;                          /* the next event to play */
+    uint64_t pos;                         /* frames played */
+    uint64_t tail;                        /* frames played after the last event */
+    double length;
+    MidiInfo info;
+    int notes_ch[NCH];
+    unsigned mute;
+    int prog[NCH], bank[NCH], vol[NCH], pan[NCH];
+    float lvl[NCH];
+    uint32_t *tm_tick; double *tm_sec, *tm_us; size_t ntm;       /* the tempo map: tick, seconds at that tick, microseconds per quarter note */
+    double spt;                           /* SMPTE division: seconds per tick (else 0) */
+    int div, measures;
+    MidiNote *notes; size_t nnotes; double maxdur;
+    Reverb rev; Chorus cho; float rev_level, cho_level;
+    float dry[2 * MIDI_BLOCK], wrev[2 * MIDI_BLOCK], wcho[2 * MIDI_BLOCK], orev[2 * MIDI_BLOCK], ocho[2 * MIDI_BLOCK];
+};
+
+static const char *const GM_NAMES[128] = {
+"Acoustic Grand Piano","Bright Acoustic Piano","Electric Grand Piano","Honky-tonk Piano","Electric Piano 1","Electric Piano 2","Harpsichord","Clavinet",
+"Celesta","Glockenspiel","Music Box","Vibraphone","Marimba","Xylophone","Tubular Bells","Dulcimer",
+"Drawbar Organ","Percussive Organ","Rock Organ","Church Organ","Reed Organ","Accordion","Harmonica","Tango Accordion",
+"Nylon Guitar","Steel Guitar","Jazz Guitar","Clean Guitar","Muted Guitar","Overdriven Guitar","Distortion Guitar","Guitar Harmonics",
+"Acoustic Bass","Fingered Bass","Picked Bass","Fretless Bass","Slap Bass 1","Slap Bass 2","Synth Bass 1","Synth Bass 2",
+"Violin","Viola","Cello","Contrabass","Tremolo Strings","Pizzicato Strings","Orchestral Harp","Timpani",
+"String Ensemble 1","String Ensemble 2","Synth Strings 1","Synth Strings 2","Choir Aahs","Voice Oohs","Synth Voice","Orchestra Hit",
+"Trumpet","Trombone","Tuba","Muted Trumpet","French Horn","Brass Section","Synth Brass 1","Synth Brass 2",
+"Soprano Sax","Alto Sax","Tenor Sax","Baritone Sax","Oboe","English Horn","Bassoon","Clarinet",
+"Piccolo","Flute","Recorder","Pan Flute","Blown Bottle","Shakuhachi","Whistle","Ocarina",
+"Square Lead","Sawtooth Lead","Calliope Lead","Chiff Lead","Charang Lead","Voice Lead","Fifths Lead","Bass + Lead",
+"New Age Pad","Warm Pad","Polysynth Pad","Choir Pad","Bowed Pad","Metallic Pad","Halo Pad","Sweep Pad",
+"Rain FX","Soundtrack FX","Crystal FX","Atmosphere FX","Brightness FX","Goblins FX","Echoes FX","Sci-Fi FX",
+"Sitar","Banjo","Shamisen","Koto","Kalimba","Bagpipe","Fiddle","Shanai",
+"Tinkle Bell","Agogo","Steel Drums","Woodblock","Taiko Drum","Melodic Tom","Synth Drum","Reverse Cymbal",
+"Guitar Fret Noise","Breath Noise","Seashore","Bird Tweet","Telephone Ring","Helicopter","Applause","Gunshot" };
+const char *midi_gm_name(int program, int drum) { return drum ? "Drum Kit" : (program >= 0 && program < 128 ? GM_NAMES[program] : ""); }
+
+
+/* ---------------------------------------------------------------- the SoundFont */
+static char g_sf_set[512];
+static char g_sf_found[512];
+static tsf *g_base;                       /* the loaded SoundFont, shared by all songs (tsf_copy shares the samples) */
+
+void midi_set_soundfont(const char *path) {
+    snprintf(g_sf_set, sizeof g_sf_set, "%s", path ? path : "");
+    if (g_base) { tsf_close(g_base); g_base = NULL; }
+    g_sf_found[0] = 0;
+}
+static int exists(const char *p) { return p && p[0] && access(p, R_OK) == 0; }
+static void exe_dir(char *out, size_t cap) {
+    out[0] = 0;
+#ifdef __EMSCRIPTEN__
+    (void)cap; return;
+#elif defined(__APPLE__)
+    char b[1024]; uint32_t n = sizeof b;
+    if (_NSGetExecutablePath(b, &n) != 0) return;
+#else
+    char b[1024]; ssize_t n = readlink("/proc/self/exe", b, sizeof b - 1);
+    if (n <= 0) return; b[n] = 0;
+#endif
+    char *s = strrchr(b, '/'); if (s) *s = 0;
+    snprintf(out, cap, "%s", b);
+}
+const char *midi_soundfont_path(void) {
+    if (g_sf_found[0]) return g_sf_found;
+    char c[640], d[640]; const char *h = getenv("HOME"), *e = getenv("NGPLAYER_SOUNDFONT");
+#ifdef __EMSCRIPTEN__
+    if (exists("/soundfont/GeneralUser-GS.sf2")) { snprintf(g_sf_found, sizeof g_sf_found, "%s", "/soundfont/GeneralUser-GS.sf2"); return g_sf_found; }     /* the page fetches it into the in-memory file system */
+#endif
+    if (g_sf_set[0] && exists(g_sf_set)) { snprintf(g_sf_found, sizeof g_sf_found, "%s", g_sf_set); return g_sf_found; }
+    if (exists(e)) { snprintf(g_sf_found, sizeof g_sf_found, "%s", e); return g_sf_found; }
+    exe_dir(d, sizeof d);
+    const char *name = "GeneralUser-GS.sf2";
+    const char *dirs[] = { "%s/../share/ngplayer", "%s/../Resources", "%s", NULL };      /* AppImage / install prefix, the Mac app bundle, next to the program */
+    for (int i = 0; dirs[i] && d[0]; i++) {
+        char dd[700]; snprintf(dd, sizeof dd, dirs[i], d);
+        snprintf(c, sizeof c, "%s/%s", dd, name);
+        if (exists(c)) { snprintf(g_sf_found, sizeof g_sf_found, "%s", c); return g_sf_found; }
+    }
+    static const char *const fixed[] = { "/usr/local/share/ngplayer/GeneralUser-GS.sf2", "/usr/share/ngplayer/GeneralUser-GS.sf2",
+        "/usr/share/soundfonts/GeneralUser-GS.sf2", "/usr/share/soundfonts/default.sf2", "/usr/share/soundfonts/FluidR3_GM.sf2", NULL };
+    if (h) { snprintf(c, sizeof c, "%s/.local/share/ngplayer/%s", h, name); if (exists(c)) { snprintf(g_sf_found, sizeof g_sf_found, "%s", c); return g_sf_found; } }
+    for (int i = 0; fixed[i]; i++) if (exists(fixed[i])) { snprintf(g_sf_found, sizeof g_sf_found, "%s", fixed[i]); return g_sf_found; }
+    return NULL;
+}
+static tsf *soundfont(char *err, size_t cap) {
+    if (g_base) return g_base;
+    const char *p = midi_soundfont_path();
+    if (!p) { snprintf(err, cap, "no SoundFont found (GeneralUser-GS.sf2; or set NGPLAYER_SOUNDFONT)"); return NULL; }
+    g_base = tsf_load_filename(p);
+    if (!g_base) snprintf(err, cap, "cannot read the SoundFont %s", p);
+    return g_base;
+}
+
+/* ---------------------------------------------------------------- the file */
+static int vlq(const uint8_t *b, size_t n, size_t *p, uint32_t *v) {
+    uint32_t r = 0;
+    for (int i = 0; i < 4; i++) {
+        if (*p >= n) return 0;
+        uint8_t c = b[(*p)++]; r = (r << 7) | (c & 0x7F);
+        if (!(c & 0x80)) { *v = r; return 1; }
+    }
+    return 0;
+}
+static const uint8_t *smf_start(const uint8_t *b, size_t n, size_t *len) {
+    if (n >= 14 && !memcmp(b, "MThd", 4)) { *len = n; return b; }
+    if (n >= 20 && !memcmp(b, "RIFF", 4) && !memcmp(b + 8, "RMID", 4)) {             /* RIFF RMID: a "data" chunk holds the file */
+        size_t p = 12;
+        while (p + 8 <= n) {
+            uint32_t sz = (uint32_t)b[p + 4] | (uint32_t)b[p + 5] << 8 | (uint32_t)b[p + 6] << 16 | (uint32_t)b[p + 7] << 24;
+            if (!memcmp(b + p, "data", 4) && p + 8 + 14 <= n && !memcmp(b + p + 8, "MThd", 4)) { *len = n - (p + 8); if (sz < *len) *len = sz; return b + p + 8; }
+            p += 8 + (size_t)sz + (sz & 1);
+        }
+    }
+    return NULL;
+}
+int midi_probe(const uint8_t *b, size_t n) { size_t l; return smf_start(b, n, &l) != NULL; }
+
+static void evpush(Midi *m, size_t *cap, uint32_t tick, uint8_t type, uint8_t ch, uint8_t a, uint8_t bb, uint32_t val, uint32_t *seq) {
+    if (m->nev == *cap) { *cap = *cap ? *cap * 2 : 4096; m->ev = (Ev *)realloc(m->ev, *cap * sizeof(Ev)); }
+    Ev *e = &m->ev[m->nev++]; e->tick = tick; e->type = type; e->ch = ch; e->a = a; e->b = bb; e->val = val; e->seq = (*seq)++;
+}
+static void textcpy(char *dst, size_t cap, const uint8_t *s, uint32_t n) {
+    size_t o = 0; for (uint32_t i = 0; i < n && o + 1 < cap; i++) dst[o++] = (s[i] >= 32 && s[i] < 127) ? (char)s[i] : (s[i] >= 0xA0 ? (char)s[i] : ' ');
+    while (o > 0 && dst[o - 1] == ' ') o--; dst[o] = 0;
+    size_t k = 0; while (dst[k] == ' ') k++; if (k) memmove(dst, dst + k, strlen(dst + k) + 1);
+}
+static int prio(const Ev *e) { return e->type; }             /* EV_RESET < tempo < note off < program < controller < bend < note on */
+static int evcmp(const void *x, const void *y) {
+    const Ev *a = (const Ev *)x, *b = (const Ev *)y;
+    if (a->tick != b->tick) return a->tick < b->tick ? -1 : 1;
+    if (prio(a) != prio(b)) return prio(a) < prio(b) ? -1 : 1;
+    return a->seq < b->seq ? -1 : a->seq > b->seq;
+}
+
+/* ---------------------------------------------------------------- the channels */
+static void chan_reset(Midi *m, int ch) {
+    tsf_channel_midi_control(m->f, ch, 121, 0);
+    tsf_channel_set_pitchwheel(m->f, ch, 8192);
+    tsf_channel_sounds_off_all(m->f, ch);
+    tsf_channel_set_bank(m->f, ch, 0);
+    tsf_channel_set_presetnumber(m->f, ch, 0, ch == 9);
+    tsf_channel_midi_control(m->f, ch, 7, 100); tsf_channel_midi_control(m->f, ch, 10, 64);      /* the General MIDI defaults: volume 100, pan centre */
+    m->prog[ch] = 0; m->bank[ch] = 0; m->vol[ch] = 100; m->pan[ch] = 64;
+}
+static void all_reset(Midi *m) { for (int c = 0; c < NCH; c++) chan_reset(m, c); }
+
+static void apply(Midi *m, const Ev *e, int with_notes) {
+    int c = e->ch;
+    switch (e->type) {
+    case EV_RESET: all_reset(m); break;
+    case EV_NOTEON:
+        if (!with_notes || ((m->mute >> c) & 1)) break;
+        tsf_channel_note_on(m->f, c, e->a, e->b / 127.0f);
+        if (e->b / 127.0f > m->lvl[c]) m->lvl[c] = e->b / 127.0f;
+        break;
+    case EV_NOTEOFF: if (with_notes) tsf_channel_note_off(m->f, c, e->a); break;
+    case EV_PROG:
+        m->prog[c] = e->a;
+        tsf_channel_set_presetnumber(m->f, c, e->a, c == 9);
+        break;
+    case EV_CC:
+        if (e->a == 0 || e->a == 32) m->bank[c] = e->a == 0 ? e->b : m->bank[c];
+        if (e->a == 7) m->vol[c] = e->b;
+        if (e->a == 10) m->pan[c] = e->b;
+        tsf_channel_midi_control(m->f, c, e->a, e->b);
+        break;
+    case EV_BEND: tsf_channel_set_pitchwheel(m->f, c, e->a | (e->b << 7)); break;
+    }
+}
+
+/* ---------------------------------------------------------------- open */
+Midi *midi_open(const uint8_t *buf, size_t total, int rate, char *err, size_t errcap) {
+    size_t n; const uint8_t *b = smf_start(buf, total, &n);
+    if (!b) { snprintf(err, errcap, "not a MIDI file"); return NULL; }
+    int fmt = b[8] << 8 | b[9], ntrk = b[10] << 8 | b[11], div = b[12] << 8 | b[13];
+    if (div == 0) { snprintf(err, errcap, "bad MIDI time division"); return NULL; }
+    tsf *base = soundfont(err, errcap);
+    if (!base) return NULL;
+    Midi *m = (Midi *)calloc(1, sizeof *m);
+    m->rate = rate; m->info.format = fmt; m->info.ntracks = ntrk; m->info.division = div; m->info.tempo_bpm = 120;
+    size_t cap = 0, p = 8 + (b[4] << 24 | b[5] << 16 | b[6] << 8 | b[7]); uint32_t seq = 0;
+    int got_title = 0, got_tempo = 0;
+    for (int t = 0; t < ntrk && p + 8 <= n; t++) {
+        uint32_t len = (uint32_t)b[p + 4] << 24 | (uint32_t)b[p + 5] << 16 | (uint32_t)b[p + 6] << 8 | b[p + 7];
+        if (memcmp(b + p, "MTrk", 4)) { p += 8 + (size_t)len; t--; continue; }          /* an unknown chunk: skip it */
+        size_t q = p + 8, end = q + len; if (end > n) end = n; p = end;
+        uint32_t tick = 0; uint8_t run = 0;
+        while (q < end) {
+            uint32_t dt; if (!vlq(b, end, &q, &dt)) break;
+            tick += dt; if (q >= end) break;
+            uint8_t st = b[q];
+            if (st < 0x80) { if (!run) break; st = run; } else { q++; if (st < 0xF0) run = st; }
+            if (st == 0xFF) {
+                if (q >= end) break;
+                uint8_t mt = b[q++]; uint32_t ml; if (!vlq(b, end, &q, &ml) || q + ml > end) break;
+                if (mt == 0x51 && ml == 3) { uint32_t us = (uint32_t)b[q] << 16 | b[q + 1] << 8 | b[q + 2]; if (us) { evpush(m, &cap, tick, EV_TEMPO, 0, 0, 0, us, &seq); if (!got_tempo) { got_tempo = 1; m->info.tempo_bpm = (int)(60000000.0 / us + 0.5); } } }
+                else if (mt == 0x03 && !got_title && tick == 0) { textcpy(m->info.title, sizeof m->info.title, b + q, ml); if (m->info.title[0]) got_title = 1; }
+                else if (mt == 0x02 && !m->info.copyright[0]) textcpy(m->info.copyright, sizeof m->info.copyright, b + q, ml);
+                else if (mt == 0x2F) { q += ml; break; }
+                q += ml;
+            } else if (st == 0xF0 || st == 0xF7) {
+                uint32_t sl; if (!vlq(b, end, &q, &sl) || q + sl > end) break;
+                const uint8_t *d = b + q;
+                if (st == 0xF0) {                                                       /* the resets: General MIDI / GM2, Roland GS, Yamaha XG */
+                    if ((sl >= 5 && d[0] == 0x7E && d[2] == 0x09 && (d[3] == 0x01 || d[3] == 0x03)) ||
+                        (sl >= 10 && d[0] == 0x41 && d[2] == 0x42 && d[3] == 0x12 && d[4] == 0x40 && d[5] == 0x00 && d[6] == 0x7F) ||
+                        (sl >= 8 && d[0] == 0x43 && d[2] == 0x4C && d[3] == 0x00 && d[4] == 0x00 && d[5] == 0x7E))
+                        evpush(m, &cap, tick, EV_RESET, 0, 0, 0, 0, &seq);
+                }
+                q += sl;
+            } else if (st >= 0x80 && st < 0xF0) {
+                int two = !((st & 0xF0) == 0xC0 || (st & 0xF0) == 0xD0);
+                if (q + (two ? 2 : 1) > end) break;
+                uint8_t d1 = b[q++] & 0x7F, d2 = two ? b[q++] & 0x7F : 0, ch = st & 15;
+                switch (st & 0xF0) {
+                case 0x80: evpush(m, &cap, tick, EV_NOTEOFF, ch, d1, 0, 0, &seq); break;
+                case 0x90: if (d2) { evpush(m, &cap, tick, EV_NOTEON, ch, d1, d2, 0, &seq); m->notes_ch[ch]++; m->info.notes++; } else evpush(m, &cap, tick, EV_NOTEOFF, ch, d1, 0, 0, &seq); break;
+                case 0xB0: evpush(m, &cap, tick, EV_CC, ch, d1, d2, 0, &seq); break;
+                case 0xC0: evpush(m, &cap, tick, EV_PROG, ch, d1, 0, 0, &seq); break;
+                case 0xE0: evpush(m, &cap, tick, EV_BEND, ch, d1, d2, 0, &seq); break;
+                }
+            } else break;                                                               /* a system message that has no place in a file */
+        }
+    }
+    if (!m->info.notes) { snprintf(err, errcap, "the MIDI file has no notes"); free(m->ev); free(m); return NULL; }
+    qsort(m->ev, m->nev, sizeof(Ev), evcmp);
+    /* the time of every event: walk the tempo map */
+    m->frame = (uint64_t *)malloc(m->nev * sizeof(uint64_t));
+    double sec = 0, tempo = 500000.0, spt = (div & 0x8000) ? 1.0 / ((double)(256 - (div >> 8)) * (double)(div & 0xFF)) : 0;       /* SMPTE: seconds per tick */
+    uint32_t lt = 0;
+    m->spt = spt; m->div = (div & 0x8000) ? 480 : div;
+    m->tm_tick = (uint32_t *)malloc((m->nev + 1) * sizeof(uint32_t)); m->tm_sec = (double *)malloc((m->nev + 1) * sizeof(double)); m->tm_us = (double *)malloc((m->nev + 1) * sizeof(double));
+    m->tm_tick[0] = 0; m->tm_sec[0] = 0; m->tm_us[0] = tempo; m->ntm = 1;
+    for (size_t i = 0; i < m->nev; i++) {
+        double d = (double)(m->ev[i].tick - lt);
+        sec += (div & 0x8000) ? d * spt : d * tempo / 1e6 / (double)div;
+        lt = m->ev[i].tick;
+        if (m->ev[i].type == EV_TEMPO) {
+            tempo = (double)m->ev[i].val;
+            if (m->ntm && m->tm_tick[m->ntm - 1] == m->ev[i].tick) m->tm_us[m->ntm - 1] = tempo;            /* a tempo change at the same tick replaces the earlier one */
+            else { m->tm_tick[m->ntm] = m->ev[i].tick; m->tm_sec[m->ntm] = sec; m->tm_us[m->ntm] = tempo; m->ntm++; }
+        }
+        m->frame[i] = (uint64_t)(sec * rate + 0.5);
+    }
+    m->length = sec;
+    uint32_t last_note_tick = 0;
+    for (size_t i = 0; i < m->nev; i++) if ((m->ev[i].type == EV_NOTEON || m->ev[i].type == EV_NOTEOFF) && m->ev[i].tick > last_note_tick) last_note_tick = m->ev[i].tick;
+    { uint32_t mt = (uint32_t)m->div * 4; m->measures = (int)(last_note_tick / mt) + 1; }
+    /* the notes: pair every note on with its note off (the same channel and key; an overlap closes the earlier note) */
+    m->notes = (MidiNote *)malloc((size_t)m->info.notes * sizeof(MidiNote));
+    { static int open[NCH][128]; memset(open, 0, sizeof open);                               /* index + 1 of the note that is still sounding */
+      for (size_t i = 0; i < m->nev; i++) {
+        const Ev *e = &m->ev[i]; double t = (double)m->frame[i] / rate;
+        if (e->type == EV_NOTEON && m->nnotes < (size_t)m->info.notes) {
+            int *o = &open[e->ch][e->a];
+            if (*o) m->notes[*o - 1].t1 = t;
+            MidiNote *nt = &m->notes[m->nnotes++]; nt->t0 = t; nt->t1 = m->length; nt->ch = e->ch; nt->key = e->a; nt->vel = e->b;
+            *o = (int)m->nnotes;
+        } else if (e->type == EV_NOTEOFF) {
+            int *o = &open[e->ch][e->a];
+            if (*o) { m->notes[*o - 1].t1 = t; double d = t - m->notes[*o - 1].t0; if (d > m->maxdur) m->maxdur = d; *o = 0; }
+        }
+      }
+      for (size_t i = 0; i < m->nnotes; i++) { double d = m->notes[i].t1 - m->notes[i].t0; if (d > m->maxdur) m->maxdur = d; } }
+    m->f = tsf_copy(base);
+    tsf_set_output(m->f, TSF_STEREO_INTERLEAVED, rate, -9.0f);
+    tsf_set_max_voices(m->f, 256);
+    { const char *e = getenv("NGPLAYER_REVERB"); m->rev_level = e ? (float)atof(e) : 0.22f; e = getenv("NGPLAYER_CHORUS"); m->cho_level = e ? (float)atof(e) : 0.6f; }
+    reverb_init(&m->rev, rate, 0.7f, 0.5f); chorus_init(&m->cho, rate);
+    all_reset(m);
+    return m;
+}
+void midi_close(Midi *m) {
+    if (!m) return;
+    if (m->f) tsf_close(m->f);
+    if (m->rev.comb[0][0].buf) reverb_free(&m->rev);
+    if (m->cho.buf[0]) chorus_free(&m->cho);
+    free(m->ev); free(m->frame); free(m->tm_tick); free(m->tm_sec); free(m->tm_us); free(m->notes); free(m);
+}
+
+/* ---------------------------------------------------------------- play */
+int midi_render(Midi *m, int16_t *out, int frames) {
+    int done = 0;
+    while (done < frames) {
+        while (m->next < m->nev && m->frame[m->next] <= m->pos) { apply(m, &m->ev[m->next], 1); m->next++; }
+        int chunk = frames - done;
+        if (m->next < m->nev) { uint64_t d = m->frame[m->next] - m->pos; if (d < (uint64_t)chunk) chunk = (int)d; }
+        else {
+            if (m->tail >= (uint64_t)(TAIL_SEC * m->rate) || tsf_active_voice_count(m->f) == 0) break;      /* the end: nothing left to ring */
+            if ((uint64_t)chunk > (uint64_t)(TAIL_SEC * m->rate) - m->tail) chunk = (int)((uint64_t)(TAIL_SEC * m->rate) - m->tail);
+        }
+        if (chunk < 1) chunk = 1;
+        for (int part = 0; part < chunk; part += MIDI_BLOCK) {
+            int k = chunk - part < MIDI_BLOCK ? chunk - part : MIDI_BLOCK;
+            memset(m->wrev, 0, (size_t)k * 8); memset(m->wcho, 0, (size_t)k * 8);
+            m->f->wetRev = m->wrev; m->f->wetCho = m->wcho;
+            tsf_render_float(m->f, m->dry, k, 0);
+            reverb_process(&m->rev, m->wrev, m->orev, k);
+            chorus_process(&m->cho, m->wcho, m->ocho, k, m->rate);
+            int16_t *o = out + 2 * (size_t)(done + part);
+            for (int i = 0; i < 2 * k; i++) {
+                float y = (m->dry[i] + m->orev[i] * m->rev_level + m->ocho[i] * m->cho_level) * 32767.0f, a = y < 0 ? -y : y;
+                if (a > 24000.0f) { a = 24000.0f + 8767.0f * tanhf((a - 24000.0f) / 8767.0f); y = y < 0 ? -a : a; }          /* a soft limiter: hot files bend over instead of clipping */
+                o[i] = (int16_t)y;
+            }
+        }
+        m->pos += (uint64_t)chunk; done += chunk;
+        if (m->next >= m->nev) m->tail += (uint64_t)chunk;
+    }
+    if (done) { float k = (float)pow(0.85, (double)done / m->rate * 20.0); for (int c = 0; c < NCH; c++) m->lvl[c] *= k; }
+    if (done < frames) memset(out + 2 * (size_t)done, 0, (size_t)(frames - done) * 4);
+    return done;
+}
+void midi_set_mute(Midi *m, unsigned mask) {
+    unsigned off = mask & ~m->mute; m->mute = mask;
+    for (int c = 0; c < NCH; c++) if ((off >> c) & 1) tsf_channel_sounds_off_all(m->f, c);
+}
+void midi_seek(Midi *m, double sec) {
+    if (sec < 0) sec = 0;
+    uint64_t target = (uint64_t)(sec * m->rate);
+    for (int c = 0; c < NCH; c++) tsf_channel_sounds_off_all(m->f, c);
+    all_reset(m);
+    size_t i = 0;
+    while (i < m->nev && m->frame[i] <= target) { apply(m, &m->ev[i], 0); i++; }
+    m->next = i; m->pos = target; m->tail = 0;
+    for (int c = 0; c < NCH; c++) m->lvl[c] = 0;
+    reverb_clear(&m->rev); chorus_clear(&m->cho);
+}
+double midi_length(const Midi *m) { return m->length; }
+int midi_measures(const Midi *m) { return m->measures; }
+int midi_division(const Midi *m) { return m->div; }
+static double tick_at_sec(const Midi *m, double sec) {
+    size_t lo = 0, hi = m->ntm;                                               /* the last tempo entry that starts at or before sec */
+    while (hi - lo > 1) { size_t mid = (lo + hi) / 2; if (m->tm_sec[mid] <= sec) lo = mid; else hi = mid; }
+    return m->spt ? sec / m->spt : (double)m->tm_tick[lo] + (sec - m->tm_sec[lo]) * 1e6 * m->div / m->tm_us[lo];
+}
+double midi_sec_at_tick(const Midi *m, double tick) {
+    size_t lo = 0, hi = m->ntm;
+    while (hi - lo > 1) { size_t mid = (lo + hi) / 2; if ((double)m->tm_tick[mid] <= tick) lo = mid; else hi = mid; }
+    return m->spt ? tick * m->spt : m->tm_sec[lo] + (tick - (double)m->tm_tick[lo]) * m->tm_us[lo] / 1e6 / m->div;
+}
+double midi_tick(const Midi *m) { return tick_at_sec(m, (double)m->pos / m->rate); }
+int midi_notes_in(const Midi *m, double t0, double t1, MidiNote *out, int max) {
+    size_t lo = 0, hi = m->nnotes; double from = t0 - m->maxdur;                  /* a note that started before t0 may still sound: start at t0 - the longest note */
+    while (lo < hi) { size_t mid = (lo + hi) / 2; if (m->notes[mid].t0 < from) lo = mid + 1; else hi = mid; }
+    int n = 0;
+    for (size_t i = lo; i < m->nnotes && m->notes[i].t0 <= t1 && n < max; i++) if (m->notes[i].t1 >= t0) out[n++] = m->notes[i];
+    return n;
+}
+double midi_position(const Midi *m) { return (double)m->pos / m->rate; }
+void midi_info(const Midi *m, MidiInfo *out) { *out = m->info; }
+int  midi_chan_program(const Midi *m, int c) { return m->prog[c & 15]; }
+int  midi_chan_bank(const Midi *m, int c) { return m->bank[c & 15]; }
+int  midi_chan_is_drum(int c) { return c == 9; }
+float midi_chan_level(const Midi *m, int c) { return m->lvl[c & 15]; }
+int  midi_chan_volume(const Midi *m, int c) { return m->vol[c & 15]; }
+int  midi_chan_pan(const Midi *m, int c) { return m->pan[c & 15]; }
+int  midi_chan_notes(const Midi *m, int c) { return m->notes_ch[c & 15]; }
+
+#else  /* NG_MIDI == 0: the iOS / tvOS apps (stubs: the calls in song.c are dead code there) */
+int midi_probe(const uint8_t *b, size_t n) { (void)b; (void)n; return 0; }
+void midi_set_soundfont(const char *p) { (void)p; }
+const char *midi_soundfont_path(void) { return 0; }
+Midi *midi_open(const uint8_t *b, size_t n, int r, char *e, size_t c) { (void)b; (void)n; (void)r; (void)e; (void)c; return 0; }
+void midi_close(Midi *m) { (void)m; }
+int midi_render(Midi *m, int16_t *o, int f) { (void)m; (void)o; (void)f; return 0; }
+void midi_seek(Midi *m, double s) { (void)m; (void)s; }
+double midi_length(const Midi *m) { (void)m; return 0; }
+double midi_position(const Midi *m) { (void)m; return 0; }
+void midi_info(const Midi *m, MidiInfo *o) { (void)m; (void)o; }
+int midi_chan_program(const Midi *m, int c) { (void)m; (void)c; return 0; }
+int midi_chan_bank(const Midi *m, int c) { (void)m; (void)c; return 0; }
+int midi_chan_is_drum(int c) { return c == 9; }
+float midi_chan_level(const Midi *m, int c) { (void)m; (void)c; return 0; }
+int midi_chan_volume(const Midi *m, int c) { (void)m; (void)c; return 0; }
+int midi_chan_pan(const Midi *m, int c) { (void)m; (void)c; return 64; }
+int midi_chan_notes(const Midi *m, int c) { (void)m; (void)c; return 0; }
+void midi_set_mute(Midi *m, unsigned x) { (void)m; (void)x; }
+const char *midi_gm_name(int p, int d) { (void)p; (void)d; return ""; }
+int midi_measures(const Midi *m) { (void)m; return 1; }
+int midi_division(const Midi *m) { (void)m; return 480; }
+double midi_tick(const Midi *m) { (void)m; return 0; }
+double midi_sec_at_tick(const Midi *m, double t) { (void)m; (void)t; return 0; }
+int midi_notes_in(const Midi *m, double a, double b, MidiNote *o, int x) { (void)m; (void)a; (void)b; (void)o; (void)x; return 0; }
+#endif

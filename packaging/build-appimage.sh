@@ -27,6 +27,9 @@ if [ -n "$SDL2LIB" ] && grep -q "missing in SDL3 library" "$SDL2LIB" 2>/dev/null
     echo "sdl2-compat found, bundling $SDL3LIB"
 fi
 
+sh tools/fetch-soundfont.sh                                        # the SoundFont for MIDI files goes into the AppImage (share/ngplayer, found next to the program)
+mkdir -p "$WORK/AppDir/usr/share/ngplayer"
+cp assets/soundfont/GeneralUser-GS.sf2 assets/soundfont/LICENSE-GeneralUser-GS.txt "$WORK/AppDir/usr/share/ngplayer/"
 cp assets/ngplayer-256.png "$WORK/ngplayer.png"
 cp assets/ngplayer.svg "$WORK/ngplayer.svg"
 cd "$WORK"

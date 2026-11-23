@@ -23,3 +23,11 @@
   processor (`src/core/adgold.*`) is modelled after the DOSBox Staging emulation (GPL-2.0-or-later).
 - **aPlib / LZH unpackers** (`src/core/a2m_unpack.c`): the aPlib LZ77 format by Joergen Ibsen and the static Huffman scheme of Haruhiko
   Okumura's public domain `ar002`, written from the published algorithms.
+- **TinySoundFont** (`src/core/tsf.h`, MIT, Copyright (C) 2017-2025 Bernhard Schelling, based on SFZero by Steve Folta) is the SoundFont (SF2)
+  synthesizer behind the MIDI files (`src/core/midi.c`). The licence text is in the header. https://github.com/schellingb/TinySoundFont
+  Changed for ngPlayer (marked "ngPlayer" in the file): two extra stereo buses and the per-channel reverb / chorus sends (CC 91 / 93), which
+  the original does not have.
+- **Freeverb** (Jezar at Dreampoint, public domain) is the reverb of the MIDI files (written from the published algorithm in `src/core/midi.c`).
+- **GeneralUser GS 2.0.3** (S. Christian Collins, GeneralUser GS License v2.0) is the SoundFont the desktop packages ship for MIDI files
+  (`GeneralUser-GS.sf2`; use without restriction, private or commercial, in software projects too; the author notes that he cannot be
+  fully certain of the origin of every sample). The licence text is in `documentation/LICENSE.txt` of https://github.com/mrbumpy409/GeneralUser-GS

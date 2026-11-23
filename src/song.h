@@ -56,3 +56,15 @@ const char *song_fx_name(const Song *s, const SongCell *c, int *is_vol);
 #define SONG_INFO_LINES 6
 typedef struct { char title[48], format[56], tracker[64], voice_unit[16]; int voices; char extra[SONG_INFO_LINES][88]; int nextra; } SongInfo;
 void song_info(const Song *s, SongInfo *out);
+
+/* ---- MIDI files (desktop and web): channels, notes for the roll, fast seeking. The view grid is 4/4 measures of 16 rows (orders = measures). ---- */
+int  song_is_midi(const Song *s);
+typedef struct { float level; int program, bank, drum, volume, pan, used; } SongMidiChan;      /* level 0..1, CC 7, CC 10 (0..127), used = the file has notes on it */
+void song_midi_chan(const Song *s, int ch, SongMidiChan *out);
+typedef struct { double t0, t1; uint8_t ch, key, vel; } SongMidiNote;
+int  song_midi_notes(const Song *s, double t0, double t1, SongMidiNote *out, int max);          /* the notes that sound at some time in [t0, t1] */
+double song_midi_grid_sec(const Song *s, double grid_row);        /* seconds at the grid position order * 16 + row (+ fraction) */
+double song_midi_length(const Song *s);
+int  song_midi_seek_order(Song *s, int order, double *sec);        /* 1 = done (sec = where it is now); the song is not re-opened */
+int  song_midi_seek_by(Song *s, double delta_sec, double *sec);    /* 1 = done, 2 = past the end (the caller goes to the next track) */
+const char *song_midi_program_name(int program, int drum);      /* "Acoustic Grand Piano", ... ("Drum Kit" for the drum channel) */

@@ -10,6 +10,7 @@
 #define _DEFAULT_SOURCE
 #include "font_data.h"
 #include "song.h"
+#include "midi.h"
 #include "tfmx.h"
 #include "net.h"
 #include "version.h"
@@ -202,6 +203,7 @@ static int is_mod_name(const char *n) {
     if (!d) return 0;
     static const char *ext[] = { ".mod", ".s3m", ".stm", ".ptm", ".ult", ".669", ".mtm", ".med", ".psm", ".far", ".mdl", ".mmd0", ".mmd1", ".mmd2", ".mmd3", ".xm", ".it", ".dmf", ".amf", ".dsm", ".sfx", ".ahx", ".dbm", ".dtm", ".amd", ".mad", ".a2m", ".a2t", ".hsq", ".sqx", ".sdb", ".agd", ".ha2", ".rad", ".lds", ".ld0", NULL };
     for (int i = 0; ext[i]; i++) if (!strcasecmp(d, ext[i])) return 1;
+    if (NG_MIDI && (!strcasecmp(d, ".mid") || !strcasecmp(d, ".midi") || !strcasecmp(d, ".kar") || !strcasecmp(d, ".rmi"))) return 1;      /* MIDI files (through the SoundFont) */
     return 0;
 }
 
@@ -580,7 +582,8 @@ static void view_switch(float x, float y, float w) {
         float xx = bx + t * cw;
         int on = (i == g_vmode), hv = hit(xx, by, cw - 4, 20);
         rrect(xx, by, cw - 4, 20, 6, on ? alpha(VC[2], 0.25f) : alpha(FAINT, hv ? 0.30f : 0.16f));
-        text(xx + (cw - 4 - text_width(NAME[i], 11)) / 2, by + 4, 11, on ? VC[2] : alpha(DIM, 0.9f), NAME[i]);
+        const char *tn = (i == 0 && g_song && song_is_midi(g_song)) ? "ROLL" : NAME[i];                     /* MIDI: the piano roll */
+        text(xx + (cw - 4 - text_width(tn, 11)) / 2, by + 4, 11, on ? VC[2] : alpha(DIM, 0.9f), tn);
         if (clicked(xx, by, cw - 4, 20)) { g_vmode = i; view_persist(); click = 0; }
     }
 }
@@ -770,8 +773,106 @@ static void draw_scopes(float x, float y, float w, float h) {
 }
 
 
+/* ---------------------------------------------------------------- MIDI: the piano roll (instead of the pattern) and the heard time */
+static col midi_hue(float h) {                          /* a colour per MIDI channel: hue 0..1, full saturation, a little darker than white */
+    float h6 = (h - floorf(h)) * 6.0f, f = h6 - floorf(h6), q = 1.0f - f; int i = (int)h6 % 6; const float v = 0.95f;
+    float r = 0, g = 0, b = 0;
+    switch (i) { case 0: r = v; g = v * f; break; case 1: r = v * q; g = v; break; case 2: g = v; b = v * f; break; case 3: g = v * q; b = v; break; case 4: r = v * f; b = v; break; default: r = v; b = v * q; }
+    return C(r, g, b, 1);
+}
+static double midi_heard_sec(void) { return g_song && song_is_midi(g_song) ? song_midi_grid_sec(g_song, (double)g_view.order * 16.0 + (double)g_pos) : 0.0; }
+static void midi_keyname(char *o, int k) {
+    static const char *const KN[12] = { "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-" };
+    int oct = k / 12 - 1; if (oct < 0) oct = 0;
+    snprintf(o, 4, "%s%d", KN[k % 12], oct % 10);
+}
+static void draw_midi_roll(float x, float y, float w, float h) {
+    static SongMidiNote nb[8192];
+    static float klo = 48, khi = 84;
+    const int duo_pat = g_duo && g_ox > 0;
+    if (!g_portrait) text(x + 18, y + 12, 12, DIM, "PIANO ROLL");
+    view_switch(x, y, w);
+    if (!g_song) { text(x + 18, y + 44, 14, FAINT, "No song loaded."); return; }
+    if (!g_view_valid) return;
+    char hb[64]; snprintf(hb, sizeof hb, "BAR %d / %d  BEAT %d", g_view.order + 1, song_norders(g_song), g_view.row / 4 + 1);
+    if (g_portrait) { if (text_width(hb, 12) > w - 258 - 26) snprintf(hb, sizeof hb, "BAR %d / %d", g_view.order + 1, song_norders(g_song)); text(x + 18, y + 12, 12, DIM, hb); }
+    else text_right(x + w - 18, y + 12, 12, DIM, hb);
+    const float kw = 40, bot = 12;
+    float ry = y + 34 + (duo_pat ? 52.0f : 0.0f), rh = h - (ry - y) - bot, rx = x + 14 + kw, rw = w - 28 - kw;
+    if (rw < 60 || rh < 60) return;
+    SongMidiChan dc; song_midi_chan(g_song, 9, &dc);
+    float drumh = dc.used ? fminf(fmaxf(rh * 0.17f, 34.0f), 80.0f) : 0.0f, gapd = dc.used ? 8.0f : 0.0f, noth = rh - drumh - gapd;
+    const double span = 8.0, before = 2.2, T = midi_heard_sec(), t0 = T - before, t1 = t0 + span;
+    int n = song_midi_notes(g_song, t0, t1, nb, 8192);
+    /* the key range of what is in view, eased, at least two octaves */
+    int lo = 127, hi = 0;
+    for (int i = 0; i < n; i++) if (nb[i].ch != 9) { if (nb[i].key < lo) lo = nb[i].key; if (nb[i].key > hi) hi = nb[i].key; }
+    if (lo <= hi) {
+        float tl = (float)(lo > 3 ? lo - 3 : 0), th = (float)(hi < 124 ? hi + 3 : 127);
+        if (th - tl < 24) { float mid = (tl + th) / 2; tl = mid - 12; th = mid + 12; }
+        klo += (tl - klo) * 0.08f; khi += (th - khi) * 0.08f;
+    }
+    float kh = noth / (khi - klo + 1.0f);
+    #define KEY_Y(k) (ry + noth - ((float)(k) - klo + 1.0f) * kh)
+    /* rows: black keys darker, an octave line at every C */
+    for (int k = (int)floorf(klo); k <= (int)ceilf(khi); k++) {
+        float yy = KEY_Y(k);
+        if (yy < ry - 1 || yy + kh > ry + noth + 1) continue;
+        int pc = k % 12, black = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
+        if (black) rect(rx, yy, rw, kh, alpha(FAINT, 0.07f));
+        if (pc == 0) rect(rx, yy + kh - 1, rw, 1, alpha(FAINT, 0.28f));
+    }
+    /* beats and bars */
+    {   double gp = (double)g_view.order * 16.0 + (double)g_pos;
+        for (int b = (int)(gp / 4) * 4 - 160; b <= (int)gp + 320; b += 4) {
+            if (b < 0) continue;
+            double tb = song_midi_grid_sec(g_song, (double)b); float xx = rx + (float)((tb - t0) / span) * rw;
+            if (xx < rx || xx > rx + rw) continue;
+            rect(xx, ry, 1, noth + gapd + drumh, alpha(FAINT, (b % 16 == 0) ? 0.30f : 0.10f));
+        }
+    }
+    /* the notes of the pitched channels */
+    unsigned lit[128]; memset(lit, 0, sizeof lit); int litc[128];
+    for (int i = 0; i < n; i++) {
+        const SongMidiNote *m = &nb[i]; if (m->ch == 9) continue;
+        float x0 = rx + (float)((m->t0 - t0) / span) * rw, x1 = rx + (float)((m->t1 - t0) / span) * rw;
+        if (x1 < rx || x0 > rx + rw) continue;
+        if (x0 < rx) x0 = rx; if (x1 > rx + rw) x1 = rx + rw;
+        float yy = KEY_Y(m->key), nh = kh > 3 ? kh - 1 : 2, nw = x1 - x0 < 2 ? 2 : x1 - x0;
+        col c = midi_hue((float)m->ch / 16.0f);
+        int on = m->t0 <= T && T <= m->t1;
+        if (on) { lit[m->key] = 1; litc[m->key] = m->ch; }
+        rrect(x0, yy + 0.5f, nw, nh, nh > 5 ? 3 : 1, alpha(on ? mix(c, C(1, 1, 1, 1), 0.45f) : c, 0.38f + 0.52f * (float)m->vel / 127.0f));
+    }
+    /* the drums: five lanes (kick, snare, hats, toms, cymbals / other) */
+    if (dc.used) {
+        float dy = ry + noth + gapd, lh = drumh / 5.0f;
+        rrect(rx, dy, rw, drumh, 6, alpha(FAINT, 0.07f));
+        for (int i = 0; i < n; i++) {
+            const SongMidiNote *m = &nb[i]; if (m->ch != 9) continue;
+            int k = m->key, lane = (k == 35 || k == 36) ? 0 : (k == 38 || k == 40 || k == 39 || k == 37) ? 1 : (k == 42 || k == 44 || k == 46) ? 2 : (k >= 41 && k <= 50 && k != 42 && k != 44 && k != 46 && k != 49) ? 3 : 4;
+            float xx = rx + (float)((m->t0 - t0) / span) * rw; if (xx < rx || xx > rx + rw) continue;
+            float age = (float)(T - m->t0), flash = age >= 0 && age < 0.15f ? 1.0f - age / 0.15f : 0.0f;
+            rrect(xx, dy + lane * lh + 1, 5, lh - 2, 2, alpha(mix(VC[2], C(1, 1, 1, 1), 0.6f * flash), 0.55f + 0.4f * (float)m->vel / 127.0f));
+        }
+    }
+    /* the playhead */
+    rect(rx + (float)(before / span) * rw - 1, ry, 2, noth + gapd + drumh, alpha(TXT, 0.65f));
+    /* the keyboard at the left: the sounding keys light up in the colour of their channel */
+    for (int k = (int)floorf(klo); k <= (int)ceilf(khi); k++) {
+        float yy = KEY_Y(k);
+        if (yy < ry - 1 || yy + kh > ry + noth + 1) continue;
+        int pc = k % 12, black = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
+        col kc = lit[k] ? midi_hue((float)litc[k] / 16.0f) : (black ? alpha(FAINT, 0.62f) : alpha(TXT, 0.34f));
+        rect(x + 14, yy, black ? kw * 0.62f : kw, kh > 2 ? kh - 0.5f : kh, kc);
+        if (pc == 0 && kh >= 9) { char kn[8]; midi_keyname(kn, k); text(x + 14 + kw - text_width(kn, 9) - 2, yy + kh / 2 - 5, 9, lit[k] ? C(0.02f, 0.05f, 0.1f, 1) : DIM, kn); }
+    }
+    #undef KEY_Y
+}
+
 static void draw_pattern(float x, float y, float w, float h) {
     if (!(g_duo && g_ox > 0)) card_r(x, y, w, h, g_duo ? 30.0f : 14.0f);              /* (the Duo draws the wide card itself, the content is narrower than the card; its corner follows the display) */
+    if (g_song && song_is_midi(g_song)) { draw_midi_roll(x, y, w, h); return; }          /* MIDI: the piano roll */
     if (!g_portrait) text(x + 18, y + 12, 12, DIM, "PATTERN");
     view_switch(x, y, w);
     if (!g_song) { text(x + 18, y + 44, 14, FAINT, "No song loaded."); return; }
@@ -1100,10 +1201,42 @@ static float overview_height(int nch) {
     return 38.0f + rows * rh + 10.0f;
 }
 
+/* MIDI: what each channel plays, from the notes of the file at the time that is heard (the levels have no scope of their own) */
+static void midi_overview(float dt) {
+    static SongMidiNote nb[2048]; static double lastonset[16];
+    double T = midi_heard_sec(); int n = song_midi_notes(g_song, T - 0.6, T, nb, 2048);
+    float val[16] = { 0 }; double onset[16]; int key[16] = { 0 };
+    for (int c = 0; c < 16; c++) onset[c] = -1;
+    for (int i = 0; i < n; i++) {
+        const SongMidiNote *m = &nb[i]; int c = m->ch & 15; float a = (float)m->vel / 127.0f;
+        if (T >= m->t0 && T <= m->t1) a *= 0.35f + 0.65f * expf(-(float)(T - m->t0) * 5.0f);
+        else if (T > m->t1) a *= 0.35f * expf(-(float)(T - m->t1) * 9.0f);
+        else continue;
+        if (a > val[c]) val[c] = a;
+        if (T >= m->t0 && m->t0 > onset[c]) { onset[c] = m->t0; key[c] = m->key; }
+    }
+    for (int c = 0; c < 16; c++) {
+        SongMidiChan mc; song_midi_chan(g_song, c, &mc);
+        float v = powf(fminf(val[c], 1.0f), 0.6f);
+        if (v > ch_lvl[c]) ch_lvl[c] += (v - ch_lvl[c]) * 0.7f; else { ch_lvl[c] -= dt * 1.8f; if (ch_lvl[c] < v) ch_lvl[c] = v; }
+        if (ch_lvl[c] >= ch_pk[c]) { ch_pk[c] = ch_lvl[c]; ch_pkhold[c] = 0.5f; }
+        else if (ch_pkhold[c] > 0) ch_pkhold[c] -= dt;
+        else { ch_pk[c] -= dt * 0.6f; if (ch_pk[c] < ch_lvl[c]) ch_pk[c] = ch_lvl[c]; }
+        ch_noteage[c] += dt;
+        if (onset[c] >= 0 && onset[c] != lastonset[c]) {
+            lastonset[c] = onset[c]; ch_noteage[c] = 0;
+            if (c == 9) snprintf(ch_note[c], sizeof ch_note[c], "%d", key[c]);
+            else { char kn[8]; midi_keyname(kn, key[c]); snprintf(ch_note[c], sizeof ch_note[c], "%s", kn); }
+        }
+        if (mc.used) { snprintf(ch_fx[c], sizeof ch_fx[c], "%s", song_midi_program_name(mc.program, mc.drum)); ch_fxcls[c] = 5; ch_fxage[c] = 0; }
+        else { ch_fx[c][0] = 0; ch_note[c][0] = 0; }
+    }
+}
 static void overview_update(float dt) {
     if (!g_song) return;
     if (ov_reset) { memset(ch_lvl, 0, sizeof ch_lvl); memset(ch_pk, 0, sizeof ch_pk); memset(ch_note, 0, sizeof ch_note); memset(ch_fx, 0, sizeof ch_fx); ov_last_order = -1; ov_reset = 0; }
     if (!g_view_valid) return;
+    if (song_is_midi(g_song)) { midi_overview(dt); return; }
     SongPos sp = g_view;
     int nch = song_channels(g_song);
     if (nch > 64) nch = 64;
@@ -1419,6 +1552,19 @@ static void draw_seal(float cx, float cy, float r, const char *label) {
    Gezeichnet mit den vorhandenen Primitiven (Koordinaten im 320x200-Raster, Chip um 160,100). */
 #define BEATC C(0.133f, 0.827f, 0.933f, 1)      /* Akzentfarbe des Beat-Pulses (Cyan wie das Logo) */
 static float chip_tsz(float fs, float k) { float z = fs * k; return z < 7.0f ? 7.0f : z; }
+/* MIDI files: a 5-pin DIN socket in the place of the Paula chip (h = the height of the slot) */
+static void midi_plug(float cx, float cy, float d, float beat) {
+    col metal = mix(C(0.62f, 0.65f, 0.70f, 1), BEATC, 0.5f * beat), dark = C(0.07f, 0.07f, 0.08f, 1);
+    rrect(cx - d / 2 - 1, cy - d / 2 - 1, d + 2, d + 2, d / 2 + 1, dark);
+    rrect(cx - d / 2, cy - d / 2, d, d, d / 2, C(0.30f, 0.31f, 0.34f, 1));
+    rrect(cx - d * 0.43f, cy - d * 0.43f, d * 0.86f, d * 0.86f, d * 0.43f, C(0.10f, 0.105f, 0.12f, 1));
+    rect(cx - d * 0.06f, cy - d * 0.46f, d * 0.12f, d * 0.12f, C(0.30f, 0.31f, 0.34f, 1));          /* the key notch at the top */
+    for (int i = 0; i < 5; i++) {
+        float a = 3.14159265f * (1.0f - i / 4.0f), px = cx + cosf(a) * d * 0.30f, py = cy + 0.05f * d - sinf(a) * d * 0.30f, r = d * 0.06f;
+        rrect(px - r, py - r, 2 * r, 2 * r, r, metal);
+    }
+    float z = d * 0.20f; text(cx - text_width("MIDI", z) / 2, cy + d * 0.20f, z, C(0.62f, 0.65f, 0.70f, 1), "MIDI");
+}
 static void chip_dip(float x, float y, float h, float beat) {            /* Paula, DIP-48 (MOS 8364R7); h = Hoehe, Breite = 5 * h */
     float k = h / 100.0f;
     col pin = mix(C(0.62f, 0.65f, 0.70f, 1), BEATC, 0.55f * beat), body = C(0.23f, 0.24f, 0.255f, 1), ink = mix(C(0.79f, 0.80f, 0.83f, 1), C(1, 1, 1, 1), 0.5f * beat), dimple = C(0.09f, 0.095f, 0.10f, 1);
@@ -1440,6 +1586,7 @@ static void chip_dip(float x, float y, float h, float beat) {            /* Paul
 /* Which chip: 5 = the Amiga 500 (TFMX, AHX, SoundFX, MOD and MED up to 4 channels; the drawn Paula chip, kind 0, is not used any more), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices),
  * 4 = the AdLib Gold card (the FM formats, Yamaha OPL3) */
 static int chip_kind_of(const char *f, int n) {
+    if (!strcmp(f, "MIDI")) return 0;                                  /* the MIDI socket (see midi_plug) */
     if (!strcmp(f, "AMD") || !strcmp(f, "MAD") || !strcmp(f, "A2M") || !strcmp(f, "HERAD") || !strcmp(f, "RAD") || !strcmp(f, "LDS")) return 4;
     if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || !strcmp(f, "SFX") || ((!strcmp(f, "MOD") || !strcmp(f, "MED")) && n <= 4)) {     /* the Amiga formats that run on the four Paula voices */
         return 5;                                                      /* the Amiga 500 (desktop and web) */
@@ -1468,7 +1615,8 @@ static void draw_chip_k(int k, float x, float y, float h, float beat) {
     if (k > 0) c3_px[chip_swing ? 1 : 0] = cw * sc * view_scale;           /* how large the card is shown, in pixels (the off-screen picture is made to fit) */
     float hh = h * sc;                                    /* leicht wachsen, um die Mitte */
     float xx = x - (cw * sc - cw) / 2, yy = y - (hh - h) / 2;
-    if (k == 0) chip_dip(xx, yy + hh * 0.25f, hh * 0.5f, beat);            /* the chip is half as high as the slot: centred in it */
+    if (k == 0 && g_song && song_is_midi(g_song)) midi_plug(xx + cw * sc / 2, yy + hh / 2, hh * 0.78f, beat);
+    else if (k == 0) chip_dip(xx, yy + hh * 0.25f, hh * 0.5f, beat);            /* the chip is half as high as the slot: centred in it */
     else { float b = 1.0f + 0.30f * beat; tex_quad(chip_swing ? c3_texture_swing(k - 1) : c3_texture(k - 1), xx, yy + hh * 0.57f - hh * 0.56f, cw * sc, hh * 1.12f, C(b, b, b, 1)); }
 }
 static void draw_chips(float x, float y, float h) {
@@ -1580,6 +1728,13 @@ static void seek_order(int target) {
     if (cur < 0 || !g_song) return;
     if (target < 0) target = 0;
     if (target >= song_norders(g_song)) { next_prev(1); return; }
+    if (song_is_midi(g_song)) {                                      /* MIDI: no re-opening, the player jumps (replaying program / controllers up to there) */
+        double sec = 0;
+        if (g_dev) SDL_LockAudioDevice(g_dev);
+        if (song_midi_seek_order(g_song, target, &sec)) { g_frames = (unsigned long long)(sec * g_rate); g_resync = 1; g_lastord = g_lastrow = -1; ov_reset = 1; view_reset = 1; }
+        if (g_dev) SDL_UnlockAudioDevice(g_dev);
+        return;
+    }
     char err[128] = "";
     Song *s = song_open_sub(pl[cur].path, g_rate, g_open_sub, err, sizeof err);
     if (!s) return;
@@ -1603,6 +1758,16 @@ static void seek_order(int target) {
     if (g_dev) SDL_UnlockAudioDevice(g_dev);
     song_close(old);
     ov_reset = 1; view_reset = 1; pat_ch0 = pat_ch0;
+}
+/* MIDI: seek by seconds (Left / Right: 10 s, the last bar of a file goes on to the next one) */
+static void seek_midi_by(double d) {
+    if (!g_song || !song_is_midi(g_song)) return;
+    double sec = 0; int r;
+    if (g_dev) SDL_LockAudioDevice(g_dev);
+    r = song_midi_seek_by(g_song, d, &sec);
+    if (r == 1) { g_frames = (unsigned long long)(sec * g_rate); g_resync = 1; g_lastord = g_lastrow = -1; ov_reset = 1; view_reset = 1; }
+    if (g_dev) SDL_UnlockAudioDevice(g_dev);
+    if (r == 2) next_prev(1);
 }
 
 
@@ -2587,7 +2752,7 @@ static void draw_ui(double t) {
             cx += chip(cx, cy, song_format(g_song), VC[0], 1);
             snprintf(b, sizeof b, "%d CHANNELS", song_channels(g_song));
             cx += chip(cx, cy, b, VC[2], 1);
-            snprintf(b, sizeof b, "%d ORDERS", song_norders(g_song));
+            snprintf(b, sizeof b, song_is_midi(g_song) ? "%d BARS" : "%d ORDERS", song_norders(g_song));
             cx += chip(cx, cy, b, DIM, 0);
             int pf = song_paula_filter(g_song);
             if (pf >= 0) cx += chip(cx, cy, "PAULA-FILTER", pf ? VC[1] : DIM, pf);
@@ -2602,7 +2767,7 @@ static void draw_ui(double t) {
         if (g_song) {
             int o = g_view_valid ? g_view.order : -1;
             if (o >= 0) {
-                char ob[48]; snprintf(ob, sizeof ob, "ORDER %d / %d", o + 1, song_norders(g_song));
+                char ob[48]; snprintf(ob, sizeof ob, song_is_midi(g_song) ? "BAR %d / %d" : "ORDER %d / %d", o + 1, song_norders(g_song));
                 text_right(ax + haw - 22, hy + 48, 14, VC[0], ob);
                 if (text_width(ob, 14) > rw) rw = text_width(ob, 14);
             }
@@ -2669,6 +2834,7 @@ static void draw_ui(double t) {
         float hmax = (vx - 56) - (bx + 190);        /* free room for the hints, left of the VOL label */
         {
             char l1[160] = "Space pause  \xb7  Left/Right seek (subsong)  \xb7  Up/Down track  \xb7  Shift+arrows channels", l2[160];
+            if (g_song && song_is_midi(g_song)) snprintf(l1, sizeof l1, "Space pause  \xb7  Left/Right \xb1" "10 s  \xb7  Up/Down track");
 #ifdef __EMSCRIPTEN__
             snprintf(l2, sizeof l2, "O Mod Archive  \xb7  V view  \xb7  R restart  \xb7  F fullscreen  \xb7  F5/F6 A/V sync %.0f ms", g_lag_ms);
 #else
@@ -4040,8 +4206,8 @@ static void iter(void) {
                 case SDLK_ESCAPE: running = 0; break;
                 case SDLK_i: g_vmode = 4; view_persist(); break;                 /* the Info view */
                 case SDLK_SPACE: g_paused = !g_paused; break;
-                case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) > 0) play_index_sub(cur, song_subsong(g_song) - 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
-                case SDLK_RIGHT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0++; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) + 1 < song_subsongs(g_song)) play_index_sub(cur, song_subsong(g_song) + 1); } else seek_order((g_view_valid ? g_view.order : song_order(g_song)) + 1); break;
+                case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) > 0) play_index_sub(cur, song_subsong(g_song) - 1); } else if (g_song && song_is_midi(g_song)) seek_midi_by(-10.0); else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
+                case SDLK_RIGHT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0++; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) + 1 < song_subsongs(g_song)) play_index_sub(cur, song_subsong(g_song) + 1); } else if (g_song && song_is_midi(g_song)) seek_midi_by(10.0); else seek_order((g_view_valid ? g_view.order : song_order(g_song)) + 1); break;
                 case SDLK_UP: next_user(-1); break;
                 case SDLK_DOWN: next_user(1); break;
                 case SDLK_r: if (cur >= 0) play_index_sub(cur, g_open_sub); break;
