@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Abhaengigkeiten
-        run: sudo apt-get update && sudo apt-get install -y build-essential libsdl2-dev libgl1-mesa-dev curl
+        run: sudo apt-get update && sudo apt-get install -y build-essential libsdl2-dev libgl1-mesa-dev libasound2-dev curl
       - name: AppImage bauen
         run: sh packaging/build-appimage.sh "${GITHUB_REF_NAME}"
       - name: Pruefsumme
