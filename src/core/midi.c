@@ -586,10 +586,7 @@ int midi_render(Midi *m, int16_t *out, int frames) {
     }
     if (done) { float k = (float)pow(0.85, (double)done / m->rate * 20.0); for (int c = 0; c < NCH; c++) m->lvl[c] *= k; }
     if (done < frames) memset(out + 2 * (size_t)done, 0, (size_t)(frames - done) * 4);
-#if NG_HWMIDI
-    if (g_hw) memset(out, 0, (size_t)done * 4);                                    /* on hardware the SoundFont synth is only there for the scopes: no sound */
-#endif
-    return done;
+    return done;                                                                      /* on hardware the SoundFont synth only runs for the pictures (scopes, spectrum): the caller mutes it, see midi_hardware_on() */
 }
 void midi_set_scope(Midi *m, float *buf, int len) { m->scope = buf; m->scope_len = len; m->scope_pos = 0; }
 unsigned midi_scope_pos(const Midi *m) { return m->scope_pos; }
