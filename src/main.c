@@ -1614,7 +1614,7 @@ static void module_lcd_update(void) {
     tex_quad(g->tex, 0, 0, (float)m->tw, (float)m->th, C(1, 1, 1, 1));                              /* the baked panel (the card model flips the picture, a render target is stored the other way up) */
     const float lx = MT_LCD_X0 * (float)m->tw, ly = MT_LCD_Y0 * (float)m->th, lw = (MT_LCD_X1 - MT_LCD_X0) * (float)m->tw, lh = (MT_LCD_Y1 - MT_LCD_Y0) * (float)m->th;
     const float pad = lw * 0.02f, cw = (lw - 2 * pad) / cols, rowh = lh - 4.0f;                      /* ONE line of 20 cells, as on the device */
-    const col ink = C(0.84f, 0.99f, 0.42f, 1), cellc = C(0.26f, 0.62f, 0.09f, 1);                    /* the backlit green LCD: bright characters in lit cells */
+    const col ink = C(0.757f, 0.984f, 0.224f, 1), cellc = C(0.38f, 0.66f, 0.10f, 1);                 /* the backlit green LCD, the colours measured on a photo of the device: lime characters (193, 251, 57) in lit cells (about 96, 168, 26) */
     for (int i = 0; i < cols; i++) rect(lx + pad + i * cw + 0.6f, ly + 2.0f + 0.6f, cw - 1.2f, rowh - 1.2f, cellc);
     const float emw = text_width("H", 100.0f) / 100.0f;                                               /* the characters are as wide as their cell allows ... */
     const float fs = cw * 0.86f / emw, sy = (rowh * 0.80f) / (fs * 0.73f);                            /* ... and stretched in height to fill the cell (tall and narrow like the LCD characters) */
