@@ -4619,6 +4619,7 @@ int main(int argc, char **argv) {
 #endif
     if (getenv("NGPLAYER_TEST_MOBILE")) g_mobile = 1;        /* test hook: touch layout on the desktop */
     if (getenv("NGPLAYER_TEST_PLOPEN")) g_plopen = 1;        /* test hook: playlist overlay open (phone layout) */
+    if (getenv("NGPLAYER_TEST_VOL")) g_vol = (float)atof(getenv("NGPLAYER_TEST_VOL"));        /* test hook: the volume (0 .. 1), for the knobs of the modules */
     if (getenv("NGPLAYER_TEST_ORB")) g_vmode = 1;                  /* test hook: orb view */
     if (getenv("NGPLAYER_TEST_SCOPES")) g_vmode = 3;               /* test hook: scopes view */
     if (getenv("NGPLAYER_TEST_VOXEL")) g_vmode = 2;               /* test hook: voxel flight view */

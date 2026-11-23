@@ -588,6 +588,10 @@ gfx_mesh *gfx_mesh_create(const void *verts, int nverts, const uint16_t *idx, in
     if (!m->vb || !m->ib) { m->vb = nil; m->ib = nil; m->n = 0; }
     return m;
 }
+void gfx_mesh_update_verts(gfx_mesh *m, const void *verts, int nverts) {
+    if (!m || !m->vb || nverts <= 0) return;
+    memcpy([m->vb contents], verts, (size_t)(24 * nverts));                    /* shared storage: the CPU writes it directly */
+}
 void gfx_card_render(gfx_tex *target, const float *mvp, const float *mv, gfx_mesh *board, gfx_mesh *front, gfx_tex *front_tex, gfx_mesh *back, gfx_tex *back_tex) {
     struct { float mvp[16], mv[16]; int umode, pad[3]; } p;
     memcpy(p.mvp, mvp, sizeof p.mvp); memcpy(p.mv, mv, sizeof p.mv); memset(p.pad, 0, sizeof p.pad);

@@ -33,7 +33,8 @@ static const C3Model C3M[C3_N] = {
 #define C3_BOX 0.80f                                        /* box aspect = model aspect * this: head room for the edge-on view */
 static float c3_box_aspect(int mi) { return C3M[mi].aspect * C3_BOX; }
 
-typedef struct { gfx_mesh *mesh[3]; gfx_tex *tex, *btex, *color, *color2, *lcd; int ready, w, h; } C3Gl;   /* the second target (…2) is the picture of the Specs window: the card swings there instead of turning */
+typedef struct { float x, y, z, u, v; unsigned char r, g, b, a; } C3V;
+typedef struct { gfx_mesh *mesh[3]; gfx_tex *tex, *btex, *color, *color2, *lcd; int ready, w, h; C3V *kv; int nkv, nmark, mark[8]; float kcx, kcy, korig[8][2], kbase, kang; } C3Gl;   /* the second target (…2) is the picture of the Specs window: the card swings there instead of turning */
 static C3Gl c3gl[C3_N];
 static float c3_ang;
 static int c3_first = 1;
@@ -53,7 +54,7 @@ static void c3_setup(int mi) {
     C3Gl *g = &c3gl[mi]; const C3Model *m = &C3M[mi];
     if (g->ready) return;
     const float Q = 1.0f / 20000.0f;
-    typedef struct { float x, y, z, u, v; unsigned char r, g, b, a; } V3;
+    typedef C3V V3;
     int counts[3] = { m->nv, m->ntv, m->nbv }, tcnt[3] = { m->nt, m->ntt, m->nbt };
     for (int p = 0; p < 3; p++) {
         int n = counts[p];
@@ -67,6 +68,19 @@ static void c3_setup(int mi) {
             o->a = 255;
         }
         g->mesh[p] = gfx_mesh_create(vb3, n, p == 2 ? m->bidx : (p ? m->tidx : m->idx), 3 * tcnt[p]);
+        if (p == 0 && (mi == 5 || mi == 6)) {                                   /* the knob of the module: its pointer (colour 6 of the palette) turns with the volume, the rest of the mesh stays */
+            float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f; g->nmark = 0;
+            for (int i = 0; i < n; i++) {
+                if (m->vc[i] == 5) { if (vb3[i].x < x0) x0 = vb3[i].x; if (vb3[i].x > x1) x1 = vb3[i].x; if (vb3[i].y < y0) y0 = vb3[i].y; if (vb3[i].y > y1) y1 = vb3[i].y; }
+                else if (m->vc[i] == 6 && g->nmark < 8) { g->mark[g->nmark] = i; g->korig[g->nmark][0] = vb3[i].x; g->korig[g->nmark][1] = vb3[i].y; g->nmark++; }
+            }
+            if (g->nmark > 0 && x1 > x0) {
+                g->kcx = (x0 + x1) / 2; g->kcy = (y0 + y1) / 2; float mx = 0, my = 0;
+                for (int k = 0; k < g->nmark; k++) { mx += g->korig[k][0]; my += g->korig[k][1]; }
+                g->kbase = atan2f(mx / g->nmark - g->kcx, my / g->nmark - g->kcy); g->kang = g->kbase;
+                g->kv = vb3; g->nkv = n; vb3 = NULL;
+            }
+        }
         free(vb3);
     }
     g->tex = gfx_tex_create(m->tw, m->th, GFX_RGB565, m->tex, GFX_MIPS);                 /* the photo of the board */
@@ -99,9 +113,22 @@ static void c3_fit(int mi, float px) {
     g->color = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH | GFX_MSAA);
     g->color2 = gfx_tex_create(g->w, g->h, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET | GFX_DEPTH | GFX_MSAA);
 }
+/* the volume knob of the two modules: the pointer turns with the volume slider from 7:30 (silent) to 4:30 o'clock (full) */
+static float c3_knob_want(void) { return (-135.0f + 270.0f * (g_vol < 0 ? 0 : g_vol > 1 ? 1 : g_vol)) * 0.017453293f; }
+static int c3_knob_dirty(int mi) { return (mi == 5 || mi == 6) && c3gl[mi].kv && fabsf(c3gl[mi].kang - c3_knob_want()) > 0.004f; }
+static void c3_knob(int mi) {
+    C3Gl *g = &c3gl[mi]; if (!c3_knob_dirty(mi)) return;
+    float a = c3_knob_want(), d = a - g->kbase, cs = cosf(d), sn = sinf(d);
+    for (int k = 0; k < g->nmark; k++) {
+        float x = g->korig[k][0] - g->kcx, y = g->korig[k][1] - g->kcy;
+        g->kv[g->mark[k]].x = g->kcx + x * cs + y * sn; g->kv[g->mark[k]].y = g->kcy - x * sn + y * cs;
+    }
+    gfx_mesh_update_verts(g->mesh[0], g->kv, g->nkv); g->kang = a;
+}
 /* draws the card at the angle ang into the given target */
 static void c3_render(int mi, float ang, gfx_tex *target, int fw, int fh) {
     C3Gl *g = &c3gl[mi]; const C3Model *m = &C3M[mi];
+    c3_knob(mi);
     float mvp[16], mv[16];
     c3_matrices(ang, m->tilt > 0 ? m->tilt : 0.17f, m->fit > 0 ? m->fit : 0.95f, (float)g->w / (float)g->h, mvp, mv);
     gfx_card_render(target, mvp, mv, g->mesh[0], g->mesh[1], g->lcd ? g->lcd : g->tex, g->mesh[2], g->btex);       /* the MT-32 module: the front with the title in its display (module_lcd_update) */
@@ -113,7 +140,7 @@ static void card3d_frame(int mi, int fw, int fh) {
     const char *fix = getenv("NGPLAYER_TEST_CARDANG");
     if (fix) c3_ang = (float)atof(fix) * 0.017453293f;
     else if (!g_paused) c3_ang += (float)g_dt * 0.55f;
-    else if (!c3_first && last_mi == mi) return;                                 /* paused: keep the last picture */
+    else if (!c3_first && last_mi == mi && !c3_knob_dirty(mi)) return;          /* paused: keep the last picture (unless the knob moves) */
     c3_first = 0; last_mi = mi;
     c3_render(mi, c3_ang, c3gl[mi].color, fw, fh);
 }

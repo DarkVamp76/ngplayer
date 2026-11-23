@@ -639,6 +639,11 @@ gfx_mesh *gfx_mesh_create(const void *verts, int nverts, const uint16_t *idx, in
     glBindVertexArray(0);
     return m;
 }
+void gfx_mesh_update_verts(gfx_mesh *m, const void *verts, int nverts) {
+    typedef struct { float x, y, z, u, v; unsigned char r, g, b, a; } V3;
+    if (!m || !m->vbo || nverts <= 0) return;
+    glBindBuffer(GL_ARRAY_BUFFER, m->vbo); glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(sizeof(V3) * (size_t)nverts), verts); glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
 void gfx_card_render(gfx_tex *target, const float *mvp, const float *mv, gfx_mesh *board, gfx_mesh *front, gfx_tex *front_tex, gfx_mesh *back, gfx_tex *back_tex) {
     if (!c3_prog) {
         c3_prog = link_prog(C3_VS, C3_FS, "card3d");

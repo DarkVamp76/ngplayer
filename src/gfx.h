@@ -63,6 +63,7 @@ void   gfx_scope_draw(const float *vals, const float *info, int nt, float lw, co
 gfx_tex *gfx_voxel_render(int w, int h, const float *cam, const float *geo, const float *lv, const float *col);
 /* the 3D card: vertices xyz, uv, rgba8 (24 bytes each) with 16 bit indices */
 gfx_mesh *gfx_mesh_create(const void *verts, int nverts, const uint16_t *idx, int nidx);
+void   gfx_mesh_update_verts(gfx_mesh *m, const void *verts, int nverts);      /* replaces the vertices of a mesh (same count and layout as at the creation): for a moving part (a knob) */
 /* renders into the target (cleared to transparent, depth tested): the board (colours), the front picture and the back of the board */
 void   gfx_card_render(gfx_tex *target, const float *mvp, const float *mv, gfx_mesh *board, gfx_mesh *front, gfx_tex *front_tex, gfx_mesh *back, gfx_tex *back_tex);
 
