@@ -114,6 +114,8 @@ struct Midi {
     MidiNote *notes; size_t nnotes; double maxdur;
     Reverb rev; Chorus cho; float rev_level, cho_level;
     float dry[2 * MIDI_BLOCK], wrev[2 * MIDI_BLOCK], wcho[2 * MIDI_BLOCK], orev[2 * MIDI_BLOCK], ocho[2 * MIDI_BLOCK];
+    float scblk[NCH * MIDI_BLOCK];        /* the dry signal of each channel for one block (tsf scopeBlk) */
+    float *scope; int scope_len; unsigned scope_pos;
 };
 
 static const char *const GM_NAMES[128] = {
@@ -395,7 +397,12 @@ int midi_render(Midi *m, int16_t *out, int frames) {
             int k = chunk - part < MIDI_BLOCK ? chunk - part : MIDI_BLOCK;
             memset(m->wrev, 0, (size_t)k * 8); memset(m->wcho, 0, (size_t)k * 8);
             m->f->wetRev = m->wrev; m->f->wetCho = m->wcho;
+            if (m->scope) { memset(m->scblk, 0, sizeof m->scblk); m->f->scopeBlk = m->scblk; m->f->scopeStride = MIDI_BLOCK; } else m->f->scopeBlk = 0;
             tsf_render_float(m->f, m->dry, k, 0);
+            if (m->scope) {                                                         /* the scope rings: one trace per channel (the view normalises the level) */
+                for (int c = 0; c < NCH; c++) for (int i = 0; i < k; i++) m->scope[(size_t)c * (size_t)m->scope_len + ((m->scope_pos + (unsigned)i) & (unsigned)(m->scope_len - 1))] = m->scblk[c * MIDI_BLOCK + i] * 4.0f;
+                m->scope_pos += (unsigned)k;
+            }
             reverb_process(&m->rev, m->wrev, m->orev, k);
             chorus_process(&m->cho, m->wcho, m->ocho, k, m->rate);
             int16_t *o = out + 2 * (size_t)(done + part);
@@ -412,6 +419,8 @@ int midi_render(Midi *m, int16_t *out, int frames) {
     if (done < frames) memset(out + 2 * (size_t)done, 0, (size_t)(frames - done) * 4);
     return done;
 }
+void midi_set_scope(Midi *m, float *buf, int len) { m->scope = buf; m->scope_len = len; m->scope_pos = 0; }
+unsigned midi_scope_pos(const Midi *m) { return m->scope_pos; }
 void midi_set_mute(Midi *m, unsigned mask) {
     unsigned off = mask & ~m->mute; m->mute = mask;
     for (int c = 0; c < NCH; c++) if ((off >> c) & 1) tsf_channel_sounds_off_all(m->f, c);
@@ -477,6 +486,8 @@ int midi_chan_volume(const Midi *m, int c) { (void)m; (void)c; return 0; }
 int midi_chan_pan(const Midi *m, int c) { (void)m; (void)c; return 64; }
 int midi_chan_notes(const Midi *m, int c) { (void)m; (void)c; return 0; }
 void midi_set_mute(Midi *m, unsigned x) { (void)m; (void)x; }
+void midi_set_scope(Midi *m, float *b, int l) { (void)m; (void)b; (void)l; }
+unsigned midi_scope_pos(const Midi *m) { (void)m; return 0; }
 const char *midi_gm_name(int p, int d) { (void)p; (void)d; return ""; }
 int midi_measures(const Midi *m) { (void)m; return 1; }
 int midi_division(const Midi *m) { (void)m; return 480; }

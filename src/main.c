@@ -756,6 +756,9 @@ static void draw_scopes(float x, float y, float w, float h) {
     if (!g_song) { text(x + 18, y + 44, 14, FAINT, "No song loaded."); return; }
     int nch = song_channels(g_song);
     if (nch > 64) nch = 64;
+    int show[64], nshow = 0;                              /* all the channels, MIDI too (16: the grid stays the same from file to file, like the channel list) */
+    for (int c = 0; c < nch; c++) show[nshow++] = c;
+    nch = nshow;
     float ax = x + 14, ay = y + 40, aw = w - 28, ah = h - 40 - 12;
     if (aw < 60 || ah < 40 || nch < 1) return;
     int bestc = 1; float bestd = 1e9f;
@@ -768,7 +771,7 @@ static void draw_scopes(float x, float y, float w, float h) {
     int cols = bestc, rows = (nch + cols - 1) / cols;
     float gap = 6, tw = (aw - gap * (cols - 1)) / cols, th = (ah - gap * (rows - 1)) / rows;
     sc_begin();
-    for (int c = 0; c < nch; c++) chan_tile(c, ax + (c % cols) * (tw + gap), ay + (c / cols) * (th + gap), tw, th);
+    for (int j = 0; j < nch; j++) chan_tile(show[j], ax + (j % cols) * (tw + gap), ay + (j / cols) * (th + gap), tw, th);
     sc_draw(1.0f);                                                       /* all scope lines in one instanced GPU pass */
 }
 

@@ -39,6 +39,8 @@ int   midi_chan_volume(const Midi *m, int ch);                       /* CC 7 */
 int   midi_chan_pan(const Midi *m, int ch);                          /* CC 10: 0..127 */
 int   midi_chan_notes(const Midi *m, int ch);                        /* notes in the file on this channel (0 = unused channel) */
 void  midi_set_mute(Midi *m, unsigned mask);
+void  midi_set_scope(Midi *m, float *buf, int len);                  /* scope rings: buf[channel * len + position], len a power of two (the voices of each channel, dry) */
+unsigned midi_scope_pos(const Midi *m);                              /* frames written so far (write position = pos & (len - 1)) */
 /* time grid (4/4 measures of division * 4 ticks, sixteen rows each: the same grid the tracker views use) and the notes for the roll */
 const char *midi_gm_name(int program, int drum);                      /* "Acoustic Grand Piano", ... ("Drum Kit" for the drum channel) */
 int    midi_measures(const Midi *m);

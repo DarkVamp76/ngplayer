@@ -25,8 +25,8 @@
   Okumura's public domain `ar002`, written from the published algorithms.
 - **TinySoundFont** (`src/core/tsf.h`, MIT, Copyright (C) 2017-2025 Bernhard Schelling, based on SFZero by Steve Folta) is the SoundFont (SF2)
   synthesizer behind the MIDI files (`src/core/midi.c`). The licence text is in the header. https://github.com/schellingb/TinySoundFont
-  Changed for ngPlayer (marked "ngPlayer" in the file): two extra stereo buses and the per-channel reverb / chorus sends (CC 91 / 93), which
-  the original does not have.
+  Changed for ngPlayer (marked "ngPlayer" in the file): two extra stereo buses and the per-channel reverb / chorus sends (CC 91 / 93) and
+  a mono block per MIDI channel for the scope view, which the original does not have.
 - **Freeverb** (Jezar at Dreampoint, public domain) is the reverb of the MIDI files (written from the published algorithm in `src/core/midi.c`).
 - **GeneralUser GS 2.0.3** (S. Christian Collins, GeneralUser GS License v2.0) is the SoundFont the desktop packages ship for MIDI files
   (`GeneralUser-GS.sf2`; use without restriction, private or commercial, in software projects too; the author notes that he cannot be

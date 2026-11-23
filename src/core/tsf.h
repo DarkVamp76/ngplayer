@@ -344,6 +344,7 @@ struct tsf
 	float globalGainDB;
 	int* refCount;
 	float *wetRev, *wetCho;       /* ngPlayer: optional stereo (interleaved) buses for the reverb / chorus sends of the channels (CC 91 / 93); the caller zeroes and processes them */
+	float *scopeBlk; int scopeStride; /* ngPlayer: optional mono block per MIDI channel (16 x scopeStride floats): the dry signal of the voices of each channel, for the scope view; the caller zeroes it */
 };
 
 #ifndef TSF_NO_STDIO
@@ -1230,6 +1231,7 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 	if (f->outputmode != TSF_STEREO_INTERLEAVED) wetRev = wetCho = TSF_NULL;
 	if (sendRev <= 0) wetRev = TSF_NULL;
 	if (sendCho <= 0) wetCho = TSF_NULL;
+	float *scopeOut = (f->scopeBlk && f->outputmode == TSF_STEREO_INTERLEAVED && v->playingChannel >= 0 && v->playingChannel < 16 ? f->scopeBlk + (size_t)v->playingChannel * (size_t)f->scopeStride : TSF_NULL);
 
 	// Cache some values, to give them at least some chance of ending up in registers.
 	TSF_BOOL updateModEnv = (region->modEnvToPitch || region->modEnvToFilterFc);
@@ -1308,6 +1310,7 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 					*outL++ += val * gainRight;
 					if (wetRev) { *wetRev++ += val * gainLeft * sendRev; *wetRev++ += val * gainRight * sendRev; }
 					if (wetCho) { *wetCho++ += val * gainLeft * sendCho; *wetCho++ += val * gainRight * sendCho; }
+					if (scopeOut) *scopeOut++ += val * gainMono;
 
 					// Next sample.
 					tmpSourceSamplePosition += pitchRatio;
