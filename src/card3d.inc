@@ -5,7 +5,10 @@
 #include <math.h>
 #include "card3d_data.h"
 #include "a500_data.h"      /* the Amiga 500 replaces the drawn Paula chip */
-#define C3_N 5
+#if NG_MIDI
+#include "module_data.h"    /* the MIDI sound module: the card of the MIDI files (no MIDI in the iOS / tvOS apps, so no data there) */
+#endif
+#define C3_N (NG_MIDI ? 6 : 5)
 
 typedef struct { const int16_t *v; const uint8_t *vc, *pal; const uint16_t *idx; int nv, nt; const int16_t *tv; const uint16_t *tuv, *tidx; int ntt, ntv; const uint16_t *tex; int tw, th; float aspect; const int16_t *bv; const uint16_t *buv, *bidx; int nbv, nbt; const uint8_t *bpal, *bpix; int bw, bh; float tilt, fit; } C3Model;   /* tilt and fit: 0 = the defaults of the sound cards (0.17 rad, 0.95) */
 static const C3Model C3M[C3_N] = {
@@ -15,6 +18,10 @@ static const C3Model C3M[C3_N] = {
     { c3_GOLD_v, c3_GOLD_vc, c3_GOLD_pal, c3_GOLD_i, C3_GOLD_NV, C3_GOLD_NT, c3_GOLD_tv, c3_GOLD_tuv, c3_GOLD_ti, C3_GOLD_NTT, C3_GOLD_NTV, c3_GOLD_tex, C3_GOLD_TW, C3_GOLD_TH, C3_GOLD_ASPECT, c3_GOLD_bv, c3_GOLD_buv, c3_GOLD_bi, C3_GOLD_NBV, C3_GOLD_NBT, c3_GOLD_bpal, c3_GOLD_bpix, C3_GOLD_BW, C3_GOLD_BH },
     /* Amiga 500: lies flat, so it is seen from above at 0.50 rad and turns about its vertical axis; the box aspect (1.75 after C3_BOX) holds the diagonal of the turning case, fit leaves room for the perspective */
     { c3_A500_v, c3_A500_vc, c3_A500_pal, c3_A500_i, C3_A500_NV, C3_A500_NT, c3_A500_tv, c3_A500_tuv, c3_A500_ti, C3_A500_NTT, C3_A500_NTV, c3_A500_tex, C3_A500_TW, C3_A500_TH, 2.19f, c3_A500_bv, c3_A500_buv, c3_A500_bi, C3_A500_NBV, C3_A500_NBT, c3_A500_bpal, c3_A500_bpix, C3_A500_BW, C3_A500_BH, 0.50f, 0.72f },
+#if NG_MIDI
+    /* the MIDI sound module: a rack module lying flat, seen from above like the Amiga */
+    { c3_MODULE_v, c3_MODULE_vc, c3_MODULE_pal, c3_MODULE_i, C3_MODULE_NV, C3_MODULE_NT, c3_MODULE_tv, c3_MODULE_tuv, c3_MODULE_ti, C3_MODULE_NTT, C3_MODULE_NTV, c3_MODULE_tex, C3_MODULE_TW, C3_MODULE_TH, 2.2f, c3_MODULE_bv, c3_MODULE_buv, c3_MODULE_bi, C3_MODULE_NBV, C3_MODULE_NBT, c3_MODULE_bpal, c3_MODULE_bpix, C3_MODULE_BW, C3_MODULE_BH, 0.50f, 0.50f },
+#endif
 };
 #define C3_BOX 0.80f                                        /* box aspect = model aspect * this: head room for the edge-on view */
 static float c3_box_aspect(int mi) { return C3M[mi].aspect * C3_BOX; }

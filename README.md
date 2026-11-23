@@ -63,7 +63,7 @@ Planned: 15-sample MOD, WAV/VOC, MP1/MP2/MP3, more FM formats (RAD).
 - Spectrum analyser and level meters
 - Four views for the main area (key **V**): **pattern** (the notes only; click a column number to mute, Ctrl+click for solo), **scopes** (one oscilloscope tile per voice with live panning), **orb** (a geodesic sphere shaped by the spectrum) and **voxel** (the spectrum as stacks of real voxel cubes in perspective)
 - An **Info** view (the INFO tab next to Pattern, Scopes, Orb and Voxel, or key `I`; a link to the module page on The Mod Archive for downloaded modules): the swinging sound card, the song title, the tracker that wrote the file, the number of voices and the technical details (OPL2 / OPL3, 8 or 16 bit samples, instruments, orders, patterns).
-- A turning 3D model of the sound card in the header, chosen by the number of voices: the Paula chip (up to 4 voices), the Gravis UltraSound (GF1, up to 14), the UltraSound PnP (AMD InterWave, 15 to 32) and the Terratec EWS64 (more than 32 voices) The FM formats (AMD, MAD, A2M, HERAD, RAD, LDS) show the AdLib Gold card (Yamaha OPL3).
+- A turning 3D model of the sound card in the header, chosen by the number of voices: the Paula chip (up to 4 voices), the Gravis UltraSound (GF1, up to 14), the UltraSound PnP (AMD InterWave, 15 to 32) and the Terratec EWS64 (more than 32 voices) The FM formats (AMD, MAD, A2M, HERAD, RAD, LDS) show the AdLib Gold card (Yamaha OPL3). MIDI files show a MIDI sound module (a rack module lying flat).
 - Seek inside a song (Left/Right), drag and drop for files and folders, playlist
 
 ## Technical details
