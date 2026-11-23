@@ -449,7 +449,7 @@ const char *midi_output_name(void) {
 }
 void midi_idle(Midi *m) {
 #if NG_HWMIDI
-    if (g_hw && m->hw_ready) { midi_hw_drop(g_hw); midi_hw_panic(g_hw); m->hw_ready = 0; }      /* pause / end: no hanging notes; the next render starts again from this position */
+    if (g_hw && m->hw_ready && m->pos > 0) { midi_hw_drop(g_hw); midi_hw_panic(g_hw); m->hw_ready = 0; }      /* pause / end: no hanging notes; the next render starts again from this position (at the very start the set-up goes on: nothing sounds yet) */
 #else
     (void)m;
 #endif
@@ -457,7 +457,12 @@ void midi_idle(Midi *m) {
 #if NG_HWMIDI
 /* a SysEx message takes its time on the wire (31250 baud: 0.32 ms per byte) and the device needs a moment to store it (the MT-32 drops what comes too fast), so the messages
  * are spaced by their own length plus a pause */
-static double sx_gap(int len) { return (double)len * 0.00032 + 0.02; }
+static double sx_gap_base(void) { static double g = -1; if (g < 0) { const char *e = getenv("NGPLAYER_MIDI_SXGAP_MS"); g = (e ? atof(e) : 50.0) / 1000.0; } return g; }      /* the pause after a SysEx message: 50 ms like the maintainer's midiplay, NGPLAYER_MIDI_SXGAP_MS changes it */
+static double sx_gap_msg(const uint8_t *p, int len) {               /* p: the message with its F0; len: its length */
+    double g = (double)len * 0.00032 + sx_gap_base();
+    if (len >= 9 && p[0] == 0xF0 && p[1] == 0x41 && p[3] == 0x16 && p[4] == 0x12 && p[5] == 0x7F && p[6] == 0 && p[7] == 0) g += 0.4;        /* the MT-32 reset (7F 00 00) takes its time */
+    return g;
+}
 static void hw_short(Midi *m, const Ev *e, double t) {
     unsigned char b[3];
     if (e->type == EV_PROG) { b[0] = (unsigned char)(0xC0 | e->ch); b[1] = e->a; midi_hw_send(g_hw, b, 2, t); }
@@ -472,22 +477,22 @@ static void hw_resync(Midi *m) {
     m->hw_pos0 = pos0; m->hw_sx_free = 0;
     size_t i = 0;
     if (m->pos == 0) {                                                          /* the start: General MIDI gets its reset (not the MT-32), then the .syx next to the file comes first */
-        if (!m->sx_mt32) { static const unsigned char gm[6] = { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 }; midi_hw_send(g_hw, gm, 6, t); t += sx_gap(6) + 0.08; }
+        if (!m->sx_mt32) { static const unsigned char gm[6] = { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 }; midi_hw_send(g_hw, gm, 6, t); t += sx_gap_base() + 0.08; }
         for (size_t k = 0; k < m->syx_len; k++) {
             if (m->syx[k] != 0xF0) continue;
             size_t j = k + 1; while (j < m->syx_len && m->syx[j] != 0xF7) j++;
-            if (j < m->syx_len) { midi_hw_send(g_hw, m->syx + k, (int)(j - k + 1), t); t += sx_gap((int)(j - k + 1)); k = j; }
+            if (j < m->syx_len) { midi_hw_send(g_hw, m->syx + k, (int)(j - k + 1), t); t += sx_gap_msg(m->syx + k, (int)(j - k + 1)); k = j; }
         }
         for (; i < m->nev && m->ev[i].type != EV_NOTEON; i++) {                 /* everything before the first note is set-up: in order, spaced, and the song waits for it */
             const Ev *e = &m->ev[i];
-            if (e->type == EV_SYSEX) { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); midi_hw_send(g_hw, p + 2, n, t); t += sx_gap(n); }
+            if (e->type == EV_SYSEX) { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); midi_hw_send(g_hw, p + 2, n, t); t += sx_gap_msg(p + 2, n); }
             else if (e->type == EV_PROG || e->type == EV_CC || e->type == EV_BEND) { hw_short(m, e, t); t += 0.002; }
         }
         t += 0.1;
     } else {                                                                    /* a seek / a resume: the state of the channels up to here (no notes) */
         for (; i < m->nev && m->frame[i] < m->pos; i++) {
             const Ev *e = &m->ev[i];
-            if (e->type == EV_SYSEX) { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); midi_hw_send(g_hw, p + 2, n, t); t += sx_gap(n); }
+            if (e->type == EV_SYSEX) { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); midi_hw_send(g_hw, p + 2, n, t); t += sx_gap_msg(p + 2, n); }
             else if (e->type == EV_PROG || e->type == EV_CC || e->type == EV_BEND) { hw_short(m, e, t); t += 0.002; }
         }
         t += 0.05;
@@ -503,7 +508,7 @@ static void hw_event(Midi *m, size_t i) {
     case EV_PROG: b[0] = (unsigned char)(0xC0 | e->ch); b[1] = e->a; midi_hw_send(g_hw, b, 2, at); break;
     case EV_CC: b[0] = (unsigned char)(0xB0 | e->ch); b[1] = e->a; b[2] = e->b; midi_hw_send(g_hw, b, 3, at); break;
     case EV_BEND: b[0] = (unsigned char)(0xE0 | e->ch); b[1] = e->a; b[2] = e->b; midi_hw_send(g_hw, b, 3, at); break;
-    case EV_SYSEX: { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); if (at < m->hw_sx_free) at = m->hw_sx_free; midi_hw_send(g_hw, p + 2, n, at); m->hw_sx_free = at + sx_gap(n); break; }
+    case EV_SYSEX: { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); if (at < m->hw_sx_free) at = m->hw_sx_free; midi_hw_send(g_hw, p + 2, n, at); m->hw_sx_free = at + sx_gap_msg(p + 2, n); break; }
     default: break;                                                             /* the resets are in the SysEx messages themselves, the tempo is in the times */
     }
 }
