@@ -48,7 +48,7 @@ MidiHw *midi_hw_open(const char *want) {
     if (snd_seq_open(&seq, "default", SND_SEQ_OPEN_OUTPUT, SND_SEQ_NONBLOCK) < 0) return NULL;
     snd_seq_set_client_name(seq, "ngPlayer");
     snd_seq_set_output_buffer_size(seq, 1 << 16);
-    snd_seq_set_client_pool_output(seq, 8192);                                        /* a SysEx message takes a cell for every 12 bytes: the default 500 cells are gone after about 20 long messages */
+    { int r = snd_seq_set_client_pool_output(seq, 2000); if (r < 0 && getenv("NGPLAYER_MIDI_LOG")) fprintf(stderr, "  pool size failed: %s\n", snd_strerror(r)); }      /* a SysEx takes a cell for every 12 bytes: the default 500 cells are full after about 20 long messages (the kernel allows 2000 at most) */
     MidiHw *h = (MidiHw *)calloc(1, sizeof *h); h->seq = seq;
     if (!find_dest(seq, want, &h->dcl, &h->dpt, h->name, sizeof h->name)) { snd_seq_close(seq); free(h); return NULL; }
     h->port = snd_seq_create_simple_port(seq, "MIDI out", SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ, SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
