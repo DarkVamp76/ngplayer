@@ -168,6 +168,7 @@ void ios_media_update(const char *title, const char *artist, const char *album, 
 int ios_media_poll(void);
 int ios_audio_event_poll(void);                                                    /* ios_glue.m: 1 = the route changed / an interruption ended (reopen the output), 2 = pause (the route fell back to the built-in speaker) */
 void ios_media_set_cover(const unsigned char *px, int w, int h);                    /* ios_glue.m: the cover of the song (RGBA, bottom row first, as glReadPixels gives it); NULL = none */
+void ios_media_set_cover_text(const char *title, const char *by, float ar, float ag, float ab, float br, float bg, float bb);   /* ios_glue.m: a cover drawn on the CPU (for the background, where the GPU may not be used): gradient from the colour a to b, title, artist */
 float ios_output_latency_ms(void);                                               /* ios_glue.m: latency of the current output route in ms (AirPlay: ~2000) */
 void ios_audio_longform(void);                                                    /* ios_glue.m: AirPlay 2 (HomePod) needs the long-form route sharing policy */
 void ios_airplay_place(SDL_Window *win, float x, float y, float size, int visible);   /* ios_glue.m: the native AirPlay button over the window (points) */
@@ -3756,14 +3757,24 @@ static col hue_col(float h) {                         /* hue 0..1 at full satura
     r = r < 0 ? 0 : r > 1 ? 1 : r; g = g < 0 ? 0 : g > 1 ? 1 : g; b = b < 0 ? 0 : b > 1 ? 1 : b;
     return C(0.25f + 0.70f * r, 0.25f + 0.70f * g, 0.25f + 0.70f * b, 1);
 }
+static col cover_title(char *title, size_t cap) {      /* the title on the cover and the colour that belongs to it (from the title) */
+    const char *tt = song_title(g_song);
+    snprintf(title, cap, "%s", tt[0] ? tt : (cur >= 0 && cur < npl ? pl[cur].label : "ngPlayer"));
+    unsigned hs = 2166136261u; for (const char *q = title; *q; q++) hs = (hs ^ (unsigned char)*q) * 16777619u;
+    return hue_col((float)(hs % 360) / 360.0f);
+}
+#if !defined(__EMSCRIPTEN__)
+static void cover_fallback(void) {                    /* in the background: no GPU, so the cover is drawn on the CPU (colour, title, artist; no 3D card) until the app is open again and cover_render draws the real one */
+    if (!g_song) return;
+    char title[160]; col acc = cover_title(title, sizeof title);
+    ios_media_set_cover_text(title, g_cover_by, acc.r, acc.g, acc.b, BG0.r, BG0.g, BG0.b);
+}
+#endif
 static void cover_render(int dw, int dh) {
     if (!g_song) return;
     int kind = chip_kind();
     char title[160];
-    const char *tt = song_title(g_song);
-    snprintf(title, sizeof title, "%s", tt[0] ? tt : (cur >= 0 && cur < npl ? pl[cur].label : "ngPlayer"));
-    unsigned hs = 2166136261u; for (const char *q = title; *q; q++) hs = (hs ^ (unsigned char)*q) * 16777619u;
-    col acc = hue_col((float)(hs % 360) / 360.0f);
+    col acc = cover_title(title, sizeof title);
     if (kind > 0) { c3_setup(kind - 1); c3_render(kind - 1, 0.0f, c3gl[kind - 1].color2, dw, dh); }       /* the card, front on, into the picture the Info page uses too */
     if (!cv_tex) cv_tex = gfx_tex_create(COVER_PX, COVER_PX, GFX_RGBA8, NULL, GFX_TARGET);
     if (!gfx_target_begin(cv_tex, BG0.r, BG0.g, BG0.b, 1)) return;
@@ -4185,7 +4196,7 @@ static void ios_media_sync(void) {
     snprintf(g_cover_by, sizeof g_cover_by, "%s", by);
     Uint32 tn = SDL_GetTicks();
     int newsong = strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb);
-    if (newsong) { ios_media_set_cover(NULL, 0, 0); g_cover_gen++; cover_pending = g_song != NULL; }      /* the cover of the previous song goes, the new one is drawn in the next frame */
+    if (newsong) { ios_media_set_cover(NULL, 0, 0); g_cover_gen++; cover_pending = g_song != NULL; if (g_bg && g_song) cover_fallback(); }      /* the cover of the previous song goes, the new one is drawn in the next frame (in the background: a cover from the CPU first, cover_pending stays) */
     if (now != mp || newsong || g_len_s != mlen || tn - mt0 > 15000) {
         mlen = g_len_s; mp = now; mt0 = tn; snprintf(mt, sizeof mt, "%s", t); snprintf(ma, sizeof ma, "%s", artist); snprintf(mb, sizeof mb, "%s", album);
         ios_media_update(mt, ma, mb, now, (double)g_frames / g_rate, g_len_s > 0 ? g_len_s : 0);
