@@ -2924,8 +2924,10 @@ static void draw_ui_portrait(float W, float H) {
             else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
         }
         float chy = novis ? cy0 + oh - 34 : cy0 + oh + M + (avail - oh - M) - 34;   /* without the visualisation the chips sit in the lower right corner of the channels card */
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)           /* iOS has them in the bar (they were hidden with the list open) */
         if (!NG_TV) { draw_rand_chip(M + aw - 56, chy, 44);
         draw_rpt_chip(M + aw - 106, chy, 44); }       /* RND (and RPT left of it) in the lower right corner of the pattern / orb card */
+#endif
         float vuw = 130, spw = aw - vuw - M;
         if (!nosp) { draw_spectrum(M, sy, spw, sh); draw_level(M + spw + M, sy, vuw, sh); }
     }
@@ -2963,6 +2965,9 @@ static void draw_ui_portrait(float W, float H) {
             if (clicked(lx, cy - 16, lw, 32)) { g_plopen = !g_plopen; click = 0; }
         }
         draw_dice(bx + 266, cy, 13.0f);           /* random dice (portrait: right of LIST), big enough for a finger */
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+        draw_rpt_chip(bx + 296, cy - 11, 38); draw_rand_chip(bx + 340, cy - 11, 38);       /* RPT and RND in the bar (the room of the volume slider): reachable with the list open, too */
+#endif
 #if !(defined(__APPLE__) && TARGET_OS_IPHONE)                /* no volume slider on iOS: the device has its buttons */
         float vx = bx + 306, vw = bw - 306 - 22;
         rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
