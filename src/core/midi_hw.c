@@ -14,6 +14,7 @@ struct MidiHw {
     snd_midi_event_t *enc;
     int port, queue, dcl, dpt;
     char name[64];
+    double act[512]; int nact;                                                         /* the queue times of the last messages (for the activity lamp) */
 };
 
 static int find_dest(snd_seq_t *seq, const char *want, int *cl, int *pt, char *name, size_t cap) {
@@ -74,6 +75,7 @@ void midi_hw_send(MidiHw *h, const unsigned char *msg, int len, double at) {
     snd_seq_event_t ev;
     static int logging = -1; if (logging < 0) logging = getenv("NGPLAYER_MIDI_LOG") != NULL;       /* NGPLAYER_MIDI_LOG=1: every message that goes out, on stderr (queue time, bytes) */
     if (logging) { fprintf(stderr, "%9.3f %s%3d:", at < 0 ? midi_hw_time(h) : at, at < 0 ? "now " : "    ", len); for (int i = 0; i < len && i < 24; i++) fprintf(stderr, " %02X", msg[i]); if (len > 24) fprintf(stderr, " ..."); fputc('\n', stderr); }
+    h->act[h->nact++ & 511] = at < 0 ? midi_hw_time(h) : at;
     snd_midi_event_reset_encode(h->enc);
     for (int i = 0; i < len; ) {
         snd_seq_ev_clear(&ev);
@@ -89,6 +91,12 @@ void midi_hw_send(MidiHw *h, const unsigned char *msg, int len, double at) {
     }
     int r = snd_seq_drain_output(h->seq);
     if (r < 0 && logging) fprintf(stderr, "  drain failed: %s\n", snd_strerror(r));
+}
+int midi_hw_activity(const MidiHw *h, double window) {        /* 1 when a message went out (its time stamp in the queue) within the last `window` seconds */
+    if (!h) return 0;
+    double now = midi_hw_time(h); int n = h->nact < 512 ? h->nact : 512;
+    for (int i = 0; i < n; i++) { double t = h->act[(h->nact - 1 - i) & 511]; if (t <= now && t > now - window) return 1; }
+    return 0;
 }
 void midi_hw_drop(MidiHw *h) {
     if (!h) return;

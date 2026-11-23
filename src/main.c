@@ -1606,8 +1606,9 @@ static void module_lcd_update(void) {
     if (n <= cols) { memset(vis, ' ', cols); memcpy(vis + (cols - n) / 2, t, (size_t)n); }
     else { off = (int)(SDL_GetTicks() / 280) % (n + 4); for (int i = 0; i < cols; i++) { int k = (off + i) % (n + 4); vis[i] = k < n ? t[k] : ' '; } }
     vis[cols] = 0;
-    static char shown[cols + 1];
-    if (g->lcd && !strcmp(shown, vis)) return;
+    static char shown[cols + 1]; static int shown_led = -1;
+    const int led = midi_activity();                                                                  /* the MIDI lamp blinks with the messages that go to the hardware */
+    if (g->lcd && !strcmp(shown, vis) && led == shown_led) return;
     if (!g->lcd) g->lcd = gfx_tex_create(m->tw, m->th, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET);
     if (!g->lcd || !gfx_target_begin(g->lcd, 0, 0, 0, 1)) return;
     gfx_set_params((float)m->tw, (float)m->th, 1.0f); gfx_set_texture(fonttex);
@@ -1623,8 +1624,13 @@ static void module_lcd_update(void) {
         char ch[2] = { vis[i], 0 }; if (ch[0] == ' ') continue;
         text_tall(lx + pad + i * cw + (cw - text_width(ch, fs)) / 2, ly + 2.0f + rowh * 0.10f - fs * 0.21f * sy, fs, sy, ink, ch);
     }
+    {   /* the lamp (its place in tools/make_module_panel_mt.py): dark when idle (it is on the baked picture), lit green with a glow while a message goes out */
+        const float cx = 0.4525f * (float)m->tw, cy = 0.4788f * (float)m->th, r = 0.0212f * (float)m->th;
+        if (led) { rrect(cx - r * 2.2f, cy - r * 2.2f, r * 4.4f, r * 4.4f, r * 2.2f, C(0.35f, 1.0f, 0.25f, 0.22f)); rrect(cx - r * 1.2f, cy - r * 1.2f, r * 2.4f, r * 2.4f, r * 1.2f, C(0.55f, 1.0f, 0.40f, 1)); }
+    }
     flush();
     gfx_target_end(g->lcd);
+    shown_led = led;
     snprintf(shown, sizeof shown, "%s", vis);
 #endif
 }

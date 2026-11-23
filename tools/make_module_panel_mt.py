@@ -44,7 +44,7 @@ kx, ky, kr = int(1410 * sx), 112, 46
 d.ellipse((kx - kr, ky - kr, kx + kr, ky + kr), fill=(18, 18, 21))
 import math
 for a in range(24):
-    ang = math.radians(-60 + a * (300.0 / 23)); x = kx + (kr + 12) * math.cos(ang - math.pi / 2); y = ky + (kr + 12) * math.sin(ang - math.pi / 2); d.ellipse((x - 2, y - 2, x + 2, y + 2), fill=(200, 200, 205))
+    ang = math.radians(-135 + a * (270.0 / 23)); x = kx + (kr + 12) * math.cos(ang - math.pi / 2); y = ky + (kr + 12) * math.sin(ang - math.pi / 2); d.ellipse((x - 2, y - 2, x + 2, y + 2), fill=(200, 200, 205))
 label(kx, 24, 'SELECT', f_s)
 # the edge shading
 edge = Image.new('L', (W, H), 0); ImageDraw.Draw(edge).rectangle((0, 0, W - 1, H - 1), outline=255, width=7)

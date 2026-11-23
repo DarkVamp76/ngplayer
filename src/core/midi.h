@@ -45,6 +45,7 @@ void  midi_set_mute(Midi *m, unsigned mask);
 /* the output: the SoundFont (default) or real MIDI hardware through ALSA (Linux; NG_HWMIDI). Switch with the audio device locked. */
 int   midi_set_hardware(int on, const char *want);                   /* on: connect to the hardware port `want` (NULL: the first one); returns 1 when the hardware is the output now */
 int   midi_hardware_on(void);
+int midi_activity(void);                                            /* 1 while the MIDI hardware gets a message (the lamp of the module) */
 const char *midi_output_name(void);                                  /* "SoundFont" or the name of the MIDI device */
 void  midi_idle(Midi *m);                                            /* the player does not render (pause, end): the hardware gets a panic and the next render starts again from here */
 void  midi_set_scope(Midi *m, float *buf, int len);                  /* scope rings: buf[channel * len + position], len a power of two (the voices of each channel, dry) */
