@@ -754,7 +754,7 @@ void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
 }
 
 void song_scope_enable(Song *s, float *buf, int len) {
-    if (s->mi) return;
+    if (s->mi) { midi_set_scope(s->mi, buf, len); return; }
     if (s->op) opl_set_scope(s->op, buf, len);
     else if (s->ap) ahx_set_scope(s->ap, buf, len);
     else if (s->ip) itp_set_scope(s->ip, buf, len);
@@ -764,7 +764,7 @@ void song_scope_enable(Song *s, float *buf, int len) {
     else xplay_set_scope(s->xp, buf, len);
 }
 unsigned song_scope_pos(const Song *s) {
-    if (s->mi) return 0;
+    if (s->mi) return midi_scope_pos(s->mi);
     if (s->op) return opl_scope_pos(s->op);
     if (s->ap) return ahx_scope_pos(s->ap);
     if (s->ip) return itp_scope_pos(s->ip);
