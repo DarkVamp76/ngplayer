@@ -162,13 +162,16 @@ static int find_syx(const char *path, char *out, size_t cap, char *name, size_t 
     snprintf(stem, sizeof stem, "%s", sl ? sl + 1 : path);
     char *dt = strrchr(stem, '.'); if (dt) *dt = 0;
     DIR *d = opendir(dir); if (!d) return 0;
-    struct dirent *e; int found = 0;
+    struct dirent *e; int found = 0, nsyx = 0; char only[256] = "";
     while ((e = readdir(d))) {
         const char *x = strrchr(e->d_name, '.'); if (!x || strcasecmp(x, ".syx")) continue;
         size_t n = (size_t)(x - e->d_name);
         if (n == strlen(stem) && !strncasecmp(e->d_name, stem, n)) { snprintf(out, cap, "%s/%s", dir, e->d_name); snprintf(name, ncap, "%s", e->d_name); found = 1; break; }
+        if (nsyx++ == 0) snprintf(only, sizeof only, "%s", e->d_name);
     }
-    closedir(d); return found;
+    closedir(d);
+    if (!found && nsyx == 1) { snprintf(out, cap, "%s/%s", dir, only); snprintf(name, ncap, "%s", only); found = 1; }      /* no .syx with the name of the song, but exactly one in the folder (one set-up for a whole game): that one */
+    return found;
 #endif
 }
 
