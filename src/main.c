@@ -2290,9 +2290,9 @@ static void draw_duo_bar(float W, float H) {
     float hash_cx = ri - 22, fold_cx = hash_cx - 14 - 8 - 14, air_cx = fold_cx - 14 - 10 - 18;
     float vx = fold + 8, lw = 58;
     float room = (air_cx - 18 - 12) - (26 + 12 + lw + 16) - vx;                /* what is left up to the AirPlay button, for the volume (and RPT / RND) */
-    int chips = room - 92 >= 96;                                               /* RPT and RND (two chips of 38 and the gaps) next to the dice, when the bar is wide enough */
+    int chips = room - 92 >= 72;                                               /* RPT and RND (two chips of 38 and the gaps) next to the dice, when the bar is wide enough (the volume keeps 72 at least) */
     float vw = chips ? room - 92 : room;
-    if (vw > 168) vw = 168; if (vw < 96) vw = 96;
+    if (vw > 168) vw = 168; if (vw < (chips ? 72 : 96)) vw = chips ? 72 : 96;
     if (g_song && song_norders(g_song) > 1) draw_seek_row(M + 164, cy - 36.0f / 2 + 3, (fold - 8) - (M + 164));      /* 36 = SEEK_ROW */
     rrect(vx, cy - 3, vw, 6, 3, alpha(FAINT, 0.35f));
     rrect(vx, cy - 3, 6 + (vw - 6) * g_vol, 6, 3, VC[0]);
