@@ -110,7 +110,8 @@ struct Midi {
     char lcd[24];
     uint8_t *syx; size_t syx_len; char syx_name[48]; int syx_msgs;      /* the .syx file next to the MIDI file */
     uint8_t *sxp; size_t sxn, sxcap;                                     /* every SysEx message of the file as it is (2 bytes length, then F0 .. F7): for the hardware output */
-    int hw_ready, hw_mode; double hw_base, hw_pos0, hw_sx_free;                      /* the hardware output: the queue time of the song time hw_pos0 */
+    int hw_ready, hw_mode, hw_setup_done; double hw_base, hw_pos0, hw_sx_free; size_t hw_next;      /* hw_next: the next event for the hardware (the SoundFont synth runs on, silent, for the scopes and has its own m->next) */
+    size_t setup_end;                                                    /* the index of the first note: what comes before it is the set-up of the file */                      /* the hardware output: the queue time of the song time hw_pos0 */
     unsigned mute;
     int prog[NCH], bank[NCH], vol[NCH], pan[NCH];
     float lvl[NCH];
@@ -366,6 +367,7 @@ Midi *midi_open(const uint8_t *buf, size_t total, int rate, char *err, size_t er
     }
     if (!m->info.notes) { snprintf(err, errcap, "the MIDI file has no notes"); free(m->ev); free(m); return NULL; }
     qsort(m->ev, m->nev, sizeof(Ev), evcmp);
+    m->setup_end = m->nev; for (size_t k = 0; k < m->nev; k++) if (m->ev[k].type == EV_NOTEON) { m->setup_end = k; break; }
     /* the time of every event: walk the tempo map */
     m->frame = (uint64_t *)malloc(m->nev * sizeof(uint64_t));
     double sec = 0, tempo = 500000.0, spt = (div & 0x8000) ? 1.0 / ((double)(256 - (div >> 8)) * (double)(div & 0xFF)) : 0;       /* SMPTE: seconds per tick */
@@ -463,41 +465,46 @@ static double sx_gap_msg(const uint8_t *p, int len) {               /* p: the me
     if (len >= 9 && p[0] == 0xF0 && p[1] == 0x41 && p[3] == 0x16 && p[4] == 0x12 && p[5] == 0x7F && p[6] == 0 && p[7] == 0) g += 0.4;        /* the MT-32 reset (7F 00 00) takes its time */
     return g;
 }
-static void hw_short(Midi *m, const Ev *e, double t) {
-    unsigned char b[3];
-    if (e->type == EV_PROG) { b[0] = (unsigned char)(0xC0 | e->ch); b[1] = e->a; midi_hw_send(g_hw, b, 2, t); }
-    else if (e->type == EV_CC) { b[0] = (unsigned char)(0xB0 | e->ch); b[1] = e->a; b[2] = e->b; midi_hw_send(g_hw, b, 3, t); }
-    else if (e->type == EV_BEND) { b[0] = (unsigned char)(0xE0 | e->ch); b[1] = e->a; b[2] = e->b; midi_hw_send(g_hw, b, 3, t); }
-    (void)m;
-}
-/* what the hardware needs before the notes (the GM reset, the .syx, the set-up messages of the file), the state of the channels when the song is not at its start, then the time of the song in the queue */
+/* what the hardware needs: once per song the GM reset (not for the MT-32), the .syx next to the file and the set-up messages before the first note, in order and spaced; and every time
+ * (start, seek, resume) the state of the channels up to the song position: the LAST program, controllers and pitch bend of each channel (not everything that came on the way, and not the
+ * set-up again and no SysEx at all: they are an INIT, sent once at the start; the device keeps what it has been told). Then the time of the song in the queue. */
 static void hw_resync(Midi *m) {
     midi_hw_drop(g_hw); midi_hw_panic(g_hw);
-    double t = midi_hw_time(g_hw) + 0.06, pos0 = (double)m->pos / m->rate;
-    m->hw_pos0 = pos0; m->hw_sx_free = 0;
-    size_t i = 0;
-    if (m->pos == 0) {                                                          /* the start: General MIDI gets its reset (not the MT-32), then the .syx next to the file comes first */
+    double t = midi_hw_time(g_hw) + 0.06;
+    m->hw_pos0 = (double)m->pos / m->rate; m->hw_sx_free = 0;
+    if (!m->hw_setup_done) {
         if (!m->sx_mt32) { static const unsigned char gm[6] = { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 }; midi_hw_send(g_hw, gm, 6, t); t += sx_gap_base() + 0.08; }
         for (size_t k = 0; k < m->syx_len; k++) {
             if (m->syx[k] != 0xF0) continue;
             size_t j = k + 1; while (j < m->syx_len && m->syx[j] != 0xF7) j++;
             if (j < m->syx_len) { midi_hw_send(g_hw, m->syx + k, (int)(j - k + 1), t); t += sx_gap_msg(m->syx + k, (int)(j - k + 1)); k = j; }
         }
-        for (; i < m->nev && m->ev[i].type != EV_NOTEON; i++) {                 /* everything before the first note is set-up: in order, spaced, and the song waits for it */
-            const Ev *e = &m->ev[i];
+        for (size_t j = 0; j < m->setup_end; j++) {                              /* the SysEx messages before the first note: the set-up of the file */
+            const Ev *e = &m->ev[j];
             if (e->type == EV_SYSEX) { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); midi_hw_send(g_hw, p + 2, n, t); t += sx_gap_msg(p + 2, n); }
-            else if (e->type == EV_PROG || e->type == EV_CC || e->type == EV_BEND) { hw_short(m, e, t); t += 0.002; }
         }
-        t += 0.1;
-    } else {                                                                    /* a seek / a resume: the state of the channels up to here (no notes) */
-        for (; i < m->nev && m->frame[i] < m->pos; i++) {
-            const Ev *e = &m->ev[i];
-            if (e->type == EV_SYSEX) { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); midi_hw_send(g_hw, p + 2, n, t); t += sx_gap_msg(p + 2, n); }
-            else if (e->type == EV_PROG || e->type == EV_CC || e->type == EV_BEND) { hw_short(m, e, t); t += 0.002; }
-        }
-        t += 0.05;
+        m->hw_setup_done = 1; t += 0.1;
     }
-    m->next = i; m->hw_base = t; m->hw_ready = 1;
+    int prog[NCH], bend[NCH][2], cc[NCH][128];
+    for (int c = 0; c < NCH; c++) { prog[c] = -1; bend[c][0] = -1; for (int k = 0; k < 128; k++) cc[c][k] = -1; }
+    size_t i = 0;
+    for (; i < m->nev; i++) {
+        const Ev *e = &m->ev[i];
+        if (i >= m->setup_end && m->frame[i] >= m->pos) break;                  /* up to the song position (and always the events before the first note) */
+        if (e->type == EV_PROG) prog[e->ch] = e->a;
+        else if (e->type == EV_CC) cc[e->ch][e->a] = e->b;
+        else if (e->type == EV_BEND) { bend[e->ch][0] = e->a; bend[e->ch][1] = e->b; }
+    }
+    for (int c = 0; c < NCH; c++) {
+        unsigned char b[3];
+        static const int first[2] = { 0, 32 };                                  /* bank select first, then the other controllers, then the program (it needs the bank), then the bend */
+        for (int k = 0; k < 2; k++) if (cc[c][first[k]] >= 0) { b[0] = (unsigned char)(0xB0 | c); b[1] = (unsigned char)first[k]; b[2] = (unsigned char)cc[c][first[k]]; midi_hw_send(g_hw, b, 3, t); t += 0.002; }
+        for (int k = 1; k < 128; k++) if (k != 32 && cc[c][k] >= 0) { b[0] = (unsigned char)(0xB0 | c); b[1] = (unsigned char)k; b[2] = (unsigned char)cc[c][k]; midi_hw_send(g_hw, b, 3, t); t += 0.002; }
+        if (prog[c] >= 0) { b[0] = (unsigned char)(0xC0 | c); b[1] = (unsigned char)prog[c]; midi_hw_send(g_hw, b, 2, t); t += 0.002; }
+        if (bend[c][0] >= 0) { b[0] = (unsigned char)(0xE0 | c); b[1] = (unsigned char)bend[c][0]; b[2] = (unsigned char)bend[c][1]; midi_hw_send(g_hw, b, 3, t); t += 0.002; }
+    }
+    t += 0.05;
+    m->hw_next = i; m->hw_base = t; m->hw_ready = 1;
 }
 static void hw_event(Midi *m, size_t i) {
     const Ev *e = &m->ev[i]; unsigned char b[3];
@@ -512,22 +519,13 @@ static void hw_event(Midi *m, size_t i) {
     default: break;                                                             /* the resets are in the SysEx messages themselves, the tempo is in the times */
     }
 }
-/* the player's audio callback asks for frames: nothing is rendered, the song time runs on and the events go to the hardware a little ahead of their time */
-static int render_hw(Midi *m, int16_t *out, int frames) {
+/* the hardware part of a render call: the events go to the device a little ahead of their time; returns 0 while the set-up is still being sent (the song does not run yet) */
+static int hw_feed(Midi *m, int frames) {
     if (!m->hw_ready) hw_resync(m);
-    if (midi_hw_time(g_hw) < m->hw_base - 0.12) { memset(out, 0, (size_t)frames * 4); return frames; }     /* the set-up is still on its way: the song does not run yet */
+    if (midi_hw_time(g_hw) < m->hw_base - 0.12) return 0;
     double ahead = ((double)m->pos + frames) / m->rate + 0.12;
-    while (m->next < m->nev && (double)m->frame[m->next] / m->rate <= ahead) { hw_event(m, m->next); m->next++; }
-    int n = frames;
-    if (m->next >= m->nev) {                                                    /* after the last event: the release of the notes, then the end */
-        double end = m->length + 2.0, now = (double)m->pos / m->rate;
-        if (now >= end) { memset(out, 0, (size_t)frames * 4); return 0; }
-        if ((double)n / m->rate > end - now) { n = (int)((end - now) * m->rate); if (n < 1) n = 1; }
-    }
-    memset(out, 0, (size_t)n * 4); memset(out + 2 * (size_t)n, 0, (size_t)(frames - n) * 4);
-    m->pos += (uint64_t)n;
-    if (m->tail || m->next < m->nev) m->tail = 0;
-    return n;
+    while (m->hw_next < m->nev && (double)m->frame[m->hw_next] / m->rate <= ahead) { hw_event(m, m->hw_next); m->hw_next++; }
+    return 1;
 }
 #endif
 
@@ -540,7 +538,7 @@ int midi_render(Midi *m, int16_t *out, int frames) {
         if (hw) { for (int c = 0; c < NCH; c++) tsf_channel_sounds_off_all(m->f, c); m->hw_ready = 0; }
         else { uint64_t p = m->pos; midi_seek(m, (double)p / m->rate); }
     }
-    if (hw) return render_hw(m, out, frames);
+    if (hw && !hw_feed(m, frames)) { memset(out, 0, (size_t)frames * 4); return frames; }            /* the set-up is still on its way: the song does not run yet */
 #endif
     int done = 0;
     while (done < frames) {
@@ -576,6 +574,9 @@ int midi_render(Midi *m, int16_t *out, int frames) {
     }
     if (done) { float k = (float)pow(0.85, (double)done / m->rate * 20.0); for (int c = 0; c < NCH; c++) m->lvl[c] *= k; }
     if (done < frames) memset(out + 2 * (size_t)done, 0, (size_t)(frames - done) * 4);
+#if NG_HWMIDI
+    if (g_hw) memset(out, 0, (size_t)done * 4);                                    /* on hardware the SoundFont synth is only there for the scopes: no sound */
+#endif
     return done;
 }
 void midi_set_scope(Midi *m, float *buf, int len) { m->scope = buf; m->scope_len = len; m->scope_pos = 0; }
