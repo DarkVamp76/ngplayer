@@ -2377,7 +2377,7 @@ static void ma_text(const char *t) {
 static void draw_ma_dialog(double t) {
     if (!ma_open) return;
     rect(0, 0, view_w, view_h, C(0, 0, 0, 0.60f));
-    float w = 640, h = 168, x = (view_w - w) / 2, y = (view_h - h) / 2 - 20;
+    float w = view_w - 24 < 640 ? view_w - 24 : 640, h = 168, x = (view_w - w) / 2, y = (view_h - h) / 2 - 20;      /* a narrow screen (phone): the dialog is as wide as the screen minus a margin */
     card(x, y, w, h, 0);
     text(x + 24, y + 18, 12, DIM, "THE MOD ARCHIVE");
     text(x + 24, y + 38, 14, TXT, "Paste a module ID or link");
@@ -2389,7 +2389,7 @@ static void draw_ma_dialog(double t) {
     text(bx + 12, by + 9, 15, TXT, s);
     if (dl_state != 1 && ((int)(t * 2) & 1)) rect(bx + 12 + text_width(s, 15) + 2, by + 8, 2, 20, VC[0]);
     if (ma_msg[0]) text(x + 24, y + 120, 13, ma_msg_err ? WARN : VC[0], ma_msg);
-    else text(x + 24, y + 120, 12, FAINT, "Enter downloads  \xb7  Ctrl+V paste  \xb7  Ctrl+R random  \xb7  Esc close");
+    else text(x + 24, y + 120, 12, FAINT, w < 560 ? "Enter downloads  \xb7  tap outside to close" : "Enter downloads  \xb7  Ctrl+V paste  \xb7  Ctrl+R random  \xb7  Esc close");
 }
 
 /* the second line of the title card: the tracker the module was made with (the same text as on the Info page), or its format when that is not known */
@@ -4404,6 +4404,12 @@ static void iter(void) {
             ctx_idx = -1; click = 0; lp_swallow = 1;
         }
         if (rclick && ctx_idx >= 0) ctx_idx = -1;
+        if (ma_open && click) {                              /* the Mod Archive dialog: a click or tap outside of it closes it (a phone has no Esc key) */
+            float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;
+            float dw = view_w - 24 < 640 ? view_w - 24 : 640, dh = 168, dx = (view_w - dw) / 2, dy = (view_h - dh) / 2 - 20;
+            if (cmx < dx || cmx >= dx + dw || cmy < dy || cmy >= dy + dh) ma_show(0);
+            click = 0; lp_swallow = 1;
+        }
 
         Uint64 now = SDL_GetPerformanceCounter();
         double dt = (double)(now - tlast) / freq;
