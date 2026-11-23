@@ -2813,7 +2813,7 @@ static void draw_seek_row(float bx, float ty, float bw) {
 
 static void draw_ui_portrait(float W, float H) {
     const float M = 10, BOT = (g_duo || NG_TV) ? 0.0f : 64.0f;          /* iPhone Duo opened: the transport bar is the wide one over both pages (draw_duo_bar) */
-    const float awf = W - 2 * M - (g_sa_r > 0 ? 24.0f : 0.0f);         /* the width of all the cards; the closed Duo keeps 24 more at the right, clear of the rounded corner of the display */
+    const float awf = W - 2 * M - (g_sa_r > 0 ? 8.0f : 0.0f);          /* the width of all the cards; the closed Duo keeps 8 more at the right, clear of the rounded corner of the display */
     float aw = W - g_sa_r - 2 * M;                                         /* the content of the top cards (header, channels) stays left of the status column of the closed Duo; the cards themselves have the full width */
     g_ov_fullw = awf;
     /* ---------------- Kopf */
