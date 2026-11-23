@@ -32,3 +32,5 @@
   (`GeneralUser-GS.sf2`; use without restriction, private or commercial, in software projects too; the author notes that he cannot be
   fully certain of the origin of every sample). The licence text is in `documentation/LICENSE.txt` of https://github.com/mrbumpy409/GeneralUser-GS
 - **MIDI sound module** (`assets/models/midi-module.obj` / `.mtl`, baked into `src/module_data.h` by `tools/bake_module.py`): a generic rack module; the geometry was supplied by the maintainer, the front panel picture (`assets/models/module-front.png`, `tools/make_module_panel.py`) is drawn for ngPlayer and carries no brand names or logos.
+- **Second MIDI sound module, black** (`assets/models/midi-module-mt.obj` / `.mtl`, baked into `src/module_mt_data.h`): geometry supplied by the maintainer; its front panel picture (`assets/models/module-mt-front.png`, `tools/make_module_panel_mt.py`) is drawn for ngPlayer, no brand names or logos.
+

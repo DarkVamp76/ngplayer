@@ -1583,7 +1583,11 @@ static int chip_kind_of(const char *f, int n) {
     }
     return n > 32 ? 3 : (n >= 15 ? 2 : 1);
 }
-static int chip_kind(void) { return chip_kind_of(song_format(g_song), song_channels(g_song)); }
+static int chip_kind_song(const Song *sg) {                    /* MIDI: the black module for files written for the MT-32, the other one for the rest */
+    if (song_is_midi(sg)) { int known; return !strcmp(song_midi_standard(sg, &known), "MT-32") ? 7 : 6; }
+    return chip_kind_of(song_format(sg), song_channels(sg));
+}
+static int chip_kind(void) { return chip_kind_song(g_song); }
 #include "card3d.inc"
 static float chips_width_k(int k, float h) {
     if (k == 0) return 5.0f * h * 0.5f;                            /* Paula: a flat strip (5:1), at half height */
@@ -2769,7 +2773,7 @@ static void draw_ui(double t) {
             if (bend > tl) tl = bend;
             float x0 = 0.5f * (tl + tr) - chw / 2;
             if (x0 < tl + 8) x0 = tl + 8;
-            { static const float lift[7] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f, 0.0f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
+            { static const float lift[8] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f, 0.0f, 0.0f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
         }
     }
 
@@ -3043,7 +3047,7 @@ static void draw_ui_portrait(float W, float H) {
                 if (cx > tl) tl = cx;
                 if (tr - tl >= 40) { x0 = 0.5f * (tl + tr) - chw / 2; if (x0 < tl + 4) x0 = tl + 4; }   /* centred between the title and the time; on a phone it may reach into the time, not into the title */
                 else if (x0 < cx + 6) x0 = cx + 6;                                          /* a very long title: lower right, may cover part of the time */
-                if (chw > 0 && x0 + chw <= M + aw - 6) { static const float lift[7] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f, 0.0f };               /* the same lift per model as in the landscape header */
+                if (chw > 0 && x0 + chw <= M + aw - 6) { static const float lift[8] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f, 0.0f, 0.0f };               /* the same lift per model as in the landscape header */
                     draw_chips(x0, chip_kind() == 0 ? hy + hh / 2 - chh / 2 : hy + (hh - chh) / 2 - lift[chip_kind()] * chh, chh); }   /* centred in the title card at every width */
             }
         }
@@ -3825,7 +3829,7 @@ static void draw_info_tv(float x, float y, float w, float h) {
     if (isong != g_song || icur != cur) {
         isong = g_song; icur = cur; song_info(g_song, &isi);
         snprintf(ilabel, sizeof ilabel, "%s", isi.title[0] ? isi.title : (cur >= 0 ? pl[cur].label : ""));
-        ikind = chip_kind_of(song_format(g_song), song_channels(g_song));
+        ikind = chip_kind_song(g_song);
     }
     { const char *tc = getenv("NGPLAYER_TEST_CHIP"); if (tc) ikind = atoi(tc); }          /* test hook: another card kind (0 = Paula strip, 1 .. 5 the 3D cards) */
     /* the room: the sound card (swinging) takes the left part at the largest size that fits, the text column the rest, centred in the height */
