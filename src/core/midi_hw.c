@@ -48,6 +48,7 @@ MidiHw *midi_hw_open(const char *want) {
     if (snd_seq_open(&seq, "default", SND_SEQ_OPEN_OUTPUT, SND_SEQ_NONBLOCK) < 0) return NULL;
     snd_seq_set_client_name(seq, "ngPlayer");
     snd_seq_set_output_buffer_size(seq, 1 << 16);
+    snd_seq_set_client_pool_output(seq, 8192);                                        /* a SysEx message takes a cell for every 12 bytes: the default 500 cells are gone after about 20 long messages */
     MidiHw *h = (MidiHw *)calloc(1, sizeof *h); h->seq = seq;
     if (!find_dest(seq, want, &h->dcl, &h->dpt, h->name, sizeof h->name)) { snd_seq_close(seq); free(h); return NULL; }
     h->port = snd_seq_create_simple_port(seq, "MIDI out", SND_SEQ_PORT_CAP_READ | SND_SEQ_PORT_CAP_SUBS_READ, SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
@@ -80,12 +81,14 @@ void midi_hw_send(MidiHw *h, const unsigned char *msg, int len, double at) {
         if (n <= 0) break;
         i += (int)n;
         if (ev.type == SND_SEQ_EVENT_NONE) continue;
-        snd_seq_ev_set_source(&ev, h->port); snd_seq_ev_set_dest(&ev, h->dcl, h->dpt);
+        snd_seq_ev_set_source(&ev, h->port); snd_seq_ev_set_subs(&ev);
         if (at < 0) snd_seq_ev_set_direct(&ev);
         else { snd_seq_real_time_t rt; rt.tv_sec = (unsigned)at; rt.tv_nsec = (unsigned)((at - (double)rt.tv_sec) * 1e9); snd_seq_ev_schedule_real(&ev, h->queue, 0, &rt); }
-        snd_seq_event_output(h->seq, &ev);
+        int r = snd_seq_event_output(h->seq, &ev);
+        if (r < 0 && logging) fprintf(stderr, "  event_output failed: %s\n", snd_strerror(r));
     }
-    snd_seq_drain_output(h->seq);
+    int r = snd_seq_drain_output(h->seq);
+    if (r < 0 && logging) fprintf(stderr, "  drain failed: %s\n", snd_strerror(r));
 }
 void midi_hw_drop(MidiHw *h) {
     if (!h) return;

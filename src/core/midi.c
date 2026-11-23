@@ -110,7 +110,7 @@ struct Midi {
     char lcd[24];
     uint8_t *syx; size_t syx_len; char syx_name[48]; int syx_msgs;      /* the .syx file next to the MIDI file */
     uint8_t *sxp; size_t sxn, sxcap;                                     /* every SysEx message of the file as it is (2 bytes length, then F0 .. F7): for the hardware output */
-    int hw_ready, hw_mode, hw_setup_done; double hw_base, hw_pos0, hw_sx_free; size_t hw_next;      /* hw_next: the next event for the hardware (the SoundFont synth runs on, silent, for the scopes and has its own m->next) */
+    int hw_ready, hw_mode, hw_setup_done; double hw_base, hw_pos0, hw_sx_free, hw_setup_end; size_t hw_next;      /* hw_next: the next event for the hardware (the SoundFont synth runs on, silent, for the scopes and has its own m->next) */
     size_t setup_end;                                                    /* the index of the first note: what comes before it is the set-up of the file */                      /* the hardware output: the queue time of the song time hw_pos0 */
     unsigned mute;
     int prog[NCH], bank[NCH], vol[NCH], pan[NCH];
@@ -340,7 +340,7 @@ Midi *midi_open(const uint8_t *buf, size_t total, int rate, char *err, size_t er
                     sysex_note(m, d, sl);
                     if (sl >= 2 && sl < 65000 && d[sl - 1] == 0xF7) {                       /* the whole message, for the hardware */
                         if (m->sxn + sl + 3 > m->sxcap) { m->sxcap = (m->sxcap + sl + 3) * 2; m->sxp = (uint8_t *)realloc(m->sxp, m->sxcap); }
-                        size_t off = m->sxn; m->sxp[off] = (uint8_t)(sl & 0xFF); m->sxp[off + 1] = (uint8_t)(sl >> 8); m->sxp[off + 2] = 0xF0; memcpy(m->sxp + off + 3, d, sl); m->sxn += sl + 3;
+                        size_t off = m->sxn; m->sxp[off] = (uint8_t)((sl + 1) & 0xFF); m->sxp[off + 1] = (uint8_t)((sl + 1) >> 8); m->sxp[off + 2] = 0xF0;   /* the length counts the F0 too */ memcpy(m->sxp + off + 3, d, sl); m->sxn += sl + 3;
                         evpush(m, &cap, tick, EV_SYSEX, 0, 0, 0, (uint32_t)off, &seq);
                     }
                 }
@@ -470,6 +470,7 @@ static double sx_gap_msg(const uint8_t *p, int len) {               /* p: the me
  * set-up again and no SysEx at all: they are an INIT, sent once at the start; the device keeps what it has been told). Then the time of the song in the queue. */
 static void hw_resync(Midi *m) {
     midi_hw_drop(g_hw); midi_hw_panic(g_hw);
+    if (m->hw_setup_done && midi_hw_time(g_hw) < m->hw_setup_end) m->hw_setup_done = 0;        /* the drop above threw away a set-up that was still waiting in the queue: send it again */
     double t = midi_hw_time(g_hw) + 0.06;
     m->hw_pos0 = (double)m->pos / m->rate; m->hw_sx_free = 0;
     if (!m->hw_setup_done) {
@@ -483,7 +484,7 @@ static void hw_resync(Midi *m) {
             const Ev *e = &m->ev[j];
             if (e->type == EV_SYSEX) { const uint8_t *p = m->sxp + e->val; int n = p[0] | (p[1] << 8); midi_hw_send(g_hw, p + 2, n, t); t += sx_gap_msg(p + 2, n); }
         }
-        m->hw_setup_done = 1; t += 0.1;
+        m->hw_setup_done = 1; t += 0.1; m->hw_setup_end = t;
     }
     int prog[NCH], bend[NCH][2], cc[NCH][128];
     for (int c = 0; c < NCH; c++) { prog[c] = -1; bend[c][0] = -1; for (int k = 0; k < 128; k++) cc[c][k] = -1; }
