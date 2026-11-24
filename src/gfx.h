@@ -18,6 +18,7 @@ typedef struct gfx_mesh gfx_mesh;                     /* an indexed triangle mes
 
 /* ---- window and frame ---------------------------------------------------------------------------------------------------------------------------------- */
 Uint32 gfx_window_flags(void);                        /* the SDL window flag of the backend (SDL_WINDOW_OPENGL or SDL_WINDOW_METAL) */
+int gfx_target_v_flipped(void);                       /* 1: a picture drawn into a render target (GFX_TARGET) has to be sampled with 1 - v to stand upright on a 3D model (OpenGL); 0: with v (Metal) */
 void   gfx_window_attrs(void);                        /* before the window is created: attributes of the context (OpenGL); nothing for Metal */
 int    gfx_init(SDL_Window *win, int max_vtx);        /* after the window: context / device, shaders, vertex buffer. 0 = ok, else -1 (a message is printed) */
 void   gfx_shutdown(void);
