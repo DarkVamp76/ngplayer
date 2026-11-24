@@ -1623,6 +1623,7 @@ static void module_bars_update(void) {
     memcpy(shown, seg, sizeof seg); have = 1;
 #endif
 }
+#include "lcd_font.h"
 static void module_lcd_update(void) {
 #if NG_MIDI
     if (!g_song || !song_is_midi(g_song) || chip_kind() != 7) return;
@@ -1644,14 +1645,19 @@ static void module_lcd_update(void) {
     set_additive(0);
     tex_quad(g->tex, 0, 0, (float)m->tw, (float)m->th, C(1, 1, 1, 1));                              /* the baked panel (the card model flips the picture, a render target is stored the other way up) */
     const float lx = MT_LCD_X0 * (float)m->tw, ly = MT_LCD_Y0 * (float)m->th, lw = (MT_LCD_X1 - MT_LCD_X0) * (float)m->tw, lh = (MT_LCD_Y1 - MT_LCD_Y0) * (float)m->th;
-    const float pad = lw * 0.02f, cw = (lw - 2 * pad) / cols, rowh = lh - 4.0f;                      /* ONE line of 20 cells, as on the device */
-    const col ink = C(0.757f, 0.984f, 0.224f, 1), cellc = C(0.38f, 0.66f, 0.10f, 1);                 /* the backlit green LCD, the colours measured on a photo of the device: lime characters (193, 251, 57) in lit cells (about 96, 168, 26) */
-    for (int i = 0; i < cols; i++) rect(lx + pad + i * cw + 0.6f, ly + 2.0f + 0.6f, cw - 1.2f, rowh - 1.2f, cellc);
-    const float emw = text_width("H", 100.0f) / 100.0f;                                               /* the characters are as wide as their cell allows ... */
-    const float fill = 0.64f, fs = cw * 0.86f / emw, sy = (rowh * fill) / (fs * 0.73f);                /* ... and stretched in height to fill 64 % of the cell (room above and below, so that the characters do not look so narrow) */
+    /* the backlit LCD of the device (colours from photos of it): a bright green window; the 20 cells of 5 x 7 dots (+ 2 rows for the descenders and the cursor row below) use the inner
+     * 70 % of the height, a green frame stays all round; the dots that are off stay visible as a darker grid */
+    const col winc = C(0.47f, 0.70f, 0.03f, 1), offc = C(0.36f, 0.56f, 0.03f, 1), onc = C(0.93f, 1.0f, 0.15f, 1);
+    rrect(lx, ly, lw, lh, 4.0f, winc);
+    const float iw = lw * 0.94f, ih = lh * 0.70f, ix = lx + (lw - iw) / 2, iy = ly + (lh - ih) / 2, cw = iw / cols, px = cw / 6.0f, py = ih / 10.0f, dw = px * 0.88f, dh = py * 0.88f;
     for (int i = 0; i < cols; i++) {
-        char ch[2] = { vis[i], 0 }; if (ch[0] == ' ') continue;
-        text_tall(lx + pad + i * cw + (cw - text_width(ch, fs)) / 2, ly + 2.0f + rowh * (1.0f - fill) / 2 - fs * 0.21f * sy, fs, sy, ink, ch);
+        int ci = (unsigned char)vis[i]; if (ci < 32 || ci > 126) ci = '?';
+        const unsigned char *g = lcd_font[ci - 32];
+        for (int r = 0; r < 9; r++) for (int c = 0; c < 5; c++) {
+            const int on = (g[r] >> (4 - c)) & 1;
+            rect(ix + i * cw + (c + 0.5f) * px + (px - dw) / 2, iy + r * py + (py - dh) / 2, dw, dh, on ? onc : offc);
+        }
+        for (int c = 0; c < 5; c++) rect(ix + i * cw + (c + 0.5f) * px + (px - dw) / 2, iy + 9 * py + (py - dh) / 2, dw, dh, offc);       /* the cursor row (nothing lit) */
     }
     {   /* the lamp (its place in tools/make_module_panel_mt.py): dark when idle (it is on the baked picture), lit green with a glow while a message goes out */
         const float cx = 0.4525f * (float)m->tw, cy = 0.4788f * (float)m->th, r = 0.0212f * (float)m->th;
