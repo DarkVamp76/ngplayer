@@ -1899,6 +1899,69 @@ static void tv_dice(void) {                 /* Apple TV, Select: always draw a n
     if (ma_busy()) { if (ma_loading()) { snprintf(toast_txt, sizeof toast_txt, "Still loading ..."); toast_t = 1.5f; } return; }
     rand_fail_t = 0; snprintf(toast_txt, sizeof toast_txt, "Drawing a random module ..."); toast_t = 2.5f; ma_random();
 }
+#if defined(__APPLE__) && TARGET_OS_TV
+/* ---- Apple TV: favorites and the context menu (Select held) ---------------------------------------------------------------------------------------------------
+ * Favorites are Mod Archive modules: "id<TAB>title" per line in favorites.txt next to settings.ini. The left list shows either the loaded modules or the favorites.
+ * Select held (0.5 s) opens the menu: add / remove favorite, show favorites / the loaded modules, remove from the list, cancel. Up / Down choose, Select acts, Menu closes. */
+static int settings_path(char *out, size_t n, int mkdir_p);
+static void ma_start_id(int id);
+typedef struct { int id; char title[96]; } tv_fav_t;
+static tv_fav_t tv_fav[512]; static int tv_nfav;
+static int tv_fav_mode, tv_fav_sel;                       /* 1 = the left list shows the favorites; the selected row there */
+static int tv_ctx_open, tv_ctx_sel, tv_ctx_n, tv_ctx_it[6]; static Uint32 tv_ctx_t;
+enum { TVC_FAVADD = 1, TVC_FAVDEL, TVC_SHOWFAV, TVC_SHOWLIST, TVC_REMOVE, TVC_CANCEL };
+static int tv_fav_path(char *out, size_t n, int mk) {
+    char p[1000]; if (!settings_path(p, sizeof p, mk)) return 0;
+    char *sl = strrchr(p, '/'); if (!sl) return 0;
+    snprintf(sl + 1, sizeof p - (size_t)(sl + 1 - p), "favorites.txt"); snprintf(out, n, "%s", p); return 1;
+}
+static int tv_fav_find(int id) { for (int i = 0; i < tv_nfav; i++) if (tv_fav[i].id == id) return i; return -1; }
+static void tv_fav_save(void) {
+    char path[1000]; FILE *f; if (!tv_fav_path(path, sizeof path, 1) || !(f = fopen(path, "w"))) return;
+    for (int i = 0; i < tv_nfav; i++) fprintf(f, "%d\t%s\n", tv_fav[i].id, tv_fav[i].title);
+    fclose(f);
+}
+static void tv_fav_load(void) {
+    char path[1000], line[256]; FILE *f; tv_nfav = 0;
+    if (!tv_fav_path(path, sizeof path, 0) || !(f = fopen(path, "r"))) return;
+    while (fgets(line, sizeof line, f) && tv_nfav < 512) {
+        char *tab = strchr(line, '\t'), *nl = strpbrk(line, "\r\n"); int id = atoi(line); if (nl) *nl = 0; if (id <= 0) continue;
+        tv_fav[tv_nfav].id = id; snprintf(tv_fav[tv_nfav].title, sizeof tv_fav[tv_nfav].title, "%s", tab && tab[1] ? tab + 1 : "ModArchive"); tv_nfav++;
+    }
+    fclose(f);
+}
+static void tv_toast(const char *t) { snprintf(toast_txt, sizeof toast_txt, "%s", t); toast_t = 1.8f; }
+static void tv_fav_play(void) {                                     /* Select (short) in the favorites list: load the selected one (a module that is loaded already just plays) */
+    if (tv_fav_sel < 0 || tv_fav_sel >= tv_nfav) return;
+    int id = tv_fav[tv_fav_sel].id;
+    for (int i = 0; i < npl; i++) if (pl[i].ma_id == id) { play_index(i); return; }
+    if (ma_busy()) { tv_toast("Still loading ..."); return; }
+    tv_toast("Loading the favorite ..."); ma_start_id(id);
+}
+static void tv_ctx_show(void) {                                      /* build the menu for the module / favorite in focus */
+    tv_ctx_n = 0; int curid = !tv_fav_mode && cur >= 0 && cur < npl ? pl[cur].ma_id : 0;
+    if (!tv_fav_mode && curid > 0) tv_ctx_it[tv_ctx_n++] = tv_fav_find(curid) >= 0 ? TVC_FAVDEL : TVC_FAVADD;
+    if (tv_fav_mode && tv_nfav > 0) tv_ctx_it[tv_ctx_n++] = TVC_FAVDEL;
+    tv_ctx_it[tv_ctx_n++] = tv_fav_mode ? TVC_SHOWLIST : TVC_SHOWFAV;
+    if (!tv_fav_mode && cur >= 0) tv_ctx_it[tv_ctx_n++] = TVC_REMOVE;
+    tv_ctx_it[tv_ctx_n++] = TVC_CANCEL;
+    tv_ctx_open = 1; tv_ctx_sel = 0; tv_ctx_t = SDL_GetTicks();
+}
+static void tv_ctx_act(void) {
+    int a = tv_ctx_it[tv_ctx_sel]; tv_ctx_open = 0; tv_ctx_t = SDL_GetTicks();
+    switch (a) {
+    case TVC_FAVADD: if (cur >= 0 && pl[cur].ma_id > 0 && tv_fav_find(pl[cur].ma_id) < 0 && tv_nfav < 512) {
+            tv_fav[tv_nfav].id = pl[cur].ma_id; snprintf(tv_fav[tv_nfav].title, sizeof tv_fav[tv_nfav].title, "%s", pl[cur].label); tv_nfav++; tv_fav_save(); tv_toast("Added to favorites"); } break;
+    case TVC_FAVDEL: {
+        int k = tv_fav_mode ? tv_fav_sel : (cur >= 0 ? tv_fav_find(pl[cur].ma_id) : -1);
+        if (k >= 0 && k < tv_nfav) { memmove(tv_fav + k, tv_fav + k + 1, sizeof(tv_fav_t) * (size_t)(tv_nfav - k - 1)); tv_nfav--; if (tv_fav_sel >= tv_nfav) tv_fav_sel = tv_nfav - 1; if (tv_fav_sel < 0) tv_fav_sel = 0; tv_fav_save(); tv_toast("Removed from favorites"); } } break;
+    case TVC_SHOWFAV: tv_fav_mode = 1; if (tv_fav_sel >= tv_nfav) tv_fav_sel = 0; break;
+    case TVC_SHOWLIST: tv_fav_mode = 0; break;
+    case TVC_REMOVE: if (cur >= 0) { pl_remove(cur); tv_toast("Removed from the list"); } break;
+    default: break;
+    }
+}
+#endif
 static void song_end_advance(void) {        /* song ended -> next entry (a new random one at the end of the list in random mode) */
     if (!g_ended || cur < 0 || cur >= npl) return;
     if (g_rpt == 2) { play_index_sub(cur, g_open_sub); return; }                      /* RPT 1: the same song again */
@@ -2638,10 +2701,24 @@ static void draw_fps(float W, float H) {
 static float tv_list_scroll;
 static void draw_playlist_tv(float x, float y, float w, float h) {
     card(x, y, w, h, 0);
-    text(x + 18, y + 16, 15, TXT, "PLAYLIST");
-    char cnt[16]; snprintf(cnt, sizeof cnt, "%d", npl); text_right(x + w - 18, y + 16, 15, DIM, cnt);
+    text(x + 18, y + 16, 15, TXT, tv_fav_mode ? "FAVORITES" : "PLAYLIST");
+    char cnt[16]; snprintf(cnt, sizeof cnt, "%d", tv_fav_mode ? tv_nfav : npl); text_right(x + w - 18, y + 16, 15, DIM, cnt);
     float ry = y + 52, rh = 34, area = h - 52 - 12;
-    if (npl <= 0) { text(x + 18, ry + 6, 14, DIM, "Select draws a module"); return; }
+    if (tv_fav_mode) {                                                        /* the favorites: Select loads the marked one */
+        if (tv_nfav <= 0) { text(x + 18, ry + 6, 14, DIM, "No favorites yet"); text(x + 18, ry + 30, 12, FAINT, "Hold Select on a module: Add to favorites"); return; }
+        int vis = (int)(area / rh); if (vis < 1) vis = 1; rh = area / (float)vis;
+        static float fs; float maxs = tv_nfav > vis ? (float)(tv_nfav - vis) : 0;
+        if ((float)tv_fav_sel < fs) fs = (float)tv_fav_sel; if ((float)tv_fav_sel > fs + (float)vis - 1) fs = (float)(tv_fav_sel - vis + 1);
+        if (fs > maxs) fs = maxs; if (fs < 0) fs = 0;
+        for (int n = 0, i0 = (int)fs; n < vis && i0 + n < tv_nfav; n++) {
+            int i = i0 + n; float yy = ry + (float)n * rh;
+            if (i == tv_fav_sel) { rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(VC[0], 0.30f)); rect(x + 8, yy + 4, 3, rh - 10, VC[0]); }
+            char lb[128]; snprintf(lb, sizeof lb, "%s", tv_fav[i].title); fit_text(lb, w - 52, 15);
+            text(x + 22, yy + (rh - 15) / 2 - 2, 15, i == tv_fav_sel ? TXT : DIM, lb);
+        }
+        return;
+    }
+    if (npl <= 0) { text(x + 18, ry + 6, 14, DIM, "Select draws a module"); text(x + 18, ry + 30, 12, FAINT, "Hold Select for the menu"); return; }
     int vis = (int)(area / rh); if (vis < 1) vis = 1;
     rh = area / (float)vis;
     float maxs = npl > vis ? (float)(npl - vis) : 0;
@@ -2653,11 +2730,25 @@ static void draw_playlist_tv(float x, float y, float w, float h) {
         if (i == cur) { rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(VC[0], 0.30f)); rect(x + 8, yy + 4, 3, rh - 10, VC[0]); }
         char lb[128]; snprintf(lb, sizeof lb, "%s", pl[i].label); fit_text(lb, w - 52, 15);
         text(x + 22, yy + (rh - 15) / 2 - 2, 15, i == cur ? TXT : DIM, lb);
+        if (pl[i].ma_id > 0 && tv_fav_find(pl[i].ma_id) >= 0) text_right(x + w - 20, yy + (rh - 15) / 2 - 2, 15, WARN, "*");     /* a favorite */
     }
     if (npl > vis) {   /* scrollbar */
         float th = area * (float)vis / (float)npl; if (th < 24) th = 24;
         float ty = ry + (area - th) * (maxs > 0 ? tv_list_scroll / maxs : 0);
         rrect(x + w - 8, ty, 3, th, 1.5f, alpha(DIM, 0.5f));
+    }
+}
+
+static void tv_ctx_draw(float W, float H) {                                  /* the menu (Select held): a panel in the middle, the chosen row marked */
+    if (!tv_ctx_open) return;
+    static const char *const nm[7] = { "", "Add to favorites", "Remove from favorites", "Show favorites", "Show the loaded modules", "Remove from the list", "Cancel" };
+    float rh = 54, pw = 560, ph = 24 + (float)tv_ctx_n * rh + 24, px = (W - pw) / 2, py = (H - ph) / 2;
+    rect(0, 0, W, H, alpha(BG0, 0.55f));
+    rrect(px - 1, py - 1, pw + 2, ph + 2, 15, alpha(EDGE, 0.9f)); rrect(px, py, pw, ph, 14, CARDHI);
+    for (int j = 0; j < tv_ctx_n; j++) {
+        float yy = py + 24 + (float)j * rh;
+        if (j == tv_ctx_sel) rrect(px + 10, yy, pw - 20, rh - 6, 9, alpha(VC[0], 0.30f));
+        text(px + 34, yy + (rh - 6 - 22) / 2, 22, tv_ctx_it[j] == TVC_REMOVE ? (j == tv_ctx_sel ? WARN : alpha(WARN, 0.8f)) : (j == tv_ctx_sel ? TXT : DIM), nm[tv_ctx_it[j]]);
     }
 }
 #endif
@@ -2685,6 +2776,7 @@ static void draw_ui(double t) {
         g_ox = g_tvi_l + lw; view_w = aw - lw; view_h = ah + M;
         draw_ui_portrait(aw - lw, ah + M);                                      /* right: the player (the phone layout keeps one margin above the end of its height, so the bottom edges line up with the list) */
         g_ox = 0; g_oy = 0; view_w = vw0; view_h = vh0;
+        tv_ctx_draw(W, H);
         draw_fps(W, H);
         return;
     }
@@ -4249,7 +4341,16 @@ static int url_ma_id(const char *u) {
 }
 #endif
 static void iter(void) {
-    { static int once; if (!once) { once = 1; if (getenv("NGPLAYER_TEST_MATAB")) g_pltab = 1; } }      /* test hook: the Mod Archive tab of the list */
+    { static int once; if (!once) { once = 1; if (getenv("NGPLAYER_TEST_MATAB")) g_pltab = 1; } }
+#if defined(__APPLE__) && TARGET_OS_TV
+    {   /* The Menu button: while the context menu is open the app gets it (as Escape: it closes the menu); otherwise the system takes it (the Apple TV home screen). The system takes
+         * the button over completely while the controller UI events are on, so they follow the menu. Not switched within 0.6 s of the last menu action (a press on its way). */
+        int pass = !tv_ctx_open;
+        if (SDL_GetTicks() - tv_ctx_t > 600) { SDL_SetHint(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS, pass ? "1" : "0"); }
+        SDL_SetHint("NG_TV_MENU_TO_SYSTEM", pass ? "1" : "0");
+        if (getenv("NGPLAYER_TEST_TVCTX")) { static int o; if (!o && SDL_GetTicks() > 3000) { o = 1; if (getenv("NGPLAYER_TEST_TVFAV")) { tv_fav_mode = 1; if (!tv_nfav) { tv_fav[0].id = 192184; snprintf(tv_fav[0].title, 96, "Unknown World"); tv_fav[1].id = 160140; snprintf(tv_fav[1].title, 96, "UnreaL ][ / PM"); tv_nfav = 2; } } tv_ctx_show(); } }      /* test hook: the menu (and the favorites list) */
+    }
+#endif      /* test hook: the Mod Archive tab of the list */
 #ifndef __EMSCRIPTEN__
     ipc_poll();
 #endif
@@ -4290,18 +4391,28 @@ static void iter(void) {
             }
             case SDL_TEXTINPUT: if (ma_open) ma_text(e.text.text); break;
 #if defined(__APPLE__) && TARGET_OS_TV
-            case SDL_KEYUP: if ((e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER) && tv_dn_armed) { tv_dn_armed = 0; tv_dice(); } break;     /* a short Select: the dice */
+            case SDL_KEYUP: if ((e.key.keysym.sym == SDLK_RETURN || e.key.keysym.sym == SDLK_KP_ENTER) && tv_dn_armed) { tv_dn_armed = 0; if (tv_ctx_open) break; if (tv_fav_mode) tv_fav_play(); else tv_dice(); } break;     /* a short Select: the dice */
 #endif
             case SDL_KEYDOWN:
                 if (ma_open) { ma_key(&e.key); break; }
 #if defined(__APPLE__) && TARGET_OS_TV
+                if (tv_ctx_open) {                                            /* the menu is open: Up / Down choose, Select acts, Menu closes */
+                    switch (e.key.keysym.sym) {
+                    case SDLK_UP: if (tv_ctx_sel > 0) tv_ctx_sel--; break;
+                    case SDLK_DOWN: if (tv_ctx_sel + 1 < tv_ctx_n) tv_ctx_sel++; break;
+                    case SDLK_RETURN: case SDLK_KP_ENTER: if (!e.key.repeat && SDL_GetTicks() - tv_ctx_t > 350) tv_ctx_act(); break;
+                    case SDLK_ESCAPE: tv_ctx_open = 0; tv_ctx_t = SDL_GetTicks(); break;
+                    default: break;
+                    }
+                    break;
+                }
                 {   /* Siri Remote: Left/Right = the views (the Info page is one of them), Select = a new random module, Down / Up = the loaded modules */
                     int done = 1;
                     switch (e.key.keysym.sym) {
                     case SDLK_LEFT: case SDLK_RIGHT: { int t = 0, d = e.key.keysym.sym == SDLK_RIGHT ? 1 : NVIEW - 1; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + d) % NVIEW]; view_persist(); } break;
                     case SDLK_RETURN: case SDLK_KP_ENTER: if (!e.key.repeat) { tv_dn_t = SDL_GetTicks(); tv_dn_armed = 1; tv_dn_warn = 0; } break;   /* Select acts on release: short = a new random module, long (1 s) = remove the marked one */
-                    case SDLK_DOWN: next_prev(1); break;                               /* Down / Up: through the modules that are already loaded (after the last the first) */
-                    case SDLK_UP: next_prev(-1); break;
+                    case SDLK_DOWN: if (tv_fav_mode) { if (tv_fav_sel + 1 < tv_nfav) tv_fav_sel++; } else next_prev(1); break;     /* Down / Up: through the modules that are already loaded (after the last the first), in the favorites list through the favorites */
+                    case SDLK_UP: if (tv_fav_mode) { if (tv_fav_sel > 0) tv_fav_sel--; } else next_prev(-1); break;
                     default: done = 0; break;
                     }
                     if (done) break;
@@ -4358,8 +4469,7 @@ static void iter(void) {
 #if defined(__APPLE__) && TARGET_OS_TV
         if (tv_dn_armed) {
             Uint32 held = SDL_GetTicks() - tv_dn_t;
-            if (held >= 1000) { tv_dn_armed = 0; if (cur >= 0) { pl_remove(cur); snprintf(toast_txt, sizeof toast_txt, "Removed"); toast_t = 1.5f; } }
-            else if (held >= 350 && !tv_dn_warn && cur >= 0) { tv_dn_warn = 1; snprintf(toast_txt, sizeof toast_txt, "Keep holding to remove this module ..."); toast_t = 1.0f; }
+            if (held >= 500) { tv_dn_armed = 0; tv_ctx_show(); }                  /* Select held: the menu (the release that follows is ignored) */
         }
 #endif
         ios_media_sync();
@@ -4603,6 +4713,9 @@ int main(int argc, char **argv) {
     gfx_window_attrs();
 #ifndef __EMSCRIPTEN__
     if (!shot) { settings_load(); ma_list_load(); }
+#if defined(__APPLE__) && TARGET_OS_TV
+    tv_fav_load();
+#endif
     if ((g_midi_hw || getenv("NGPLAYER_MIDI_HW")) && !midi_set_hardware(1, getenv("NGPLAYER_MIDI_OUT"))) g_midi_hw = 0;           /* the last session played MIDI files on hardware: connect again (not found: the SoundFont) */
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     g_vol = 1.0f;                                                  /* iOS: no slider, the volume is the device's (the buttons, the control centre) */
@@ -4677,7 +4790,6 @@ int main(int argc, char **argv) {
     running = 1;
 #if defined(__APPLE__) && TARGET_OS_TV
     SDL_SetHint(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS, "1");      /* without it the root view controller does not hand the Menu press to the system (the app stays where it is) */
-    SDL_SetHint("NG_TV_MENU_TO_SYSTEM", "1");      /* the Menu button leaves to the Apple TV home screen (patched SDL, ios/patches/sdl-tv-menu.patch); no black screen */
 #endif
 #ifndef __EMSCRIPTEN__
     if (!shot && !getenv("NGPLAYER_NEW_INSTANCE")) ipc_listen();
