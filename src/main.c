@@ -1203,7 +1203,8 @@ static int ch_fxcls[64];
 static float ch_fxage[64], ch_noteage[64];
 static int ov_last_order = -1, ov_last_row = -1;
 
-static int overview_cols(int nch) { if (g_portrait) return nch <= 8 ? 1 : (nch <= 16 ? 2 : 3); return nch <= 10 ? 1 : (nch <= 20 ? 2 : 3); }
+static int overview_cols(int nch) { if (NG_TV) return nch <= 8 ? 1 : (nch <= 16 ? 2 : (nch <= 32 ? 4 : 6));      /* the Apple TV: a wide card, many columns, so the views below stay (52 voices: 9 rows) */
+    if (g_portrait) return nch <= 8 ? 1 : (nch <= 16 ? 2 : 3); return nch <= 10 ? 1 : (nch <= 20 ? 2 : 3); }
 static float overview_height(int nch) {
     int cols = overview_cols(nch), rows = (nch + cols - 1) / cols;
     float rh = g_portrait ? 16.0f : (cols == 1 ? 17.0f : 15.0f);
@@ -3257,7 +3258,7 @@ static void draw_ui_portrait(float W, float H) {
     float avail = sy - M - cy0;
     if (g_song && !nosp && avail - oh - M < 150) { nosp = 1; sh = 0; sy = by; avail = sy - M - cy0; }      /* a short screen (iPad upright): the room is not enough for channels + visualisation + spectrum: the spectrum and level go first (as with many voices), not the visualisation */
     int novis = 0;                                    /* many voices and the height runs out: only the channels, no visualisation, the whole room goes to the list */
-    if ((g_song && song_channels(g_song) >= 36) || avail - oh - M < 150) { novis = 1; oh = avail; }       /* 36 voices or more: always only the channels */
+    if ((g_song && song_channels(g_song) >= 36 && !NG_TV) || avail - oh - M < 150) { novis = 1; oh = avail; }       /* 36 voices or more: always only the channels */
     if (oh < 40) oh = 40;
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     if (oh < 112 && !g_duo) oh = 112;                 /* room for the AirPlay button and the two buttons below it */
