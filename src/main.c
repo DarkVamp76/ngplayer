@@ -1648,10 +1648,10 @@ static void module_lcd_update(void) {
     const col ink = C(0.757f, 0.984f, 0.224f, 1), cellc = C(0.38f, 0.66f, 0.10f, 1);                 /* the backlit green LCD, the colours measured on a photo of the device: lime characters (193, 251, 57) in lit cells (about 96, 168, 26) */
     for (int i = 0; i < cols; i++) rect(lx + pad + i * cw + 0.6f, ly + 2.0f + 0.6f, cw - 1.2f, rowh - 1.2f, cellc);
     const float emw = text_width("H", 100.0f) / 100.0f;                                               /* the characters are as wide as their cell allows ... */
-    const float fs = cw * 0.86f / emw, sy = (rowh * 0.80f) / (fs * 0.73f);                            /* ... and stretched in height to fill the cell (tall and narrow like the LCD characters) */
+    const float fill = 0.64f, fs = cw * 0.86f / emw, sy = (rowh * fill) / (fs * 0.73f);                /* ... and stretched in height to fill 64 % of the cell (room above and below, so that the characters do not look so narrow) */
     for (int i = 0; i < cols; i++) {
         char ch[2] = { vis[i], 0 }; if (ch[0] == ' ') continue;
-        text_tall(lx + pad + i * cw + (cw - text_width(ch, fs)) / 2, ly + 2.0f + rowh * 0.10f - fs * 0.21f * sy, fs, sy, ink, ch);
+        text_tall(lx + pad + i * cw + (cw - text_width(ch, fs)) / 2, ly + 2.0f + rowh * (1.0f - fill) / 2 - fs * 0.21f * sy, fs, sy, ink, ch);
     }
     {   /* the lamp (its place in tools/make_module_panel_mt.py): dark when idle (it is on the baked picture), lit green with a glow while a message goes out */
         const float cx = 0.4525f * (float)m->tw, cy = 0.4788f * (float)m->th, r = 0.0212f * (float)m->th;
