@@ -4,6 +4,7 @@
 #include "core.h"
 #include "tables.h"
 #include "period.h"
+#include "opl/opl3.h"
 #define PK 256
 #include <math.h>
 /* S3M (fmt 2): gleichstufige Frequenz, gemessen am Original (60 Noten): Hz = floor(c2spd * 2^((n-48)/12)); Periode = 14318184/Hz in PK-Aufloesung */
@@ -98,6 +99,7 @@ struct XPlayer {
     int gvol, fix_e8;
     int done; double acc;
     int lp; double lpa, lpl, lpr;    /* Paula-Tiefpass (A500: RC ca. 4,9 kHz): an/aus, Koeffizient, Zustand L/R */
+    int has_opl; opl3_chip chip; uint8_t opl_on[9]; int opl_vol[9]; uint8_t opl_patch[9][12];   /* S3M AdLib channels: the OPL2 chip (one per player), which channels sound, the patch they play */
     int led, led_force; double lb0, lb1, lb2, la1, la2, lz[2][4];   /* A500 LED filter (E00 on / E01 off): 2-pole low-pass 3275 Hz, state per side: x1 x2 y1 y2 */
 };
 
@@ -167,9 +169,58 @@ static void synth_step(Ch *c){
     c->sv_vol = clampi(c->sv_vol, 0, 64);
 }
 
+
+/* ---- S3M AdLib (OPL2) channels: a note of an AdLib instrument is played by the OPL chip (Nuked-OPL3); the replayer's period / volume of the channel drive the chip each tick ---- */
+static const uint8_t opl_mod_off[9] = { 0, 1, 2, 8, 9, 10, 16, 17, 18 };
+static void opl_w(XPlayer *p, unsigned reg, unsigned v){ OPL3_WriteRegBuffered(&p->chip, (uint16_t)reg, (uint8_t)v); }
+static int opl_chan(const XPlayer *p, int chn){ return p->has_opl && chn < 64 ? (int)p->s->adlib_ch[chn] - 1 : -1; }
+static void opl_level(XPlayer *p, int oc, int vol){          /* vol 0..64 (channel volume incl. the global one): the carrier level (and the modulator too when the two operators are added) */
+    const uint8_t *pt = p->opl_patch[oc]; unsigned mo = opl_mod_off[oc], co = mo + 3;
+    int cl = 63 - (63 - (pt[3] & 63)) * vol / 64; if (cl < 0) cl = 0; if (cl > 63) cl = 63;
+    opl_w(p, 0x40 + co, (pt[3] & 0xC0) | (unsigned)cl);
+    int ml = pt[2] & 63;
+    if (pt[10] & 1) { ml = 63 - (63 - ml) * vol / 64; if (ml < 0) ml = 0; if (ml > 63) ml = 63; }
+    opl_w(p, 0x40 + mo, (pt[2] & 0xC0) | (unsigned)ml);
+    p->opl_vol[oc] = vol;
+}
+static void opl_freq(XPlayer *p, int oc, double hz, int key){     /* hz = the pitch of the note; the block is the lowest one that gives an F-number below 1024 */
+    int blk = 0; double fn = 0;
+    for (blk = 0; blk < 8; blk++) { fn = hz * (double)(1 << (20 - blk)) / 49716.0; if (fn < 1024.0) break; }
+    if (blk > 7) { blk = 7; fn = 1023; }
+    int f = (int)(fn + 0.5); if (f > 1023) f = 1023; if (f < 0) f = 0;
+    opl_w(p, 0xA0 + oc, (unsigned)f & 0xFF);
+    opl_w(p, 0xB0 + oc, (unsigned)(((f >> 8) & 3) | (blk << 2) | (key ? 0x20 : 0)));
+}
+static void opl_note_off(XPlayer *p, int chn){
+    int oc = opl_chan(p, chn); if (oc < 0 || !p->opl_on[oc]) return;
+    p->opl_on[oc] = 0;
+    /* key off: the same F-number with the key bit clear (the release runs on) */
+    opl_w(p, 0xB0 + oc, 0);
+}
+static void opl_note_on(XPlayer *p, int chn, Ch *c){
+    int oc = opl_chan(p, chn); if (oc < 0) return;
+    const XSmp *m = &p->s->smp[c->inst]; if (!m->is_adlib) return;
+    const uint8_t *pt = m->adlib; unsigned mo = opl_mod_off[oc], co = mo + 3;
+    opl_w(p, 0xB0 + oc, 0);                                      /* key off first so the envelope restarts */
+    memcpy(p->opl_patch[oc], pt, 12);
+    opl_w(p, 0x20 + mo, pt[0]); opl_w(p, 0x20 + co, pt[1]);
+    opl_w(p, 0x60 + mo, pt[4]); opl_w(p, 0x60 + co, pt[5]);
+    opl_w(p, 0x80 + mo, pt[6]); opl_w(p, 0x80 + co, pt[7]);
+    opl_w(p, 0xE0 + mo, pt[8]); opl_w(p, 0xE0 + co, pt[9]);
+    opl_w(p, 0xC0 + oc, (pt[10] & 0x0F) | 0x30);                 /* feedback + connection; both outputs on (OPL3 stereo bits, harmless in OPL2 mode) */
+    p->opl_on[oc] = 1;
+    opl_level(p, oc, 0);                                         /* the real level follows in the same tick (opl_update) */
+}
+static void opl_update(XPlayer *p, int chn, Ch *c){              /* once per tick, after the effects: pitch and volume of a sounding AdLib channel */
+    int oc = opl_chan(p, chn); if (oc < 0 || !p->opl_on[oc]) return;
+    int vol = (int)((double)c->v44 * p->gvol / 255.0 + 0.5); if (vol > 64) vol = 64; if (vol < 0) vol = 0;
+    if (vol != p->opl_vol[oc]) opl_level(p, oc, vol);
+    if (c->p74 > 0) opl_freq(p, oc, (g_clk * PK / c->p74) / 32.0, 1);
+}
+
 static void trigger_note(XPlayer *p, int chn, Ch *c, const XCell *x){
     const XSong *s = p->s; int note;
-    if (x->note == 0x7f && c->inst) { p->v[chn].on = 0; c->vD8 = 0; c->vE8 = 0; c->trig = 0; return; }
+    if (x->note == 0x7f && c->inst) { opl_note_off(p, chn); p->v[chn].on = 0; c->vD8 = 0; c->vE8 = 0; c->trig = 0; return; }
     int inst_ok = x->inst && x->inst <= s->nsmp;
     c->rt = inst_ok;
     { static int xl=-1; if(xl<0) xl=getenv("XLIVE")!=NULL; c->swap = xl && s->fmt == 1 && inst_ok && x->note && (x->eff == 3 || x->eff == 5); }
@@ -403,6 +454,7 @@ static int final_vol(int v44, int maxv, int gvol){
 static int xlive_on(void){ static int x=-1; if(x<0) x=getenv("XLIVE")!=NULL; return x; }
 static void voice_update(XPlayer *p, int chn){
     Ch *c = &p->ch[chn]; Voice *v = &p->v[chn];
+    if (c->trig && !c->len && p->has_opl && opl_chan(p, chn) >= 0 && c->inst && p->s->smp[c->inst].is_adlib) { c->trig = 0; opl_note_on(p, chn, c); }
     if (c->trig && c->len) {
         c->trig = 0;
         v->on = 1; v->is16 = c->is16; v->data = c->data; v->len = c->len; v->ls = c->ls;
@@ -424,6 +476,7 @@ static void voice_update(XPlayer *p, int chn){
       else if (fv == 3) { v->vol = (int)ex; v->volf = v->vol; }
       else { v->vol = old; v->volf = old; } }
     v->pan = clampi(c->pan5c, 0, 255);
+    if (p->has_opl) opl_update(p, chn, c);
     v->step = c->p74 > 0 ? ((p->s->fmt == 2 && p->s->pt_tuning) || (p->s->fmt == 1 && p->s->pt_tuning == 3) ? g_clk * PK / c->p74 : hzq(g_clk * PK / c->p74)) / p->rate : 0.0;   /* S3M (ST3 table): exact rate like libopenmpt */
     if (c->sy && c->vib_d && c->vib_s) v->step *= pow(2.0, sin(c->vib_ph * 6.283185307179586 / 256.0) * c->vib_d / 384.0);   /* MED synth vibrato (depth scale estimated) */
 }
@@ -436,6 +489,7 @@ XPlayer *xplay_new(const XSong *s, int rate){
     g_clk = (s->fmt == 1 && s->pt_tuning == 2 && !getenv("XMODNTSC") && !getenv("XMODHZ")) ? 14187579.6 : 14318184.0;     /* MOD: PAL clock (4 x 3546894.9) */
     p->s = s; p->rate = rate; p->speed = s->speed; p->tempo = s->tempo; p->tempof = s->tempo_exact; p->gvol = s->gvol ? s->gvol : 255;
     for (int i = 0; i < NCH; i++) p->ch[i].pan5c = (s->fmt == 1 && s->chpan[i] < 0) ? ((i % 4 == 0 || i % 4 == 3) ? 60 : 195) : (s->chpan[i] >= 0 ? s->chpan[i] : 128);
+    if (s->has_adlib) { p->has_opl = 1; OPL3_Reset(&p->chip, (uint32_t)rate); opl_w(p, 1, 0x20); opl_w(p, 0xBD, 0); }
     p->tick = 0; p->acc = 0;
     p->lp = (s->fmt == 1 && s->amiga) ? 1 : 0;
     if (getenv("XLP")) p->lp = atoi(getenv("XLP")) ? (s->fmt == 1) : 0;   /* XLP=0 off, XLP=1 force on (MOD/MED family) */
@@ -626,6 +680,7 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
             }
             if (p->scb) { unsigned w = p->scn & (unsigned)(p->scl - 1); for (int i = 0; i < s->nch; i++) p->scb[(size_t)i * p->scl + w] = (float)(cs[i] * master * 2.0); p->scn++; }
             l *= master * 32767; r *= master * 32767;
+            if (p->has_opl) { int16_t of[2]; OPL3_GenerateResampled(&p->chip, of); l += of[0] * 1.15; r += of[1] * 1.15; }
             if (p->lp) { p->lpl += p->lpa * (l - p->lpl); p->lpr += p->lpa * (r - p->lpr); l = p->lpl; r = p->lpr; }
             if (p->lp && (p->led || p->led_force)) {
                 for (int sd = 0; sd < 2; sd++) {
