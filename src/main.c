@@ -169,7 +169,7 @@ int ios_media_poll(void);
 int ios_audio_event_poll(void);                                                    /* ios_glue.m: 1 = the route changed / an interruption ended (reopen the output), 2 = pause (the route fell back to the built-in speaker) */
 void ios_media_set_cover(const unsigned char *px, int w, int h);                    /* ios_glue.m: the cover of the song (RGBA, bottom row first, as glReadPixels gives it); NULL = none */
 void ios_media_set_cover_text(const char *title, const char *by, float ar, float ag, float ab, float br, float bg, float bb);   /* ios_glue.m: a cover drawn on the CPU (for the background, where the GPU may not be used): gradient from the colour a to b, title, artist */
-int ios_media_set_cover_card(int kind);                                      /* ios_glue.m: the bundled picture card-<kind>.png of the sound card as the cover; 0 = there is none (then the CPU cover is drawn) */
+int ios_media_set_cover_card(int kind, const char *title, const char *by, float ar, float ag, float ab);   /* ios_glue.m: the bundled picture card-<kind>.png of the sound card (without text) with the title, the artist and "ngPlayer" written on it, as the cover; 0 = there is none (then the CPU cover is drawn) */
 float ios_output_latency_ms(void);                                               /* ios_glue.m: latency of the current output route in ms (AirPlay: ~2000) */
 void ios_audio_longform(void);                                                    /* ios_glue.m: AirPlay 2 (HomePod) needs the long-form route sharing policy */
 void ios_airplay_place(SDL_Window *win, float x, float y, float size, int visible);   /* ios_glue.m: the native AirPlay button over the window (points) */
@@ -3769,8 +3769,8 @@ static col cover_title(char *title, size_t cap) {      /* the title on the cover
 #if !defined(__EMSCRIPTEN__)
 static void cover_fallback(void) {                    /* in the background: no GPU, so the bundled picture of the sound card is the cover (or, without one, a cover drawn on the CPU) until the app is open again and cover_render draws the real one */
     if (!g_song) return;
-    if (ios_media_set_cover_card(chip_kind())) return;                    /* the picture of the sound card (the same as the web player uses), bundled with the app */
     char title[160]; col acc = cover_title(title, sizeof title);
+    if (ios_media_set_cover_card(chip_kind(), title, g_cover_by, acc.r, acc.g, acc.b)) return;     /* the picture of the sound card (bundled with the app) with the title and the artist written on it */
     ios_media_set_cover_text(title, g_cover_by, acc.r, acc.g, acc.b, BG0.r, BG0.g, BG0.b);
 }
 #endif
