@@ -25,15 +25,15 @@ d.rectangle((int(130 * sx), 4, int(770 * sx), H - 20), fill=(24, 24, 27)); d.rec
 # (the names as text only, no logo)
 f_big, f_two = font(BOLD, 36), font(BOLD, 15)
 lab_x = int(205 * sx)
-d.text((lab_x, 14), 'Roland', font=f_big, fill=(232, 232, 237), anchor='la')
+d.text((lab_x, 40), 'Roland', font=f_big, fill=(232, 232, 237), anchor='la')
 tx = lab_x + int(d.textlength('Roland', font=f_big)) + 10
-d.text((tx, 18), 'MULTI TIMBRE', font=f_two, fill=(215, 215, 220), anchor='la'); d.text((tx, 38), 'SOUND MODULE', font=f_two, fill=(215, 215, 220), anchor='la')
-d.text((int(745 * sx), 10), 'MT-32', font=font(BOLD, 44), fill=(232, 232, 237), anchor='ra')
+d.text((tx, 44), 'MULTI TIMBRE', font=f_two, fill=(215, 215, 220), anchor='la'); d.text((tx, 64), 'SOUND MODULE', font=f_two, fill=(215, 215, 220), anchor='la')
+d.text((int(745 * sx), 34), 'MT-32', font=font(BOLD, 44), fill=(232, 232, 237), anchor='ra')
 lx0, lx1, ly0, ly1 = int(205 * sx), int(620 * sx), int(85 * sx), int(140 * sx) + 6
 d.rounded_rectangle((lx0, ly0, lx1, ly1), 4, fill=(24, 62, 10))
 for y in range(ly0, ly1):                                             # the LCD: a dark green base; the player lights the character cells and writes the title of the MIDI file into them at run time
     k = 1.0 - 0.10 * (y - ly0) / (ly1 - ly0); d.line([(lx0 + 2, y), (lx1 - 2, y)], fill=(int(30 * k), int(78 * k), int(12 * k)))
-d.ellipse((int(690 * sx) - 5, 108, int(690 * sx) + 5, 118), fill=(64, 90, 56)); label(int(700 * sx), 80, 'MIDI MESSAGE', f_s)
+d.ellipse((int(690 * sx) - 5, 108, int(690 * sx) + 5, 118), fill=(64, 90, 56)); label(int(700 * sx), 89, 'MIDI MESSAGE', f_s)
 # the buttons: five parts and the rhythm part, then group / sound and level / master
 def button(x0, y0, x1, y1, text, tcol=LAB, above=None, ac=BLUE):
     d.rounded_rectangle((x0 - 1, y0 - 1, x1 + 1, y1 + 1), 4, fill=(10, 10, 12)); d.rounded_rectangle((x0, y0, x1, y1), 4, fill=(22, 22, 26))
