@@ -344,6 +344,7 @@ static void bind_2d(void) {
 }
 
 /* ================================================================== window and frame */
+int gfx_target_v_flipped(void) { return 1; }
 Uint32 gfx_window_flags(void) { return SDL_WINDOW_OPENGL; }
 void gfx_window_attrs(void) {
 #ifdef NG_GLES

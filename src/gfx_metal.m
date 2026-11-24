@@ -185,6 +185,7 @@ static struct { float res[2]; float pxs; float rt; float rip[64]; } params;
 static int fb_w, fb_h, vp_x, vp_y, vp_w, vp_h;
 static float clear_rgb[3];
 
+int gfx_target_v_flipped(void) { return 0; }       /* seen on the Mac: the front of the MIDI modules (a render target) stood on its head with the 1 - v of OpenGL */
 Uint32 gfx_window_flags(void) { return SDL_WINDOW_METAL; }
 void gfx_window_attrs(void) {}
 int gfx_vsync(void) { return 1; }
