@@ -3951,17 +3951,20 @@ static void draw_info_tv(float x, float y, float w, float h) {
     chip_swing = 1; draw_chip_k(ikind, x + (boxw - cw) / 2 + 8, y + top + (boxh - chh * 1.12f) / 2 + chh * 0.06f, chh, 0.0f); chip_swing = 0;
     float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
     float rx = x + boxw + 12, rw = w - boxw - 12 - 28;
-    float need = 40 * k + 12 * k + 3 * 30 * k + 4 * k + 12 * k + (isi.nextra > 0 ? isi.nextra : 0) * 25 * k;
+    int maid = cur >= 0 && cur < npl ? pl[cur].ma_id : 0;                            /* a Mod Archive module: its ID is a row of the table too (to find it again) */
+    int nrow = 3 + (maid > 0);
+    float need = 40 * k + 12 * k + nrow * 30 * k + 4 * k + 12 * k + (isi.nextra > 0 ? isi.nextra : 0) * 25 * k;
     float ty = y + top + (boxh - need) / 2; if (ty < y + top) ty = y + top;
     char title[128]; snprintf(title, sizeof title, "%s", ilabel); fit_text(title, rw, 26 * k);
     text(rx, ty, 26 * k, TXT, title);
     ty += 40 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
     char vb[64]; snprintf(vb, sizeof vb, "%d %s", isi.voices, isi.voice_unit);
-    const char *lab[3] = { "TRACKER", "FORMAT", "VOICES" }, *val[3] = { isi.tracker, isi.format, vb };
-    for (int i = 0; i < 3; i++) {
+    char mb[32]; snprintf(mb, sizeof mb, "#%d", maid);
+    const char *lab[4] = { "TRACKER", "FORMAT", "VOICES", "MOD ARCHIVE" }, *val[4] = { isi.tracker, isi.format, vb, mb };
+    for (int i = 0; i < nrow; i++) {
         text(rx, ty + 3 * k, 12 * k, FAINT, lab[i]);
-        char v[96]; snprintf(v, sizeof v, "%s", val[i]); fit_text(v, rw - 100 * k, 16 * k);
-        text(rx + 100 * k, ty, 16 * k, TXT, v); ty += 30 * k;
+        char v[96]; snprintf(v, sizeof v, "%s", val[i]); fit_text(v, rw - 112 * k, 16 * k);
+        text(rx + 112 * k, ty, 16 * k, TXT, v); ty += 30 * k;
     }
     ty += 4 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
     for (int i = 0; i < isi.nextra && ty < y + h - 22 * k; i++) {
