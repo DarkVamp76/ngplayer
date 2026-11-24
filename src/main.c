@@ -4673,6 +4673,7 @@ int main(int argc, char **argv) {
 
     running = 1;
 #if defined(__APPLE__) && TARGET_OS_TV
+    SDL_SetHint(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS, "1");      /* without it the root view controller does not hand the Menu press to the system (the app stays where it is) */
     SDL_SetHint("NG_TV_MENU_TO_SYSTEM", "1");      /* the Menu button leaves to the Apple TV home screen (patched SDL, ios/patches/sdl-tv-menu.patch); no black screen */
 #endif
 #ifndef __EMSCRIPTEN__
