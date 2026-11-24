@@ -64,6 +64,7 @@ int xs3m_load(XSong *s, const uint8_t *b, size_t n){
     int stereo = (b[0x33] & 0x80) != 0, dp = b[0x35];
     const uint8_t *chset = b + 0x40;
     for (int i = 0; i < 32; i++) s->chen[i] = !(chset[i] == 0x80 || chset[i] == 0xFF);
+    for (int i = 0; i < 32; i++) if (chset[i] >= 0x10 && chset[i] <= 0x18) s->adlib_ch[i] = (uint8_t)(chset[i] - 0x10 + 1);   /* melodic AdLib channels 1..9 (the drum channels 0x19..0x1D are not played) */
     memcpy(s->orders, b + 0x60, ordnum);
     s->nord = ordnum;
     while (s->nord > 0 && s->orders[s->nord - 1] > 0xFD) s->nord--;
@@ -89,6 +90,7 @@ int xs3m_load(XSong *s, const uint8_t *b, size_t n){
         if (!o || o + 0x50 > n) continue;
         const uint8_t *h = b + o; XSmp *m = &s->smp[i];
         m->vol = h[0x1C]; m->c2spd = rd32(h + 0x20);
+        if (h[0] == 2) { m->is_adlib = 1; memcpy(m->adlib, h + 0x10, 12); s->has_adlib = 1; continue; }   /* an AdLib (OPL2) instrument: no sample data */
         m->len = rd32(h + 0x10); m->ls = rd32(h + 0x14); m->le = rd32(h + 0x18);
         m->loop = (h[0x1F] & 1) != 0; m->is16 = (h[0x1F] & 4) != 0;
         if (h[0] != 1 || memcmp(h + 0x4C, "SCRS", 4) && 0) { m->len = 0; }

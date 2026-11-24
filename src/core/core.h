@@ -19,6 +19,7 @@ typedef struct {
     int nofree;                /* data belongs to another XSmp (DBM instruments sharing one sample): do not free */
     int finetune, relnote, pan;/* XM: -128..127, -96..95, 0..255 */
     XSyn *syn;                 /* MED synth: volume table (optional) */
+    int is_adlib; uint8_t adlib[12];   /* S3M AdLib instrument (type 2): the 12 OPL bytes (mod / car 0x20, 0x40, 0x60, 0x80, 0xE0, then 0xC0), no sample */
 } XSmp;
 /* XM-Huellkurve */
 typedef struct {
@@ -61,6 +62,7 @@ typedef struct {
     int *prows;                /* XM: Zeilen je Pattern (sonst 64) */
     int amiga;                 /* MOD: echtes Amiga-Format (M.K., M!K!, FLT4, 15 Samples) -> Paula-Tiefpass */
     int linpan;                /* 1 = linear pan law (DSM, like libopenmpt) instead of the S3M law */
+    int has_adlib; uint8_t adlib_ch[64];   /* S3M: AdLib instruments are used; adlib_ch[ch] = OPL channel + 1 (0 = a sample channel) */
     int s3m_ni;                /* Scream Tracker 3 module: an instrument number without a note resets the volume but does not retrigger the sample */
     int pt_tuning;             /* fmt 1: 0 = 12 tone equal temperament (FAR, AMF, PSM, MED ...), 1 = ProTracker period table (MTM), 3 = DSM (integer ST3 period like S3M), 2 = real MOD (fmt 2, S3M: 1 = integer ST3 period table, 0 = exact; saved by Impulse Tracker): period table + PAL tuning + exact slides */
 } XSong;
