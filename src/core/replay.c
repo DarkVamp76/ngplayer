@@ -678,9 +678,15 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
                 if (v->loop) { while (v->pos >= v->le) v->pos -= (v->le - v->ls); }
                 else if (v->pos >= v->len) { v->on = 0; if (xlive_on()) { v->hold = 1; v->pos = v->len; } }
             }
+            int16_t ofr[2] = { 0, 0 };
+            if (p->has_opl) {                                    /* the OPL2 chip: one frame; its channel outputs feed the scopes / level meters of the AdLib channels */
+                OPL3_GenerateResampled(&p->chip, ofr);
+                const int16_t *co = OPL3_ChannelOutput(&p->chip);
+                for (int i = 0; i < s->nch && i < 64; i++) { int oc = (int)s->adlib_ch[i] - 1; if (oc >= 0 && co) cs[i] = co[oc] * 1.15 / 32768.0 / master; }
+            }
             if (p->scb) { unsigned w = p->scn & (unsigned)(p->scl - 1); for (int i = 0; i < s->nch; i++) p->scb[(size_t)i * p->scl + w] = (float)(cs[i] * master * 2.0); p->scn++; }
             l *= master * 32767; r *= master * 32767;
-            if (p->has_opl) { int16_t of[2]; OPL3_GenerateResampled(&p->chip, of); l += of[0] * 1.15; r += of[1] * 1.15; }
+            if (p->has_opl) { l += ofr[0] * 1.15; r += ofr[1] * 1.15; }
             if (p->lp) { p->lpl += p->lpa * (l - p->lpl); p->lpr += p->lpa * (r - p->lpr); l = p->lpl; r = p->lpr; }
             if (p->lp && (p->led || p->led_force)) {
                 for (int sd = 0; sd < 2; sd++) {
