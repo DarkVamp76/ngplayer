@@ -393,7 +393,7 @@ static void play_index_sub(int idx, int sub) {
 #endif
     song_set_mute(0);
     list_follow = 1;
-    g_pltab = pl[idx].ma_id > 0;
+    if (g_pltab != 2) g_pltab = pl[idx].ma_id > 0;                  /* (the FAV tab stays) */
     g_frames = 0; g_ended = 0; g_paused = 0;
     pat_last_order = -1; pat_disp = 0; pat_ch0 = 0;
     ov_reset = 1;
@@ -541,16 +541,73 @@ static Uint32 lp_t;
 static int sw_idx = -1; static float sw_off, sw_tgt;       /* swipe actions of a list row (touch): the entry and how far its row is shifted (< 0 left, > 0 right) */
 static int ctx_idx = -1; static float ctx_x, ctx_y;        /* context menu ("Share") of a Mod Archive entry in the list */
 static float toast_t; static char toast_txt[48];
-#define CTX_W 120.0f
+/* ---- Favorites: Mod Archive modules (id + title), the FAV tab of the list. favorites.txt next to settings.ini ("id<TAB>title" per line), in the browser localStorage ---- */
+typedef struct { int id; char title[96]; } fav_t;
+#define FAV_MAX 512
+static fav_t g_fav[FAV_MAX]; static int g_nfav;
+static int settings_path(char *out, size_t n, int mkdir_p);
+static void ma_start_id(int id);
+static int ma_busy(void);
+#ifdef __EMSCRIPTEN__
+EM_JS(void, web_fav_store, (const char *s), { try { localStorage.setItem('ngp.favs', UTF8ToString(s)); } catch (e) {} });
+EM_JS(void, web_fav_fetch, (char *buf, int cap), { var s = ''; try { s = localStorage.getItem('ngp.favs') || ''; } catch (e) {} stringToUTF8(s, buf, cap); });
+#endif
+static int fav_find(int id) { for (int i = 0; i < g_nfav; i++) if (g_fav[i].id == id) return i; return -1; }
+static void fav_save(void) {
+#ifdef __EMSCRIPTEN__
+    static char t[FAV_MAX * 112 + 16]; size_t n = 0; t[0] = 0;
+    for (int i = 0; i < g_nfav; i++) n += (size_t)snprintf(t + n, sizeof t - n, "%d\t%s\n", g_fav[i].id, g_fav[i].title);
+    web_fav_store(t);
+#else
+    char path[1000], *sl; FILE *f;
+    if (!settings_path(path, sizeof path, 1) || !(sl = strrchr(path, '/'))) return;
+    snprintf(sl + 1, sizeof path - (size_t)(sl + 1 - path), "favorites.txt");
+    if (!(f = fopen(path, "w"))) return;
+    for (int i = 0; i < g_nfav; i++) fprintf(f, "%d\t%s\n", g_fav[i].id, g_fav[i].title);
+    fclose(f);
+#endif
+}
+static void fav_load(void) {
+    g_nfav = 0;
+#ifdef __EMSCRIPTEN__
+    static char buf[FAV_MAX * 112 + 16]; web_fav_fetch(buf, sizeof buf);
+    for (char *ln = strtok(buf, "\n"); ln && g_nfav < FAV_MAX; ln = strtok(NULL, "\n")) {
+        char *tab = strchr(ln, '\t'); int id = atoi(ln); if (id <= 0) continue;
+        g_fav[g_nfav].id = id; snprintf(g_fav[g_nfav].title, sizeof g_fav[g_nfav].title, "%s", tab && tab[1] ? tab + 1 : "ModArchive"); g_nfav++;
+    }
+#else
+    char path[1000], line[256], *sl; FILE *f;
+    if (!settings_path(path, sizeof path, 0) || !(sl = strrchr(path, '/'))) return;
+    snprintf(sl + 1, sizeof path - (size_t)(sl + 1 - path), "favorites.txt");
+    if (!(f = fopen(path, "r"))) return;
+    while (fgets(line, sizeof line, f) && g_nfav < FAV_MAX) {
+        char *tab = strchr(line, '\t'), *nl = strpbrk(line, "\r\n"); int id = atoi(line); if (nl) *nl = 0; if (id <= 0) continue;
+        g_fav[g_nfav].id = id; snprintf(g_fav[g_nfav].title, sizeof g_fav[g_nfav].title, "%s", tab && tab[1] ? tab + 1 : "ModArchive"); g_nfav++;
+    }
+    fclose(f);
+#endif
+}
+static void fav_toggle(int id, const char *title) {                  /* a favorite on / off (the title is what the FAV tab shows) */
+    int k = fav_find(id);
+    if (k >= 0) { memmove(g_fav + k, g_fav + k + 1, sizeof(fav_t) * (size_t)(g_nfav - k - 1)); g_nfav--; snprintf(toast_txt, sizeof toast_txt, "Removed from favorites"); }
+    else if (g_nfav < FAV_MAX) {
+        g_fav[g_nfav].id = id; snprintf(g_fav[g_nfav].title, sizeof g_fav[g_nfav].title, "%s", title && *title ? title : "ModArchive");
+        for (char *c = g_fav[g_nfav].title; *c; c++) if (*c == '\t' || *c == '\n' || *c == '\r') *c = ' ';
+        g_nfav++; snprintf(toast_txt, sizeof toast_txt, "Added to favorites");
+    }
+    toast_t = 1.8f; fav_save();
+}
+#define CTX_W 150.0f
 #define CTX_ROW 30.0f
 /* The list menu: Share for Mod Archive entries, Remove for all. Items are numbered 0 Share, 3 Remove (the Mod Archive page is a link on the Info page). */
 static int ctx_acts(int idx, int *act) {
     int n = 0, ma = idx >= 0 && idx < npl && pl[idx].ma_id;
     if (ma) act[n++] = 0;                                     /* Share; the Mod Archive page is a link in the Info window now */
+    if (ma) act[n++] = 4;                                     /* add / remove favorite */
     act[n++] = 3;
     return n;
 }
-static int ctx_n(int idx) { int a[4]; return ctx_acts(idx, a); }
+static int ctx_n(int idx) { int a[5]; return ctx_acts(idx, a); }
 #define CTX_H(idx) (ctx_n(idx) * CTX_ROW + 2.0f)
 static int hit(float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; }
 static int clicked(float x, float y, float w, float h) { return click && clickx >= x && clickx < x + w && clicky >= y && clicky < y + h; }
@@ -1756,7 +1813,7 @@ static void next_prev(int d) {      /* stays inside the group (local files / Mod
 }
 
 /* playlist tabs: indices of the entries of the active tab */
-static int pl_count_tab(int tab) { int n = 0; for (int i = 0; i < npl; i++) if ((pl[i].ma_id > 0) == (tab == 1)) n++; return n; }
+static int pl_count_tab(int tab) { if (tab == 2) return g_nfav; int n = 0; for (int i = 0; i < npl; i++) if ((pl[i].ma_id > 0) == (tab == 1)) n++; return n; }
 /* Remove an entry from the list (the file itself stays untouched). The playing song moves on to the next one of its group, or stops. */
 static void pl_remove(int i) {
     if (i < 0 || i >= npl) return;
@@ -1777,14 +1834,14 @@ static void pl_remove(int i) {
 static void pl_build_vis(void) {
     pl_vis = (int *)realloc(pl_vis, sizeof(int) * (size_t)(npl > 0 ? npl : 1));
     nvis = 0; cvis = -1;
+    if (g_pltab == 2) { if (g_nfav > npl) pl_vis = (int *)realloc(pl_vis, sizeof(int) * (size_t)g_nfav); for (int k = 0; k < g_nfav; k++) pl_vis[k] = 0; nvis = g_nfav; return; }      /* the FAV tab: the rows are the favorites (fav_rows), not entries of the list */
     for (int i = 0; i < npl; i++) if ((pl[i].ma_id > 0) == (g_pltab == 1)) { if (i == cur) cvis = nvis; pl_vis[nvis++] = i; }
 }
 /* FILES | MOD ARCHIVE tabs; tap_mode: use the tap flag instead of clicked() (touch overlay) */
 static void pl_tabs(float x, float y, float w, int tap_mode, int tap) {
-    const char *nm[2] = { "FILES", "MOD ARCHIVE" };
-    int ntab = pl_count_tab(1) > 0 ? 2 : 1;                 /* the MOD ARCHIVE tab appears once something was loaded from there */
-    if (ntab == 1) g_pltab = 0;
-    float bw = ntab == 2 ? (w - 36 - 8) / 2 : 120;
+    const char *nm[3] = { "FILES", "ARCHIVE", "FAV" };
+    int ntab = 3;                                          /* FILES | ARCHIVE (Mod Archive) | FAV */
+    float bw = (w - 36 - 8 * (ntab - 1)) / (float)ntab;
     for (int t = 0; t < ntab; t++) {
         float bx = x + 18 + t * (bw + 8), by = y;
         char lb[48]; snprintf(lb, sizeof lb, "%s  %d", nm[t], pl_count_tab(t));
@@ -1793,6 +1850,32 @@ static void pl_tabs(float x, float y, float w, int tap_mode, int tap) {
         text(bx + (bw - text_width(lb, 11)) / 2, by + 6, 11, on ? VC[2] : alpha(DIM, 0.9f), lb);
         int hitnow = tap_mode ? (tap && mx >= bx && mx < bx + bw && my >= by && my < by + 24) : clicked(bx, by, bw, 24);
         if (hitnow) { g_pltab = t; list_scroll = 0; list_follow = 1; if (!tap_mode) click = 0; }
+    }
+}
+
+/* a favorite plays: a module that is in the list plays at once, else it is fetched from the Mod Archive (the web player through the page) */
+static void fav_play(int id) {
+    for (int i = 0; i < npl; i++) if (pl[i].ma_id == id) { play_index(i); return; }
+    if (ma_busy()) { snprintf(toast_txt, sizeof toast_txt, "Still loading ..."); toast_t = 1.5f; return; }
+    snprintf(toast_txt, sizeof toast_txt, "Loading the favorite ..."); toast_t = 2.0f; ma_start_id(id);
+}
+/* the rows of the FAV tab: title, #id and an x that removes the favorite (always on touch, on hover with a pointer); a click / tap plays it. use_tap: the tap flag (touch) instead of clicked() */
+static void fav_rows(float x, float ry, float w, float rh, int first, int vis_rows, float ybot, int use_tap, int tap) {
+    if (g_nfav <= 0) { text(x + 18, ry + 6, 13, FAINT, "No favorites yet."); text(x + 18, ry + 26, 12, FAINT, "Right click or hold an entry: Add favorite (key S)"); return; }
+    for (int r = 0; r < vis_rows + 1 && first + r < g_nfav; r++) {
+        int k = first + r; float yy = ry + r * rh; if (yy + rh > ybot) break;
+        int isc = cur >= 0 && cur < npl && pl[cur].ma_id == g_fav[k].id, hv = !g_mobile && hit(x + 8, yy, w - 16, rh);
+        if (isc) rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(VC[0], 0.16f)); else if (hv) rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(EDGE, 0.25f));
+        char lab[128]; snprintf(lab, sizeof lab, "%s", g_fav[k].title); fit_text(lab, w - 36 - 96, 14);
+        text(x + 20, yy + 5, 14, isc ? TXT : DIM, lab);
+        char idb[16]; snprintf(idb, sizeof idb, "#%d", g_fav[k].id);
+        text_right(x + w - 44, yy + 5, 14, VC[1], idb);
+        float xx = x + w - 38; int xhv = hit(xx, yy + 2, 26, rh - 6);
+        if (hv || g_mobile) { if (xhv) rrect(xx, yy + 3, 26, rh - 8, 6, alpha(WARN, 0.22f)); text(xx + 7, yy + 5, 15, xhv ? WARN : alpha(WARN, 0.55f), "\xd7"); }
+        int onx = use_tap ? (tap && mx >= xx && mx < xx + 26 && my >= yy && my < yy + rh) : clicked(xx, yy, 26, rh);
+        int onrow = use_tap ? (tap && mx >= x + 8 && mx < x + w - 8 && my >= yy && my < yy + rh) : clicked(x + 8, yy, w - 16, rh);
+        if (onx) { fav_toggle(g_fav[k].id, g_fav[k].title); if (!use_tap) click = 0; break; }
+        if (onrow) { fav_play(g_fav[k].id); if (!use_tap) click = 0; }
     }
 }
 
@@ -1906,43 +1989,21 @@ static void tv_dice(void) {                 /* Apple TV, Select: always draw a n
  * Select held (0.5 s) opens the menu: add / remove favorite, show favorites / the loaded modules, remove from the list, cancel. Up / Down choose, Select acts, Menu closes. */
 static int settings_path(char *out, size_t n, int mkdir_p);
 static void ma_start_id(int id);
-typedef struct { int id; char title[96]; } tv_fav_t;
-static tv_fav_t tv_fav[512]; static int tv_nfav;
 static int tv_fav_mode, tv_fav_sel;                       /* 1 = the left list shows the favorites; the selected row there */
 static int tv_ctx_open, tv_ctx_sel, tv_ctx_n, tv_ctx_it[6]; static Uint32 tv_ctx_t;
 enum { TVC_FAVADD = 1, TVC_FAVDEL, TVC_SHOWFAV, TVC_SHOWLIST, TVC_REMOVE, TVC_CANCEL };
-static int tv_fav_path(char *out, size_t n, int mk) {
-    char p[1000]; if (!settings_path(p, sizeof p, mk)) return 0;
-    char *sl = strrchr(p, '/'); if (!sl) return 0;
-    snprintf(sl + 1, sizeof p - (size_t)(sl + 1 - p), "favorites.txt"); snprintf(out, n, "%s", p); return 1;
-}
-static int tv_fav_find(int id) { for (int i = 0; i < tv_nfav; i++) if (tv_fav[i].id == id) return i; return -1; }
-static void tv_fav_save(void) {
-    char path[1000]; FILE *f; if (!tv_fav_path(path, sizeof path, 1) || !(f = fopen(path, "w"))) return;
-    for (int i = 0; i < tv_nfav; i++) fprintf(f, "%d\t%s\n", tv_fav[i].id, tv_fav[i].title);
-    fclose(f);
-}
-static void tv_fav_load(void) {
-    char path[1000], line[256]; FILE *f; tv_nfav = 0;
-    if (!tv_fav_path(path, sizeof path, 0) || !(f = fopen(path, "r"))) return;
-    while (fgets(line, sizeof line, f) && tv_nfav < 512) {
-        char *tab = strchr(line, '\t'), *nl = strpbrk(line, "\r\n"); int id = atoi(line); if (nl) *nl = 0; if (id <= 0) continue;
-        tv_fav[tv_nfav].id = id; snprintf(tv_fav[tv_nfav].title, sizeof tv_fav[tv_nfav].title, "%s", tab && tab[1] ? tab + 1 : "ModArchive"); tv_nfav++;
-    }
-    fclose(f);
-}
 static void tv_toast(const char *t) { snprintf(toast_txt, sizeof toast_txt, "%s", t); toast_t = 1.8f; }
 static void tv_fav_play(void) {                                     /* Select (short) in the favorites list: load the selected one (a module that is loaded already just plays) */
-    if (tv_fav_sel < 0 || tv_fav_sel >= tv_nfav) return;
-    int id = tv_fav[tv_fav_sel].id;
+    if (tv_fav_sel < 0 || tv_fav_sel >= g_nfav) return;
+    int id = g_fav[tv_fav_sel].id;
     for (int i = 0; i < npl; i++) if (pl[i].ma_id == id) { play_index(i); return; }
     if (ma_busy()) { tv_toast("Still loading ..."); return; }
     tv_toast("Loading the favorite ..."); ma_start_id(id);
 }
 static void tv_ctx_show(void) {                                      /* build the menu for the module / favorite in focus */
     tv_ctx_n = 0; int curid = !tv_fav_mode && cur >= 0 && cur < npl ? pl[cur].ma_id : 0;
-    if (!tv_fav_mode && curid > 0) tv_ctx_it[tv_ctx_n++] = tv_fav_find(curid) >= 0 ? TVC_FAVDEL : TVC_FAVADD;
-    if (tv_fav_mode && tv_nfav > 0) tv_ctx_it[tv_ctx_n++] = TVC_FAVDEL;
+    if (!tv_fav_mode && curid > 0) tv_ctx_it[tv_ctx_n++] = fav_find(curid) >= 0 ? TVC_FAVDEL : TVC_FAVADD;
+    if (tv_fav_mode && g_nfav > 0) tv_ctx_it[tv_ctx_n++] = TVC_FAVDEL;
     tv_ctx_it[tv_ctx_n++] = tv_fav_mode ? TVC_SHOWLIST : TVC_SHOWFAV;
     if (!tv_fav_mode && cur >= 0) tv_ctx_it[tv_ctx_n++] = TVC_REMOVE;
     tv_ctx_it[tv_ctx_n++] = TVC_CANCEL;
@@ -1951,12 +2012,12 @@ static void tv_ctx_show(void) {                                      /* build th
 static void tv_ctx_act(void) {
     int a = tv_ctx_it[tv_ctx_sel]; tv_ctx_open = 0; tv_ctx_t = SDL_GetTicks();
     switch (a) {
-    case TVC_FAVADD: if (cur >= 0 && pl[cur].ma_id > 0 && tv_fav_find(pl[cur].ma_id) < 0 && tv_nfav < 512) {
-            tv_fav[tv_nfav].id = pl[cur].ma_id; snprintf(tv_fav[tv_nfav].title, sizeof tv_fav[tv_nfav].title, "%s", pl[cur].label); tv_nfav++; tv_fav_save(); tv_toast("Added to favorites"); } break;
+    case TVC_FAVADD: if (cur >= 0 && pl[cur].ma_id > 0 && fav_find(pl[cur].ma_id) < 0 && g_nfav < FAV_MAX) {
+            g_fav[g_nfav].id = pl[cur].ma_id; snprintf(g_fav[g_nfav].title, sizeof g_fav[g_nfav].title, "%s", pl[cur].label); g_nfav++; fav_save(); tv_toast("Added to favorites"); } break;
     case TVC_FAVDEL: {
-        int k = tv_fav_mode ? tv_fav_sel : (cur >= 0 ? tv_fav_find(pl[cur].ma_id) : -1);
-        if (k >= 0 && k < tv_nfav) { memmove(tv_fav + k, tv_fav + k + 1, sizeof(tv_fav_t) * (size_t)(tv_nfav - k - 1)); tv_nfav--; if (tv_fav_sel >= tv_nfav) tv_fav_sel = tv_nfav - 1; if (tv_fav_sel < 0) tv_fav_sel = 0; tv_fav_save(); tv_toast("Removed from favorites"); } } break;
-    case TVC_SHOWFAV: tv_fav_mode = 1; if (tv_fav_sel >= tv_nfav) tv_fav_sel = 0; break;
+        int k = tv_fav_mode ? tv_fav_sel : (cur >= 0 ? fav_find(pl[cur].ma_id) : -1);
+        if (k >= 0 && k < g_nfav) { memmove(g_fav + k, g_fav + k + 1, sizeof(fav_t) * (size_t)(g_nfav - k - 1)); g_nfav--; if (tv_fav_sel >= g_nfav) tv_fav_sel = g_nfav - 1; if (tv_fav_sel < 0) tv_fav_sel = 0; fav_save(); tv_toast("Removed from favorites"); } } break;
+    case TVC_SHOWFAV: tv_fav_mode = 1; if (tv_fav_sel >= g_nfav) tv_fav_sel = 0; break;
     case TVC_SHOWLIST: tv_fav_mode = 0; break;
     case TVC_REMOVE: if (cur >= 0) { pl_remove(cur); tv_toast("Removed from the list"); } break;
     default: break;
@@ -2705,18 +2766,18 @@ static float tv_list_scroll;
 static void draw_playlist_tv(float x, float y, float w, float h) {
     card(x, y, w, h, 0);
     text(x + 18, y + 16, 15, TXT, tv_fav_mode ? "FAVORITES" : "PLAYLIST");
-    char cnt[16]; snprintf(cnt, sizeof cnt, "%d", tv_fav_mode ? tv_nfav : npl); text_right(x + w - 18, y + 16, 15, DIM, cnt);
+    char cnt[16]; snprintf(cnt, sizeof cnt, "%d", tv_fav_mode ? g_nfav : npl); text_right(x + w - 18, y + 16, 15, DIM, cnt);
     float ry = y + 52, rh = 34, area = h - 52 - 12;
     if (tv_fav_mode) {                                                        /* the favorites: Select loads the marked one */
-        if (tv_nfav <= 0) { text(x + 18, ry + 6, 14, DIM, "No favorites yet"); text(x + 18, ry + 30, 12, FAINT, "Hold Select on a module: Add to favorites"); return; }
+        if (g_nfav <= 0) { text(x + 18, ry + 6, 14, DIM, "No favorites yet"); text(x + 18, ry + 30, 12, FAINT, "Hold Select on a module: Add to favorites"); return; }
         int vis = (int)(area / rh); if (vis < 1) vis = 1; rh = area / (float)vis;
-        static float fs; float maxs = tv_nfav > vis ? (float)(tv_nfav - vis) : 0;
+        static float fs; float maxs = g_nfav > vis ? (float)(g_nfav - vis) : 0;
         if ((float)tv_fav_sel < fs) fs = (float)tv_fav_sel; if ((float)tv_fav_sel > fs + (float)vis - 1) fs = (float)(tv_fav_sel - vis + 1);
         if (fs > maxs) fs = maxs; if (fs < 0) fs = 0;
-        for (int n = 0, i0 = (int)fs; n < vis && i0 + n < tv_nfav; n++) {
+        for (int n = 0, i0 = (int)fs; n < vis && i0 + n < g_nfav; n++) {
             int i = i0 + n; float yy = ry + (float)n * rh;
             if (i == tv_fav_sel) { rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(VC[0], 0.30f)); rect(x + 8, yy + 4, 3, rh - 10, VC[0]); }
-            char lb[128]; snprintf(lb, sizeof lb, "%s", tv_fav[i].title); fit_text(lb, w - 52, 15);
+            char lb[128]; snprintf(lb, sizeof lb, "%s", g_fav[i].title); fit_text(lb, w - 52, 15);
             text(x + 22, yy + (rh - 15) / 2 - 2, 15, i == tv_fav_sel ? TXT : DIM, lb);
         }
         return;
@@ -2733,7 +2794,7 @@ static void draw_playlist_tv(float x, float y, float w, float h) {
         if (i == cur) { rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(VC[0], 0.30f)); rect(x + 8, yy + 4, 3, rh - 10, VC[0]); }
         char lb[128]; snprintf(lb, sizeof lb, "%s", pl[i].label); fit_text(lb, w - 52, 15);
         text(x + 22, yy + (rh - 15) / 2 - 2, 15, i == cur ? TXT : DIM, lb);
-        if (pl[i].ma_id > 0 && tv_fav_find(pl[i].ma_id) >= 0) text_right(x + w - 20, yy + (rh - 15) / 2 - 2, 15, WARN, "*");     /* a favorite */
+        if (pl[i].ma_id > 0 && fav_find(pl[i].ma_id) >= 0) text_right(x + w - 20, yy + (rh - 15) / 2 - 2, 15, WARN, "*");     /* a favorite */
     }
     if (npl > vis) {   /* scrollbar */
         float th = area * (float)vis / (float)npl; if (th < 24) th = 24;
@@ -2798,8 +2859,8 @@ static void draw_ui(double t) {
         draw_import_btn(x + w - 92, y + 21, 12, 0);
 #endif
         pl_build_vis();
-        if (npl) pl_tabs(x, y + 40, w, 0, 0);
-        float ry = y + (npl ? 76 : 44), rh = 28, area = h - (npl ? 76 : 44) - 66;
+        if (npl || g_nfav) pl_tabs(x, y + 40, w, 0, 0);
+        float ry = y + (npl || g_nfav ? 76 : 44), rh = 28, area = h - (npl || g_nfav ? 76 : 44) - 66;
         int tapA = 0;
         if (g_mobile) {                      /* touch: the same swipe and drag as in the phone list; a tap is the lifted finger */
             static int apd, amoved; static float apy0, als0;
@@ -2821,7 +2882,8 @@ static void draw_ui(double t) {
         if (list_scroll < 0) list_scroll = 0;
         int first = (int)list_scroll;
         sw_step();
-        for (int r = 0; r < vis_rows + 1 && first + r < nvis; r++) {
+        if (g_pltab == 2) fav_rows(x, ry, w, rh, first, vis_rows, y + h - 62, g_mobile, tapA);
+        for (int r = 0; g_pltab != 2 && r < vis_rows + 1 && first + r < nvis; r++) {
             int i = pl_vis[first + r];
             float yy = ry + r * rh;
             if (yy + rh > y + h - 62) break;
@@ -2867,7 +2929,7 @@ static void draw_ui(double t) {
         draw_rpt_chip(x + 18, y + h - 44, 38);                       /* RPT and RND flush left, the bigger dice on the right */
         draw_rand_chip(x + 18 + 38 + 6, y + h - 44, 38);
         draw_dice(x + w - 50, y + h - 38, 18.0f);
-        if (npl && !nvis) text(x + 18, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
+        if (npl && !nvis && g_pltab != 2) text(x + 18, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
         if (!npl) {
             text(x + 18, y + 60, 14, DIM, "No files.");
             {   /* word-wrapped format list: the sidebar can be narrow */
@@ -3076,8 +3138,8 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
     text(cbx + (78 - text_width("CLOSE", 12)) / 2, cby + 7, 12, TXT, "CLOSE");
     if (tap && mx >= cbx && mx < cbx + 78 && my >= cby && my < cby + 28) { g_plopen = 0; was_open = 0; return; }
     pl_build_vis();
-    if (npl) pl_tabs(x, y + 46, wh, 1, tap);
-    float ry = y + (npl ? 80 : 48), area = h - (npl ? 80 : 48) - 8;
+    if (npl || g_nfav) pl_tabs(x, y + 46, wh, 1, tap);
+    float ry = y + (npl || g_nfav ? 80 : 48), area = h - (npl || g_nfav ? 80 : 48) - 8;
     int vis_rows = (int)(area / rh), maxscroll = nvis > vis_rows ? nvis - vis_rows : 0;
     if (list_follow && cvis >= 0) {
         if (cvis < list_scroll) list_scroll = (float)cvis;
@@ -3088,7 +3150,8 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
     if (list_scroll < 0) list_scroll = 0;
     int first = (int)list_scroll;
     sw_step();
-    for (int r = 0; r < vis_rows && first + r < nvis; r++) {
+    if (g_pltab == 2) fav_rows(x, ry, w, rh, first, vis_rows, y + h - 4, 1, tap);
+    for (int r = 0; g_pltab != 2 && r < vis_rows && first + r < nvis; r++) {
         int i = pl_vis[first + r];
         float yy = ry + r * rh;
         int isc = i == cur;
@@ -3119,7 +3182,7 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
         }
     }
     if (!npl) text(x + 16, y + 64, 14, DIM, "No files.");
-    else if (!nvis) text(x + 16, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
+    else if (!nvis && g_pltab != 2) text(x + 16, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
 }
 
 /* ---- Order slider (phone layout): drag the knob to choose an order, the jump happens when the finger lifts (seek_order re-renders the
@@ -4079,8 +4142,8 @@ static void draw_info_tv(float x, float y, float w, float h) {
 
 static void draw_ctx_menu(void) {
     if (ctx_idx >= 0 && ctx_idx < npl) {
-        static const char *const item[4] = { "Share", "", "Info", "Remove" };
-        int act[4], n = ctx_acts(ctx_idx, act);
+        const char *item[5] = { "Share", "", "Info", "Remove", ctx_idx < npl && fav_find(pl[ctx_idx].ma_id) >= 0 ? "Remove favorite" : "Add favorite" };
+        int act[5], n = ctx_acts(ctx_idx, act);
         rrect(ctx_x - 1, ctx_y - 1, CTX_W + 2, CTX_H(ctx_idx) + 2, 9, alpha(EDGE, 0.9f));
         rrect(ctx_x, ctx_y, CTX_W, CTX_H(ctx_idx), 8, CARDHI);
         for (int j = 0; j < n; j++) {
@@ -4358,14 +4421,14 @@ static void iter(void) {
 #ifndef __EMSCRIPTEN__
     if (g_link_id) { int id = g_link_id; g_link_id = 0; open_ma_link(id); }
 #endif
-    { static int once; if (!once) { once = 1; if (getenv("NGPLAYER_TEST_MATAB")) g_pltab = 1; } }
+    { static int once; if (!once) { once = 1; if (getenv("NGPLAYER_TEST_MATAB")) g_pltab = 1; if (getenv("NGPLAYER_TEST_FAVTAB")) { g_pltab = 2; if (!g_nfav) { static const char *tn[4] = { "Unknown World", "UnreaL ][ / PM", "Willy Beamish", "Space Debris" }; static const int ti[4] = { 192184, 160140, 148025, 49031 }; for (int k = 0; k < 4; k++) { g_fav[k].id = ti[k]; snprintf(g_fav[k].title, 96, "%s", tn[k]); } g_nfav = 4; } } } }
 #if defined(__APPLE__) && TARGET_OS_TV
     {   /* The Menu button: while the context menu is open the app gets it (as Escape: it closes the menu); otherwise the system takes it (the Apple TV home screen). The system takes
          * the button over completely while the controller UI events are on, so they follow the menu. Not switched within 0.6 s of the last menu action (a press on its way). */
         int pass = !tv_ctx_open;
         if (SDL_GetTicks() - tv_ctx_t > 600) { SDL_SetHint(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS, pass ? "1" : "0"); }
         SDL_SetHint("NG_TV_MENU_TO_SYSTEM", pass ? "1" : "0");
-        if (getenv("NGPLAYER_TEST_TVCTX")) { static int o; if (!o && SDL_GetTicks() > 3000) { o = 1; if (getenv("NGPLAYER_TEST_TVFAV")) { tv_fav_mode = 1; if (!tv_nfav) { tv_fav[0].id = 192184; snprintf(tv_fav[0].title, 96, "Unknown World"); tv_fav[1].id = 160140; snprintf(tv_fav[1].title, 96, "UnreaL ][ / PM"); tv_nfav = 2; } } tv_ctx_show(); } }      /* test hook: the menu (and the favorites list) */
+        if (getenv("NGPLAYER_TEST_TVCTX")) { static int o; if (!o && SDL_GetTicks() > 3000) { o = 1; if (getenv("NGPLAYER_TEST_TVFAV")) { tv_fav_mode = 1; if (!g_nfav) { g_fav[0].id = 192184; snprintf(g_fav[0].title, 96, "Unknown World"); g_fav[1].id = 160140; snprintf(g_fav[1].title, 96, "UnreaL ][ / PM"); g_nfav = 2; } } tv_ctx_show(); } }      /* test hook: the menu (and the favorites list) */
     }
 #endif      /* test hook: the Mod Archive tab of the list */
 #ifndef __EMSCRIPTEN__
@@ -4428,7 +4491,7 @@ static void iter(void) {
                     switch (e.key.keysym.sym) {
                     case SDLK_LEFT: case SDLK_RIGHT: { int t = 0, d = e.key.keysym.sym == SDLK_RIGHT ? 1 : NVIEW - 1; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + d) % NVIEW]; view_persist(); } break;
                     case SDLK_RETURN: case SDLK_KP_ENTER: if (!e.key.repeat) { tv_dn_t = SDL_GetTicks(); tv_dn_armed = 1; tv_dn_warn = 0; } break;   /* Select acts on release: short = a new random module, long (1 s) = remove the marked one */
-                    case SDLK_DOWN: if (tv_fav_mode) { if (tv_fav_sel + 1 < tv_nfav) tv_fav_sel++; } else next_prev(1); break;     /* Down / Up: through the modules that are already loaded (after the last the first), in the favorites list through the favorites */
+                    case SDLK_DOWN: if (tv_fav_mode) { if (tv_fav_sel + 1 < g_nfav) tv_fav_sel++; } else next_prev(1); break;     /* Down / Up: through the modules that are already loaded (after the last the first), in the favorites list through the favorites */
                     case SDLK_UP: if (tv_fav_mode) { if (tv_fav_sel > 0) tv_fav_sel--; } else next_prev(-1); break;
                     default: done = 0; break;
                     }
@@ -4437,6 +4500,7 @@ static void iter(void) {
 #endif
                 switch (e.key.keysym.sym) {
                 case SDLK_o: ma_show(1); break;
+                case SDLK_s: if (cur >= 0 && cur < npl && pl[cur].ma_id > 0) fav_toggle(pl[cur].ma_id, pl[cur].label); break;     /* the module that plays: favorite on / off */
                 case SDLK_h: midi_toggle_output(); break;                              /* MIDI files: the SoundFont or the MIDI hardware */
                 case SDLK_v: { int t = 0; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % NVIEW]; view_persist(); } break;
 #if !(defined(__APPLE__) && TARGET_OS_TV)
@@ -4587,9 +4651,9 @@ static void iter(void) {
         if (ctx_idx >= 0 && click) {                         /* click on the open menu: copy the link; any click closes it */
             float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;     /* touch: current pointer (the event coordinates are not reliable on iOS) */
             if (cmx >= ctx_x && cmx < ctx_x + CTX_W && cmy >= ctx_y && cmy < ctx_y + CTX_H(ctx_idx) && ctx_idx < npl) {
-                int act[4], na = ctx_acts(ctx_idx, act), jj = (int)((cmy - ctx_y - 1) / CTX_ROW);
-                int j = jj >= 0 && jj < na ? act[jj] : -1;                                 /* 0 Share, 3 Remove */
-                if (j == 0) share_link(ctx_idx); else if (j == 3) pl_remove(ctx_idx);
+                int act[5], na = ctx_acts(ctx_idx, act), jj = (int)((cmy - ctx_y - 1) / CTX_ROW);
+                int j = jj >= 0 && jj < na ? act[jj] : -1;                                 /* 0 Share, 3 Remove, 4 favorite */
+                if (j == 0) share_link(ctx_idx); else if (j == 4) fav_toggle(pl[ctx_idx].ma_id, pl[ctx_idx].label); else if (j == 3) pl_remove(ctx_idx);
             }
             ctx_idx = -1; click = 0; lp_swallow = 1;
         }
@@ -4734,9 +4798,7 @@ int main(int argc, char **argv) {
     gfx_window_attrs();
 #ifndef __EMSCRIPTEN__
     if (!shot) { settings_load(); ma_list_load(); }
-#if defined(__APPLE__) && TARGET_OS_TV
-    tv_fav_load();
-#endif
+    fav_load();
     if ((g_midi_hw || getenv("NGPLAYER_MIDI_HW")) && !midi_set_hardware(1, getenv("NGPLAYER_MIDI_OUT"))) g_midi_hw = 0;           /* the last session played MIDI files on hardware: connect again (not found: the SoundFont) */
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     g_vol = 1.0f;                                                  /* iOS: no slider, the volume is the device's (the buttons, the control centre) */
