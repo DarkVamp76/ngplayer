@@ -61,6 +61,7 @@ void song_info(const Song *s, SongInfo *out);
 int  song_is_midi(const Song *s);
 void song_midi_idle(Song *s);                                        /* the player is not rendering (pause, end): the MIDI hardware gets its panic */
 const char *song_midi_standard(const Song *s, int *known);          /* "MT-32", "GS", "XG", "GM2", "GM": what the SysEx messages of the file say it was written for (known = 0: none named) */
+const char *song_midi_lcd(const Song *s);                              /* the MT-32 display text the file sends ("Willy Beamish"), "" if there is none */
 typedef struct { float level; int program, bank, drum, volume, pan, used; } SongMidiChan;      /* level 0..1, CC 7, CC 10 (0..127), used = the file has notes on it */
 void song_midi_chan(const Song *s, int ch, SongMidiChan *out);
 typedef struct { double t0, t1; uint8_t ch, key, vel; } SongMidiNote;
