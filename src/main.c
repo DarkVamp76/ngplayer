@@ -1631,10 +1631,9 @@ static void module_lcd_update(void) {
     char t[160]; const char *tt = song_title(g_song);
     snprintf(t, sizeof t, "%s", tt[0] ? tt : (cur >= 0 && cur < npl ? pl[cur].label : "MT-32"));
     enum { cols = 20 }; int n = (int)strlen(t);
-    char vis[cols + 1];                                                                               /* what the 20 cells show: the title, centred; a longer one runs through as a marquee */
-    int off = 0;
-    if (n <= cols) { memset(vis, ' ', cols); memcpy(vis + (cols - n) / 2, t, (size_t)n); }
-    else { off = (int)(SDL_GetTicks() / 280) % (n + 4); for (int i = 0; i < cols; i++) { int k = (off + i) % (n + 4); vis[i] = k < n ? t[k] : ' '; } }
+    char vis[cols + 1];                                                                               /* what the 20 cells show: the title, centred; a longer one is replaced by "ngPlayer is cool" */
+    if (n > cols) { snprintf(t, sizeof t, "ngPlayer is cool"); n = (int)strlen(t); }                  /* a title that does not fit into the 20 cells: this text instead of the marquee */
+    memset(vis, ' ', cols); memcpy(vis + (cols - n) / 2, t, (size_t)n);
     vis[cols] = 0;
     static char shown[cols + 1]; static int shown_led = -1;
     const int led = midi_activity();                                                                  /* the MIDI lamp blinks with the messages that go to the hardware */
