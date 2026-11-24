@@ -4308,7 +4308,9 @@ static void iter(void) {
                 case SDLK_o: ma_show(1); break;
                 case SDLK_h: midi_toggle_output(); break;                              /* MIDI files: the SoundFont or the MIDI hardware */
                 case SDLK_v: { int t = 0; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % NVIEW]; view_persist(); } break;
-                case SDLK_ESCAPE: running = 0; break;
+#if !(defined(__APPLE__) && TARGET_OS_TV)
+                case SDLK_ESCAPE: running = 0; break;                                  /* (the Apple TV: the Menu button goes to the system, see NG_TV_MENU_TO_SYSTEM) */
+#endif
                 case SDLK_i: g_vmode = 4; view_persist(); break;                 /* the Info view */
                 case SDLK_SPACE: g_paused = !g_paused; break;
                 case SDLK_LEFT: if (e.key.keysym.mod & KMOD_SHIFT) pat_ch0--; else if (!(e.key.keysym.mod & KMOD_CTRL) && g_song && song_subsongs(g_song) > 1) { if (song_subsong(g_song) > 0) play_index_sub(cur, song_subsong(g_song) - 1); } else if (g_song && song_is_midi(g_song)) seek_midi_by(-10.0); else seek_order((g_view_valid ? g_view.order : song_order(g_song)) - 1); break;
@@ -4670,6 +4672,10 @@ int main(int argc, char **argv) {
     if (npl && !g_launch_bg && !(pl[0].ma_id > 0 && access(pl[0].path, R_OK))) play_index(0);
 
     running = 1;
+#if defined(__APPLE__) && TARGET_OS_TV
+    SDL_SetHint(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS, "1");      /* without it the root view controller does not hand the Menu press to the system (the app stays where it is) */
+    SDL_SetHint("NG_TV_MENU_TO_SYSTEM", "1");      /* the Menu button leaves to the Apple TV home screen (patched SDL, ios/patches/sdl-tv-menu.patch); no black screen */
+#endif
 #ifndef __EMSCRIPTEN__
     if (!shot && !getenv("NGPLAYER_NEW_INSTANCE")) ipc_listen();
 #endif
