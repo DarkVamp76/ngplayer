@@ -1628,7 +1628,7 @@ static void module_lcd_update(void) {
     if (!g_song || !song_is_midi(g_song) || chip_kind() != 7) return;
     const int mi = 6; c3_setup(mi);
     C3Gl *g = &c3gl[mi]; const C3Model *m = &C3M[mi];
-    char t[160]; const char *tt = song_title(g_song);
+    char t[160]; const char *tt = song_midi_lcd(g_song); if (!tt[0]) tt = song_title(g_song);              /* the text the file sends to the display of the device, else the title */
     snprintf(t, sizeof t, "%s", tt[0] ? tt : (cur >= 0 && cur < npl ? pl[cur].label : "MT-32"));
     enum { cols = 20 }; int n = (int)strlen(t);
     char vis[cols + 1];                                                                               /* what the 20 cells show: the title, centred; a longer one is replaced by "ngPlayer is cool" */

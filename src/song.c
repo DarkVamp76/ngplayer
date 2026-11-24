@@ -1100,5 +1100,11 @@ const char *song_midi_standard(const Song *s, int *known) {
     midi_info(s->mi, &mi); snprintf(b, sizeof b, "%s", mi.standard); if (known) *known = mi.standard_known;
     return b;
 }
+const char *song_midi_lcd(const Song *s) {                              /* the display text of the MT-32 that the file sends in a SysEx message (at most 20 characters), "" if it has none */
+    static char b[24]; MidiInfo mi; b[0] = 0;
+    if (!s || !s->mi) return b;
+    midi_info(s->mi, &mi); snprintf(b, sizeof b, "%s", mi.lcd);
+    return b;
+}
 void song_midi_idle(Song *s) { if (s && s->mi) midi_idle(s->mi); }
 
