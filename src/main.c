@@ -4119,10 +4119,13 @@ static int ipc_connect(void) {
     return fd;
 }
 /* hand over: every argument that is a path (made absolute), or just RAISE; returns 1 when a running player took it */
+static int url_ma_id(const char *u);
+static int g_link_id;                                  /* a Mod Archive ID from a link (ngplayer://192184, https://ngplayer.org/player/#192184) that waits for the main loop */
 static int ipc_forward(int npaths, char **paths) {
     int fd = ipc_connect(); if (fd < 0) return 0;
     char msg[8192]; size_t n = 0;
     for (int i = 0; i < npaths && n + PATH_MAX + 8 < sizeof msg; i++) {
+        { int lid = url_ma_id(paths[i]); if (lid > 0) { n += (size_t)snprintf(msg + n, sizeof msg - n, "MA %d\n", lid); continue; } }      /* a link: the running player loads that module */
         char rp[PATH_MAX]; if (!realpath(paths[i], rp)) continue;
         n += (size_t)snprintf(msg + n, sizeof msg - n, "OPEN %s\n", rp);
     }
@@ -4165,6 +4168,7 @@ static void ipc_poll(void) {
         int first = 1;
         for (char *line = strtok(buf, "\n"); line; line = strtok(NULL, "\n")) {
             if (!strncmp(line, "OPEN /", 6)) { ipc_log("OPEN", line + 5); open_external(line + 5, first); first = 0; if (cur >= 0 && cur < npl) ipc_log("PLAYING", pl[cur].label); }
+            else if (!strncmp(line, "MA ", 3)) { int id = atoi(line + 3); ipc_log("MA", line + 3); if (id > 0) g_link_id = id; }
             else if (!strcmp(line, "RAISE")) ipc_log("RAISE", NULL);
         }
         if (win) { SDL_RestoreWindow(win); SDL_RaiseWindow(win); }
@@ -4333,8 +4337,10 @@ static void mac_media_sync(void) {
 }
 #endif
 #if defined(__APPLE__) && TARGET_OS_IPHONE
+#endif
+#ifndef __EMSCRIPTEN__
 /* The Mod Archive ID in a link: .../player/#160140 (also #ma=160140 / #id=160140), .../m/160140 or ngplayer://160140. 0 = not a link of ours. */
-static int url_ma_id(const char *u) {
+__attribute__((unused)) static int url_ma_id(const char *u) {
     if (!u || (strncmp(u, "ngplayer:", 9) && !(!strncmp(u, "http", 4) && strstr(u, "://ngplayer.org/")))) return 0;       /* only the links of our own site and scheme */
     const char *h = strchr(u, '#');
     if (h) { h++; if (!strncmp(h, "ma=", 3) || !strncmp(h, "id=", 3)) h += 3; char *e; long v = strtol(h, &e, 10); if (e != h && v > 0 && v < 100000000 && (*e == 0 || *e == '&' || *e == '/')) return (int)v; }
@@ -4342,8 +4348,16 @@ static int url_ma_id(const char *u) {
     if (!strncmp(u, "ngplayer://", 11)) { long v = strtol(u + 11, NULL, 10); if (v > 0 && v < 100000000) return (int)v; }
     return 0;
 }
+/* a link of ours (the web player's "Open in ngPlayer" button, a browser, the command line): the module of its ID plays (one that is in the list already just plays) */
+static void open_ma_link(int id) {
+    for (int i = 0; i < npl; i++) if (pl[i].ma_id == id) { play_index(i); return; }
+    snprintf(ma_buf, sizeof ma_buf, "%d", id); ma_len = (int)strlen(ma_buf); ma_start();
+}
 #endif
 static void iter(void) {
+#ifndef __EMSCRIPTEN__
+    if (g_link_id) { int id = g_link_id; g_link_id = 0; open_ma_link(id); }
+#endif
     { static int once; if (!once) { once = 1; if (getenv("NGPLAYER_TEST_MATAB")) g_pltab = 1; } }
 #if defined(__APPLE__) && TARGET_OS_TV
     {   /* The Menu button: while the context menu is open the app gets it (as Escape: it closes the menu); otherwise the system takes it (the Apple TV home screen). The system takes
@@ -4667,9 +4681,13 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--rate") && i + 1 < argc) g_rate = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--new-instance")) { }                        /* handled above: do not look for a running player */
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
-            printf("usage: %s [--new-instance] [--rate N] [--screenshot out.bmp [--frames N]] [datei|ordner ...]\n", argv[0]);
+            printf("usage: %s [--new-instance] [--rate N] [--screenshot out.bmp [--frames N]] [datei|ordner|ngplayer://ID ...]\n", argv[0]);
             return 0;
-        } else add_path(argv[i], 0);
+        }
+#ifndef __EMSCRIPTEN__
+        else if (url_ma_id(argv[i]) > 0) g_link_id = url_ma_id(argv[i]);        /* a link (ngplayer://192184, https://ngplayer.org/player/#192184): that module */
+#endif
+        else add_path(argv[i], 0);
     }
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     {   /* iOS: the downloads of the Mod Archive are kept in Documents/Music/modarchive until the user removes them; log and temporary files go to Library/Caches */

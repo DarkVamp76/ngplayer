@@ -32,6 +32,7 @@ build/ngrender: tools/render.c $(CORE)
 install: build/ngplayer
 	install -Dm755 build/ngplayer $(DESTDIR)$(PREFIX)/bin/ngplayer
 	install -Dm644 packaging/ngplayer.desktop $(DESTDIR)$(PREFIX)/share/applications/ngplayer.desktop
+	install -Dm644 packaging/ngplayer-link.desktop $(DESTDIR)$(PREFIX)/share/applications/ngplayer-link.desktop
 	install -Dm644 assets/ngplayer.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/ngplayer.svg
 	install -Dm644 packaging/ngplayer-mime.xml $(DESTDIR)$(PREFIX)/share/mime/packages/ngplayer.xml
 	for f in assets/mime/*.svg; do install -Dm644 $$f $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/mimetypes/$$(basename $$f); done
@@ -51,7 +52,7 @@ clean:
 # WebAssembly-Build (braucht Emscripten und das Kit-Repo 'ngweb' neben diesem Ordner)
 NGWEB ?= ../ngweb
 web: build/version.h
-	$(MAKE) -f $(NGWEB)/ngweb.mk APPDIR=$(CURDIR) NAME=ngPlayer WEB_COUNT=1 WEB_SOUNDFONT=GeneralUser-GS.sf2 WEB_EXPORTS=_main,_ng_web_add,_ng_web_ma_done,_ng_web_paste,_ng_web_parse_id,_ng_web_size,_ng_web_media HINT="Drop module files here (MOD, S3M, XM, IT, MIDI ... and 28 more formats)" HINTFULL="Drop MOD, S3M, STM, PTM, ULT, 669, MTM, MED, PSM, FAR, MDL, DBM, DSM, AMF, SFX, AHX, XM, IT, DMF, DTM, AMD, MAD, A2M, RAD, LDS, HSQ, SQX, SDB, AGD, HA2, MIDI (MID, KAR, RMI, M32) or TFMX files here (TFMX: mdat.* and smpl.* together)" SRC="$(SRC)"
+	$(MAKE) -f $(NGWEB)/ngweb.mk APPDIR=$(CURDIR) NAME=ngPlayer WEB_NATIVE=ngplayer WEB_COUNT=1 WEB_SOUNDFONT=GeneralUser-GS.sf2 WEB_EXPORTS=_main,_ng_web_add,_ng_web_ma_done,_ng_web_paste,_ng_web_parse_id,_ng_web_size,_ng_web_media HINT="Drop module files here (MOD, S3M, XM, IT, MIDI ... and 28 more formats)" HINTFULL="Drop MOD, S3M, STM, PTM, ULT, 669, MTM, MED, PSM, FAR, MDL, DBM, DSM, AMF, SFX, AHX, XM, IT, DMF, DTM, AMD, MAD, A2M, RAD, LDS, HSQ, SQX, SDB, AGD, HA2, MIDI (MID, KAR, RMI, M32) or TFMX files here (TFMX: mdat.* and smpl.* together)" SRC="$(SRC)"
 
 # the SoundFont for MIDI files (GeneralUser GS, fetched and checked into assets/soundfont/, not kept in git)
 soundfont:

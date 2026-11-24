@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ngPlayer (links)
+Comment=Opens ngplayer:// links (the Open in ngPlayer button of the web player)
+Exec=ngplayer %u
+Icon=ngplayer
+Terminal=false
+NoDisplay=true
+Categories=AudioVideo;Audio;Player;
+MimeType=x-scheme-handler/ngplayer;
