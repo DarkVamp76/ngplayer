@@ -2260,6 +2260,7 @@ EM_JS(void, web_rpt_set, (int v), { try { localStorage.setItem('ngp.repeat', Str
 static void draw_rand_chip(float x, float y, float w) {
     const float h = 22;
     int hv = hit(x, y, w, h);
+    rrect(x, y, w, h, 7, CARD);                                  /* opaque underneath: the chip lies over the text of the view (Info) and stays readable */
     rrect(x, y, w, h, 7, alpha(g_rand ? VC[0] : (hv ? VC[2] : EDGE), g_rand ? 0.32f : 0.30f));
     text(x + (w - text_width("RND", 11)) / 2, y + 5.5f, 11, g_rand ? TXT : DIM, "RND");
     if (clicked(x, y, w, h)) {
@@ -2277,6 +2278,7 @@ static void draw_rand_chip(float x, float y, float w) {
 static void draw_rpt_chip(float x, float y, float w) {
     const float h = 22;
     int hv = hit(x, y, w, h);
+    rrect(x, y, w, h, 7, CARD);                                  /* opaque underneath: the chip lies over the text of the view (Info) and stays readable */
     rrect(x, y, w, h, 7, alpha(g_rpt ? VC[0] : (hv ? VC[2] : EDGE), g_rpt ? 0.32f : 0.30f));
     text(x + (w - text_width("RPT", 11)) / 2, y + 5.5f, 11, g_rpt ? TXT : DIM, "RPT");
     if (g_rpt == 2) { rrect(x + w - 9, y - 5, 14, 14, 7, VC[0]); text(x + w - 9 + (14 - text_width("1", 10)) / 2, y - 5 + 1.5f, 10, C(0.02f, 0.05f, 0.1f, 1), "1"); }
