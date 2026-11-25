@@ -4153,17 +4153,19 @@ static void draw_info_tv(float x, float y, float w, float h) {
     { const char *tc = getenv("NGPLAYER_TEST_CHIP"); if (tc) ikind = atoi(tc); }          /* test hook: another card kind (0 = Paula strip, 1 .. 5 the 3D cards) */
     /* the room: the sound card (swinging) takes the left part at the largest size that fits, the text column the rest, centred in the height */
     const float top = 40;
-    float boxw = fminf(w * 0.46f, w - 400.0f), boxh = h - top - 16;           /* the cards differ in width (a flat strip, wide expansion cards, a compact computer): the column is as wide as the text on the right allows */
-    if (boxw < w * 0.34f) boxw = w * 0.34f;                                   /* (all sizes here are view units: this card is about 757 wide on the Apple TV) */
+    const int narrow = w < 520;                                               /* upright phone: the card on top (a band of 30 percent), the table below it at the full width */
+    float boxw = narrow ? w - 24 : fminf(w * 0.46f, w - 400.0f), boxh = narrow ? fminf(h * 0.30f, 150.0f) : h - top - 16;           /* the cards differ in width (a flat strip, wide expansion cards, a compact computer): the column is as wide as the text on the right allows */
+    if (!narrow && boxw < w * 0.34f) boxw = w * 0.34f;                        /* (all sizes here are view units: this card is about 757 wide on the Apple TV) */
     float chh = fminf(boxh / 1.12f, 400.0f), cw = chips_width_k(ikind, chh);
     if (cw > boxw - 24) { chh *= (boxw - 24) / cw; cw = boxw - 24; }
     chip_swing = 1; draw_chip_k(ikind, x + (boxw - cw) / 2 + 8, y + top + (boxh - chh * 1.12f) / 2 + chh * 0.06f, chh, 0.0f); chip_swing = 0;
-    float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
-    float rx = x + boxw + 12, rw = w - boxw - 12 - 28;
+    float rx = narrow ? x + 18 : x + boxw + 12, rw = narrow ? w - 36 : w - boxw - 12 - 28;
     int maid = cur >= 0 && cur < npl ? pl[cur].ma_id : 0;                            /* a Mod Archive module: its ID is a row of the table too (to find it again) */
     int nrow = 4 + (maid > 0);
+    float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
+    if (narrow) { k = (h - top - boxh - 12) / (40.0f + 12 + nrow * 30.0f + 4 + 12 + (isi.nextra > 0 ? isi.nextra : 0) * 25.0f); if (k > 1.2f) k = 1.2f; if (k < 0.6f) k = 0.6f; }
     float need = 40 * k + 12 * k + nrow * 30 * k + 4 * k + 12 * k + (isi.nextra > 0 ? isi.nextra : 0) * 25 * k;
-    float ty = y + top + (boxh - need) / 2; if (ty < y + top) ty = y + top;
+    float ty = narrow ? y + top + boxh + 6 : y + top + (boxh - need) / 2; if (ty < y + top) ty = y + top;
     char title[128]; snprintf(title, sizeof title, "%s", ilabel); fit_text(title, rw, 26 * k);
     text(rx, ty, 26 * k, TXT, title);
     ty += 40 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
