@@ -3883,9 +3883,9 @@ static void cover_frames_dump(int dw, int dh, int kind, int n, const char *dir) 
         set_additive(0);
         col acc = C(0.20f, 0.45f, 0.90f, 1);
         rect_grad(0, 0, 600, 600, mix(BG0, acc, 0.32f), BG0);
-        set_additive(1); blob(300, 92, 130, alpha(acc, 0.50f)); set_additive(0);
-        float cw = fminf(500.0f, 172.0f * C3M[kind - 1].aspect), chh = cw / c3_box_aspect(kind - 1);       /* the top 30% of the cover (180 px): the card; the rest holds the information of the Info page */
-        tex_quad(c3_texture_swing(kind - 1), (600 - cw) / 2, 92 - chh / 2, cw, chh, C(1, 1, 1, 1));
+        set_additive(1); blob(300, 150, 150, alpha(acc, 0.50f)); set_additive(0);
+        float asp = c3_box_aspect(kind - 1), chh = fminf(270.0f, 560.0f / asp), cw = chh * asp;       /* the top half of the cover (300 px): the card; the lower half holds the information of the Info page */
+        tex_quad(c3_texture_swing(kind - 1), (600 - cw) / 2, 150 - chh / 2, cw, chh, C(1, 1, 1, 1));
         flush();
         gfx_read_pixels(600, 600, fb);
         gfx_target_end(ft);
