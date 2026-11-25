@@ -4122,7 +4122,15 @@ static void draw_info_tv(float x, float y, float w, float h) {
     for (int i = 0; i < nrow; i++) {
         text(rx, ty + 3 * k, 12 * k, FAINT, lab[i]);
         char v[96]; snprintf(v, sizeof v, "%s", val[i]); fit_text(v, rw - 112 * k, 16 * k);
-        text(rx + 112 * k, ty, 16 * k, TXT, v); ty += 30 * k;
+        if (i == 3 && !NG_TV) {                                                      /* the Mod Archive ID is a link to the module page (the Apple TV has no pointer) */
+            float vx = rx + 112 * k, vs = 16 * k, tw = text_width(v, vs);
+            int hv = hit(vx - 4, ty - 3, tw + 8, vs + 8);
+            text(vx, ty, vs, hv ? TXT : VC[0], v);
+            rect(vx, ty + vs + 2, tw, 1, alpha(hv ? TXT : VC[0], 0.7f));
+            if (clicked(vx - 4, ty - 3, tw + 8, vs + 8)) { info_open(cur); click = 0; }
+        }
+        else text(rx + 112 * k, ty, 16 * k, TXT, v);
+        ty += 30 * k;
     }
     ty += 4 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
     for (int i = 0; i < isi.nextra && ty < y + h - 22 * k; i++) {
