@@ -166,15 +166,18 @@ int ios_is_testflight(void);                                                    
 void ios_media_setup(void);                                                       /* ios_glue.m: lock screen / CarPlay (Now Playing, remote commands) */
 void ios_media_update(const char *title, const char *artist, const char *album, int playing, double pos, double duration);
 int ios_media_poll(void);
+void ios_media_modes(int rnd, int rpt);                                           /* ios_glue.m: RND / RPT state for the CarPlay buttons */
+void ios_media_set_list(int start, int n, const char *const *labels, const char *const *tags, const unsigned *rgb, int cur);      /* ios_glue.m: a window of the playlist for the first CarPlay screen (labels of the entries start .. start+n-1, their format tags and colours 0xRRGGBB, cur = the playing one) */
 int ios_audio_event_poll(void);                                                    /* ios_glue.m: 1 = the route changed / an interruption ended (reopen the output), 2 = pause (the route fell back to the built-in speaker) */
 void ios_media_set_cover(const unsigned char *px, int w, int h);                    /* ios_glue.m: the cover of the song (RGBA, bottom row first, as glReadPixels gives it); NULL = none */
 void ios_media_set_cover_text(const char *title, const char *by, float ar, float ag, float ab, float br, float bg, float bb);   /* ios_glue.m: a cover drawn on the CPU (for the background, where the GPU may not be used): gradient from the colour a to b, title, artist */
-int ios_media_set_cover_card(int kind, const char *title, const char *by, float ar, float ag, float ab);   /* ios_glue.m: the bundled picture card-<kind>.png of the sound card (without text) with the title, the artist and "ngPlayer" written on it, as the cover; 0 = there is none (then the CPU cover is drawn) */
+int ios_media_set_cover_card(int kind, const char *title, const char *by, float ar, float ag, float ab, const char *rows);   /* ios_glue.m: the bundled picture card-<kind>.png of the sound card (without text) with the title, the artist and "ngPlayer" written on it, as the cover; 0 = there is none (then the CPU cover is drawn) */
 float ios_output_latency_ms(void);                                               /* ios_glue.m: latency of the current output route in ms (AirPlay: ~2000) */
 void ios_audio_longform(void);                                                    /* ios_glue.m: AirPlay 2 (HomePod) needs the long-form route sharing policy */
 void ios_airplay_place(SDL_Window *win, float x, float y, float size, int visible);   /* ios_glue.m: the native AirPlay button over the window (points) */
 int ios_music_dir(char *out, int outlen);                                          /* ios_glue.m: Documents/Music, with the files bundled with the app copied in */
 void ios_pick_files(void);                                                       /* ios_glue.m: the document picker of the Files app; the chosen files are copied to Documents/Music and arrive as drop events */
+int ios_carplay_connected(void);                                                  /* ios_glue.m: a CarPlay screen is connected (the cover is then the information screen also in the foreground) */
 int ios_launched_in_background(void);                                         /* ios_glue.m: started by the system in the background (CarPlay / lock screen play command): do not play by itself */
 int ios_app_active(void);                                                        /* ios_glue.m: the app is in the foreground */
 int ios_hinge_status(SDL_Window *win);                                       /* ios_glue.m: -1 no hinge (iPhone, iPad), 1 closed, 2 partly open, 3 open (iPhone Duo) */
@@ -632,6 +635,7 @@ static double g_dt;
 static void draw_pattern(float x, float y, float w, float h);
 static void draw_voxel(float x, float y, float w, float h);
 static void draw_info_tv(float x, float y, float w, float h);
+static const char *best_played_on(int kind);
 /* Umschalter Pattern | Orb oben in der Karte (auch per Touch/Klick) */
 static float view_cw(void) { return g_portrait && !NG_TV ? 56 : 62; }      /* width of one tab (5 of them: on a phone they must leave room for the ORD / ROW text on the left) */
 static void view_switch(float x, float y, float w) {
@@ -2326,6 +2330,22 @@ EM_JS(void, web_view_set, (int v), { try { localStorage.setItem('ngp.view', Stri
 EM_JS(int, web_rpt_get, (void), { try { var v = parseInt(localStorage.getItem('ngp.repeat') || '0', 10); return v === 1 || v === 2 ? v : 0; } catch (e) { return 0; } });
 EM_JS(void, web_rpt_set, (int v), { try { localStorage.setItem('ngp.repeat', String(v)); } catch (e) {} });
 #endif
+static void rand_toggle(void) {                       /* RND chip, CarPlay shuffle button */
+    g_rand = !g_rand;
+    if (g_rand) g_rpt = 0;                                  /* random and repeat exclude each other */
+#ifdef __EMSCRIPTEN__
+    web_rand_set(g_rand); web_rpt_set(g_rpt);
+#endif
+    snprintf(toast_txt, sizeof toast_txt, g_rand ? "Random mode on" : "Random mode off"); toast_t = 1.8f;
+}
+static void rpt_cycle(void) {                           /* RPT chip, CarPlay repeat button: off -> whole list -> this song -> off */
+    g_rpt = (g_rpt + 1) % 3;
+    if (g_rpt) g_rand = 0;
+#ifdef __EMSCRIPTEN__
+    web_rpt_set(g_rpt); web_rand_set(g_rand);
+#endif
+    snprintf(toast_txt, sizeof toast_txt, g_rpt == 1 ? "Repeat: whole list" : g_rpt == 2 ? "Repeat: this song" : "Repeat off"); toast_t = 1.8f;
+}
 /* RND chip next to the dice: switches the random mode (see next_user) */
 static void draw_rand_chip(float x, float y, float w) {
     const float h = 22;
@@ -2333,15 +2353,7 @@ static void draw_rand_chip(float x, float y, float w) {
     rrect(x, y, w, h, 7, CARD);                                  /* opaque underneath: the chip lies over the text of the view (Info) and stays readable */
     rrect(x, y, w, h, 7, alpha(g_rand ? VC[0] : (hv ? VC[2] : EDGE), g_rand ? 0.32f : 0.30f));
     text(x + (w - text_width("RND", 11)) / 2, y + 5.5f, 11, g_rand ? TXT : DIM, "RND");
-    if (clicked(x, y, w, h)) {
-        g_rand = !g_rand;
-        if (g_rand) g_rpt = 0;                                  /* random and repeat exclude each other */
-#ifdef __EMSCRIPTEN__
-        web_rand_set(g_rand); web_rpt_set(g_rpt);
-#endif
-        snprintf(toast_txt, sizeof toast_txt, g_rand ? "Random mode on" : "Random mode off"); toast_t = 1.8f;
-        click = 0;
-    }
+    if (clicked(x, y, w, h)) { rand_toggle(); click = 0; }
 }
 /* RPT chip left of RND: one click repeats the whole list (after the last song the first one follows), the next click repeats the current song
  * (a small 1 on the chip), the third switches it off. Switching it on switches RND off. */
@@ -2352,15 +2364,7 @@ static void draw_rpt_chip(float x, float y, float w) {
     rrect(x, y, w, h, 7, alpha(g_rpt ? VC[0] : (hv ? VC[2] : EDGE), g_rpt ? 0.32f : 0.30f));
     text(x + (w - text_width("RPT", 11)) / 2, y + 5.5f, 11, g_rpt ? TXT : DIM, "RPT");
     if (g_rpt == 2) { rrect(x + w - 9, y - 5, 14, 14, 7, VC[0]); text(x + w - 9 + (14 - text_width("1", 10)) / 2, y - 5 + 1.5f, 10, C(0.02f, 0.05f, 0.1f, 1), "1"); }
-    if (clicked(x, y, w, h)) {
-        g_rpt = (g_rpt + 1) % 3;
-        if (g_rpt) g_rand = 0;
-#ifdef __EMSCRIPTEN__
-        web_rpt_set(g_rpt); web_rand_set(g_rand);
-#endif
-        snprintf(toast_txt, sizeof toast_txt, g_rpt == 1 ? "Repeat: whole list" : g_rpt == 2 ? "Repeat: this song" : "Repeat off"); toast_t = 1.8f;
-        click = 0;
-    }
+    if (clicked(x, y, w, h)) { rpt_cycle(); click = 0; }
 }
 
 /* ---------------------------------------------------------------- The-Mod-Archive-Dialog (Download per ID oder Link) */
@@ -3866,6 +3870,35 @@ static void probe_start(int idx) {
  * with the screen locked the browser stops requestAnimationFrame (the main loop), only the audio keeps running, so the loop alone would
  * leave the old title on the lock screen. */
 #endif
+/* Test tool (NGPLAYER_TEST_COVERFRAMES="kind,n,dir"): the sound card turning once around, n pictures of 600 x 600 (the card on the dark glow, no text, like the bundled card-<kind>.png) as BMP files
+ * dir/card-<kind>-<i>.bmp, for the CarPlay cover (the app changes the cover from picture to picture; there is no GPU for it in the background). */
+static void cover_frames_dump(int dw, int dh, int kind, int n, const char *dir) {
+    if (kind < 1 || kind > C3_N || n < 1) return;
+    static gfx_tex *ft; static unsigned char fb[600 * 600 * 4];
+    if (!ft) ft = gfx_tex_create(600, 600, GFX_RGBA8, NULL, GFX_TARGET);
+    c3_setup(kind - 1);
+    for (int i = 0; i < n; i++) {
+        c3_render(kind - 1, 6.2831853f * (float)i / (float)n, c3gl[kind - 1].color2, dw, dh);
+        if (!gfx_target_begin(ft, BG0.r, BG0.g, BG0.b, 1)) return;
+        gfx_set_params(600, 600, 1.0f); gfx_set_texture(fonttex);
+        set_additive(0);
+        col acc = C(0.20f, 0.45f, 0.90f, 1);
+        rect_grad(0, 0, 600, 600, mix(BG0, acc, 0.32f), BG0);
+        set_additive(1); blob(300, 150, 150, alpha(acc, 0.50f)); set_additive(0);
+        float asp = c3_box_aspect(kind - 1), chh = fminf(270.0f, 560.0f / asp), cw = chh * asp;       /* the top half of the cover (300 px): the card; the lower half holds the information of the Info page */
+        tex_quad(c3_texture_swing(kind - 1), (600 - cw) / 2, 150 - chh / 2, cw, chh, C(1, 1, 1, 1));
+        flush();
+        gfx_read_pixels(600, 600, fb);
+        gfx_target_end(ft);
+        char path[600]; snprintf(path, sizeof path, "%s/card-%d-%02d.bmp", dir, kind, i);
+        FILE *f = fopen(path, "wb"); if (!f) return;
+        unsigned hdr[14] = {0}; unsigned short mg = 0x4d42; unsigned sz = 54 + 600 * 600 * 3;
+        fwrite(&mg, 2, 1, f); hdr[0] = sz; hdr[2] = 54; hdr[3] = 40; hdr[4] = 600; hdr[5] = 600; ((unsigned short *)&hdr[6])[0] = 1; ((unsigned short *)&hdr[6])[1] = 24; hdr[10] = 600 * 600 * 3;
+        fwrite(hdr, 4, 13, f);
+        for (int y = 0; y < 600; y++) for (int x = 0; x < 600; x++) { const unsigned char *q = fb + ((size_t)y * 600 + x) * 4; unsigned char o[3] = { q[2], q[1], q[0] }; fwrite(o, 1, 3, f); }
+        fclose(f);
+    }
+}
 #if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
 /* ---- The cover of the current song (Media Session: lock screen, CarPlay): drawn off screen with the player's own 2D renderer, 600 x 600:
  * a background gradient and glow in an accent colour taken from the title, the sound card of the song (the same picture as in the header,
@@ -3942,7 +3975,11 @@ static col cover_title(char *title, size_t cap) {      /* the title on the cover
 static void cover_fallback(void) {                    /* in the background: no GPU, so the bundled picture of the sound card is the cover (or, without one, a cover drawn on the CPU) until the app is open again and cover_render draws the real one */
     if (!g_song) return;
     char title[160]; col acc = cover_title(title, sizeof title);
-    if (ios_media_set_cover_card(chip_kind(), title, g_cover_by, acc.r, acc.g, acc.b)) return;     /* the picture of the sound card (bundled with the app) with the title and the artist written on it */
+    char rows[900]; { SongInfo si; song_info(g_song, &si); int n = 0, maid = (cur >= 0 && cur < npl) ? pl[cur].ma_id : 0;      /* the rows of the Info page: "LABEL<TAB>value" per line, the extra lines with an empty label */
+        n += snprintf(rows + n, sizeof rows - n, "TRACKER\t%s\nFORMAT\t%s\nVOICES\t%d %s\nBEST PLAYED ON\t%s\n", si.tracker, si.format, si.voices, si.voice_unit, best_played_on(chip_kind()));
+        if (maid > 0) n += snprintf(rows + n, sizeof rows - n, "MOD ARCHIVE\t#%d\n", maid);
+        for (int i = 0; i < si.nextra && i < 3 && n < (int)sizeof rows - 100; i++) n += snprintf(rows + n, sizeof rows - n, "\t%s\n", si.extra[i]); }
+    if (ios_media_set_cover_card(chip_kind(), title, g_cover_by, acc.r, acc.g, acc.b, rows)) return;     /* the picture of the sound card (bundled with the app) with the title and the artist written on it */
     ios_media_set_cover_text(title, g_cover_by, acc.r, acc.g, acc.b, BG0.r, BG0.g, BG0.b);
 }
 #endif
@@ -4099,6 +4136,10 @@ static void info_open(int idx) {
 }
 
 /* ---- the Info page, one of the views: the sound card (swinging) on the left, title, tracker, format, voices and the technical details of the file on the right ---- */
+static const char *best_played_on(int kind) {            /* the hardware the module sounds best on: the sound card shown on the left (chip_kind_of) */
+    static const char *const best[9] = { "COMMODORE AMIGA", "GRAVIS ULTRASOUND (FORTE GF1)", "GRAVIS ULTRASOUND PnP (AMD INTERWAVE)", "TERRATEC EWS 64", "ADLIB GOLD 1000", "COMMODORE AMIGA", "ROLAND SOUND CANVAS", "ROLAND MT-32", "SOUND BLASTER AWE32" };
+    return best[kind >= 0 && kind < 9 ? kind : 1];
+}
 static void draw_info_tv(float x, float y, float w, float h) {
     card(x, y, w, h, 0);
     view_switch(x, y, w);
@@ -4120,7 +4161,6 @@ static void draw_info_tv(float x, float y, float w, float h) {
     float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
     float rx = x + boxw + 12, rw = w - boxw - 12 - 28;
     int maid = cur >= 0 && cur < npl ? pl[cur].ma_id : 0;                            /* a Mod Archive module: its ID is a row of the table too (to find it again) */
-    static const char *const best[9] = { "COMMODORE AMIGA", "GRAVIS ULTRASOUND (FORTE GF1)", "GRAVIS ULTRASOUND PnP (AMD INTERWAVE)", "TERRATEC EWS 64", "ADLIB GOLD 1000", "COMMODORE AMIGA", "ROLAND SOUND CANVAS", "ROLAND MT-32", "SOUND BLASTER AWE32" };      /* the hardware the module sounds best on: the sound card shown on the left (chip_kind_of) */
     int nrow = 4 + (maid > 0);
     float need = 40 * k + 12 * k + nrow * 30 * k + 4 * k + 12 * k + (isi.nextra > 0 ? isi.nextra : 0) * 25 * k;
     float ty = y + top + (boxh - need) / 2; if (ty < y + top) ty = y + top;
@@ -4129,7 +4169,7 @@ static void draw_info_tv(float x, float y, float w, float h) {
     ty += 40 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
     char vb[64]; snprintf(vb, sizeof vb, "%d %s", isi.voices, isi.voice_unit);
     char mb[32]; snprintf(mb, sizeof mb, "#%d", maid);
-    const char *lab[5] = { "TRACKER", "FORMAT", "VOICES", "BEST PLAYED ON", "MOD ARCHIVE" }, *val[5] = { isi.tracker, isi.format, vb, best[ikind >= 0 && ikind < 9 ? ikind : 1], mb };
+    const char *lab[5] = { "TRACKER", "FORMAT", "VOICES", "BEST PLAYED ON", "MOD ARCHIVE" }, *val[5] = { isi.tracker, isi.format, vb, best_played_on(ikind), mb };
     float vcol = 112 * k;                                                              /* the value column: right of the longest label */
     for (int i = 0; i < nrow; i++) { float lw = text_width(lab[i], 12 * k) + 16 * k; if (lw > vcol) vcol = lw; }
     for (int i = 0; i < nrow; i++) {
@@ -4375,12 +4415,21 @@ static void ios_media_sync(void) {
     ma_titles_apply();
     audio_watch();
     if (g_launch_bg && ios_app_active()) { g_launch_bg = 0; ios_start_idle(); }        /* the user opened the app: now it may start */
+    ios_media_modes(g_rand, g_rpt);                              /* the state of the CarPlay shuffle / repeat buttons */
     int c; while ((c = ios_media_poll()) >= 0) {
         if (c == 0) { if (g_launch_bg && !g_song) { g_launch_bg = 0; ios_start_idle(); } if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; if (!g_dev || SDL_GetAudioDeviceStatus(g_dev) != SDL_AUDIO_PLAYING) audio_recover(); }
         else if (c == 1) g_paused = 1;
         else if (c == 2) next_user(1);
         else if (c == 3) next_user(-1);
+        else if (c == 4) tv_dice();                              /* CarPlay: "Random module" */
+        else if (c == 5) rand_toggle();                          /* CarPlay: shuffle button (= RND) */
+        else if (c == 6) rpt_cycle();                            /* CarPlay: repeat button (= RPT) */
+        else if (c >= 1000) { if (c - 1000 < npl) play_index(c - 1000); }          /* CarPlay: a song of the list (1000 + its number) */
     }
+    { static int lc = -2, ln = -1, was; int up = ios_carplay_connected();      /* the first CarPlay screen: a window of the list (two songs before the playing one, then the following), sent when it or the playing song changes */
+      if (up && (!was || lc != cur || ln != npl)) { lc = cur; ln = npl; int st = cur > 2 ? cur - 2 : 0, n = npl - st; if (n > 100) n = 100; if (n < 0) n = 0; const char *lab[100], *tag[100]; unsigned rgb[100]; for (int i = 0; i < n; i++) { lab[i] = pl[st + i].label; int f = entry_fmt(&pl[st + i]); if (f > 0 && f < FMT_COUNT) { tag[i] = FMT_NAME[f]; rgb[i] = ((unsigned)(FMT_COL[f].r * 255.0f + 0.5f) << 16) | ((unsigned)(FMT_COL[f].g * 255.0f + 0.5f) << 8) | (unsigned)(FMT_COL[f].b * 255.0f + 0.5f); } else { tag[i] = ""; rgb[i] = 0; } } ios_media_set_list(st, n, lab, tag, rgb, cur); }
+      was = up; }
+    { static int cc; if (!cc && g_song && getenv("NGPLAYER_TEST_COVERCARD")) { cc = 1; cover_fallback(); } }         /* test hook: the cover of the background (the information screen with the card) also in the foreground */
     if (g_probe) probe_run(2);                                  /* a few ms of the length measurement per frame */
     static char mt[160], ma[96], mb[96]; static int mp = -1; static Uint32 mt0; static double mlen = -2;
     if (g_song && cur >= 0 && cur < npl && pl[cur].ma_id > 0) {      /* a Mod Archive song: the list shows its title, not "ModArchive #id" (also after a restart) */
@@ -4402,7 +4451,10 @@ static void ios_media_sync(void) {
     snprintf(g_cover_by, sizeof g_cover_by, "%s", by);
     Uint32 tn = SDL_GetTicks();
     int newsong = strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb);
-    if (newsong) { ios_media_set_cover(NULL, 0, 0); g_cover_gen++; cover_pending = g_song != NULL; if (g_bg && g_song) cover_fallback(); }      /* the cover of the previous song goes, the new one is drawn in the next frame (in the background: a cover from the CPU first, cover_pending stays) */
+    int cp = ios_carplay_connected(); static int cp_was;
+    if (newsong) { ios_media_set_cover(NULL, 0, 0); g_cover_gen++; cover_pending = g_song != NULL && !cp; if (g_song && (g_bg || cp)) cover_fallback(); }      /* the cover of the previous song goes, the new one is drawn in the next frame (in the background: a cover from the CPU first, cover_pending stays) */
+    else if (cp != cp_was && g_song) { if (cp) { cover_pending = 0; cover_fallback(); } else cover_pending = 1; }      /* CarPlay connected / gone while a song plays: the information screen (the stop motion) now, or the picture of the GPU again */
+    cp_was = cp;
     if (now != mp || newsong || g_len_s != mlen || tn - mt0 > 15000) {
         mlen = g_len_s; mp = now; mt0 = tn; snprintf(mt, sizeof mt, "%s", t); snprintf(ma, sizeof ma, "%s", artist); snprintf(mb, sizeof mb, "%s", album);
         ios_media_update(mt, ma, mb, now, (double)g_frames / g_rate, g_len_s > 0 ? g_len_s : 0);
@@ -4736,6 +4788,7 @@ static void iter(void) {
         draw_ctx_menu();
         set_additive(0);
         flush();
+        { const char *cf = getenv("NGPLAYER_TEST_COVERFRAMES"); static int cfd; if (cf && !cfd && frame >= 5) { cfd = 1; int k, n; char d[400]; if (sscanf(cf, "%d,%d,%399s", &k, &n, d) == 3) cover_frames_dump(dw, dh, k, n, d); running = 0; } }      /* test tool, see cover_frames_dump */
         if (shot && ++frame >= shot_frames) { save_screenshot(shot, dw, dh); running = 0; }
 #if defined(__APPLE__) && TARGET_OS_IPHONE
         {   /* the AirPlay button: view units -> points (the safe area offset vpx / vpy is in pixels, GL counts the bottom inset as y) */
