@@ -15,5 +15,5 @@ def classify(n):
     return None
 import contextlib
 with contextlib.redirect_stdout(sys.stderr):
-    s = B.bake_ews('AWE', glb, 320, lines=('SOUND BLASTER', 'AWE32'), auto_outline=True, classify=classify, scale=1000.0)
+    s = B.bake_ews('AWE', glb, 320, lines=('SOUND BLASTER', 'AWE32'), auto_outline=True, classify=classify, scale=1000.0, back_pal=B.PAL_AWE)
 sys.stdout.write('/* Creative Sound Blaster AWE32, baked from the 3D model by tools/bake_awe32.py. GPL-3.0-or-later */\n#include <stdint.h>\n' + s)
