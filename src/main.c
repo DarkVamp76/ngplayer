@@ -4110,7 +4110,8 @@ static void draw_info_tv(float x, float y, float w, float h) {
     float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
     float rx = x + boxw + 12, rw = w - boxw - 12 - 28;
     int maid = cur >= 0 && cur < npl ? pl[cur].ma_id : 0;                            /* a Mod Archive module: its ID is a row of the table too (to find it again) */
-    int nrow = 3 + (maid > 0);
+    static const char *const best[8] = { "COMMODORE AMIGA", "GRAVIS ULTRASOUND GF1", "GRAVIS ULTRASOUND PnP (AMD INTERWAVE)", "TERRATEC EWS 64", "ADLIB GOLD 1000", "COMMODORE AMIGA", "ROLAND SOUND CANVAS", "ROLAND MT-32" };      /* the hardware the module sounds best on: the sound card shown on the left (chip_kind_of) */
+    int nrow = 4 + (maid > 0);
     float need = 40 * k + 12 * k + nrow * 30 * k + 4 * k + 12 * k + (isi.nextra > 0 ? isi.nextra : 0) * 25 * k;
     float ty = y + top + (boxh - need) / 2; if (ty < y + top) ty = y + top;
     char title[128]; snprintf(title, sizeof title, "%s", ilabel); fit_text(title, rw, 26 * k);
@@ -4118,18 +4119,20 @@ static void draw_info_tv(float x, float y, float w, float h) {
     ty += 40 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
     char vb[64]; snprintf(vb, sizeof vb, "%d %s", isi.voices, isi.voice_unit);
     char mb[32]; snprintf(mb, sizeof mb, "#%d", maid);
-    const char *lab[4] = { "TRACKER", "FORMAT", "VOICES", "MOD ARCHIVE" }, *val[4] = { isi.tracker, isi.format, vb, mb };
+    const char *lab[5] = { "TRACKER", "FORMAT", "VOICES", "BEST PLAYED ON", "MOD ARCHIVE" }, *val[5] = { isi.tracker, isi.format, vb, best[ikind >= 0 && ikind < 8 ? ikind : 1], mb };
+    float vcol = 112 * k;                                                              /* the value column: right of the longest label */
+    for (int i = 0; i < nrow; i++) { float lw = text_width(lab[i], 12 * k) + 16 * k; if (lw > vcol) vcol = lw; }
     for (int i = 0; i < nrow; i++) {
         text(rx, ty + 3 * k, 12 * k, FAINT, lab[i]);
-        char v[96]; snprintf(v, sizeof v, "%s", val[i]); fit_text(v, rw - 112 * k, 16 * k);
-        if (i == 3 && !NG_TV) {                                                      /* the Mod Archive ID is a link to the module page (the Apple TV has no pointer) */
-            float vx = rx + 112 * k, vs = 16 * k, tw = text_width(v, vs);
+        char v[96]; snprintf(v, sizeof v, "%s", val[i]); fit_text(v, rw - vcol, 16 * k);
+        if (i == 4 && !NG_TV) {                                                      /* the Mod Archive ID is a link to the module page (the Apple TV has no pointer) */
+            float vx = rx + vcol, vs = 16 * k, tw = text_width(v, vs);
             int hv = hit(vx - 4, ty - 3, tw + 8, vs + 8);
             text(vx, ty, vs, hv ? TXT : VC[0], v);
             rect(vx, ty + vs + 2, tw, 1, alpha(hv ? TXT : VC[0], 0.7f));
             if (clicked(vx - 4, ty - 3, tw + 8, vs + 8)) { info_open(cur); click = 0; }
         }
-        else text(rx + 112 * k, ty, 16 * k, TXT, v);
+        else text(rx + vcol, ty, 16 * k, TXT, v);
         ty += 30 * k;
     }
     ty += 4 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
