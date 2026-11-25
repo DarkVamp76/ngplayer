@@ -166,6 +166,7 @@ int ios_is_testflight(void);                                                    
 void ios_media_setup(void);                                                       /* ios_glue.m: lock screen / CarPlay (Now Playing, remote commands) */
 void ios_media_update(const char *title, const char *artist, const char *album, int playing, double pos, double duration);
 int ios_media_poll(void);
+void ios_media_modes(int rnd, int rpt);                                           /* ios_glue.m: RND / RPT state for the CarPlay buttons */
 int ios_audio_event_poll(void);                                                    /* ios_glue.m: 1 = the route changed / an interruption ended (reopen the output), 2 = pause (the route fell back to the built-in speaker) */
 void ios_media_set_cover(const unsigned char *px, int w, int h);                    /* ios_glue.m: the cover of the song (RGBA, bottom row first, as glReadPixels gives it); NULL = none */
 void ios_media_set_cover_text(const char *title, const char *by, float ar, float ag, float ab, float br, float bg, float bb);   /* ios_glue.m: a cover drawn on the CPU (for the background, where the GPU may not be used): gradient from the colour a to b, title, artist */
@@ -2327,6 +2328,22 @@ EM_JS(void, web_view_set, (int v), { try { localStorage.setItem('ngp.view', Stri
 EM_JS(int, web_rpt_get, (void), { try { var v = parseInt(localStorage.getItem('ngp.repeat') || '0', 10); return v === 1 || v === 2 ? v : 0; } catch (e) { return 0; } });
 EM_JS(void, web_rpt_set, (int v), { try { localStorage.setItem('ngp.repeat', String(v)); } catch (e) {} });
 #endif
+static void rand_toggle(void) {                       /* RND chip, CarPlay shuffle button */
+    g_rand = !g_rand;
+    if (g_rand) g_rpt = 0;                                  /* random and repeat exclude each other */
+#ifdef __EMSCRIPTEN__
+    web_rand_set(g_rand); web_rpt_set(g_rpt);
+#endif
+    snprintf(toast_txt, sizeof toast_txt, g_rand ? "Random mode on" : "Random mode off"); toast_t = 1.8f;
+}
+static void rpt_cycle(void) {                           /* RPT chip, CarPlay repeat button: off -> whole list -> this song -> off */
+    g_rpt = (g_rpt + 1) % 3;
+    if (g_rpt) g_rand = 0;
+#ifdef __EMSCRIPTEN__
+    web_rpt_set(g_rpt); web_rand_set(g_rand);
+#endif
+    snprintf(toast_txt, sizeof toast_txt, g_rpt == 1 ? "Repeat: whole list" : g_rpt == 2 ? "Repeat: this song" : "Repeat off"); toast_t = 1.8f;
+}
 /* RND chip next to the dice: switches the random mode (see next_user) */
 static void draw_rand_chip(float x, float y, float w) {
     const float h = 22;
@@ -2334,15 +2351,7 @@ static void draw_rand_chip(float x, float y, float w) {
     rrect(x, y, w, h, 7, CARD);                                  /* opaque underneath: the chip lies over the text of the view (Info) and stays readable */
     rrect(x, y, w, h, 7, alpha(g_rand ? VC[0] : (hv ? VC[2] : EDGE), g_rand ? 0.32f : 0.30f));
     text(x + (w - text_width("RND", 11)) / 2, y + 5.5f, 11, g_rand ? TXT : DIM, "RND");
-    if (clicked(x, y, w, h)) {
-        g_rand = !g_rand;
-        if (g_rand) g_rpt = 0;                                  /* random and repeat exclude each other */
-#ifdef __EMSCRIPTEN__
-        web_rand_set(g_rand); web_rpt_set(g_rpt);
-#endif
-        snprintf(toast_txt, sizeof toast_txt, g_rand ? "Random mode on" : "Random mode off"); toast_t = 1.8f;
-        click = 0;
-    }
+    if (clicked(x, y, w, h)) { rand_toggle(); click = 0; }
 }
 /* RPT chip left of RND: one click repeats the whole list (after the last song the first one follows), the next click repeats the current song
  * (a small 1 on the chip), the third switches it off. Switching it on switches RND off. */
@@ -2353,15 +2362,7 @@ static void draw_rpt_chip(float x, float y, float w) {
     rrect(x, y, w, h, 7, alpha(g_rpt ? VC[0] : (hv ? VC[2] : EDGE), g_rpt ? 0.32f : 0.30f));
     text(x + (w - text_width("RPT", 11)) / 2, y + 5.5f, 11, g_rpt ? TXT : DIM, "RPT");
     if (g_rpt == 2) { rrect(x + w - 9, y - 5, 14, 14, 7, VC[0]); text(x + w - 9 + (14 - text_width("1", 10)) / 2, y - 5 + 1.5f, 10, C(0.02f, 0.05f, 0.1f, 1), "1"); }
-    if (clicked(x, y, w, h)) {
-        g_rpt = (g_rpt + 1) % 3;
-        if (g_rpt) g_rand = 0;
-#ifdef __EMSCRIPTEN__
-        web_rpt_set(g_rpt); web_rand_set(g_rand);
-#endif
-        snprintf(toast_txt, sizeof toast_txt, g_rpt == 1 ? "Repeat: whole list" : g_rpt == 2 ? "Repeat: this song" : "Repeat off"); toast_t = 1.8f;
-        click = 0;
-    }
+    if (clicked(x, y, w, h)) { rpt_cycle(); click = 0; }
 }
 
 /* ---------------------------------------------------------------- The-Mod-Archive-Dialog (Download per ID oder Link) */
@@ -4412,12 +4413,15 @@ static void ios_media_sync(void) {
     ma_titles_apply();
     audio_watch();
     if (g_launch_bg && ios_app_active()) { g_launch_bg = 0; ios_start_idle(); }        /* the user opened the app: now it may start */
+    ios_media_modes(g_rand, g_rpt);                              /* the state of the CarPlay shuffle / repeat buttons */
     int c; while ((c = ios_media_poll()) >= 0) {
         if (c == 0) { if (g_launch_bg && !g_song) { g_launch_bg = 0; ios_start_idle(); } if (g_ended) { if (cur >= 0) play_index_sub(cur, g_open_sub); } else g_paused = 0; if (!g_dev || SDL_GetAudioDeviceStatus(g_dev) != SDL_AUDIO_PLAYING) audio_recover(); }
         else if (c == 1) g_paused = 1;
         else if (c == 2) next_user(1);
         else if (c == 3) next_user(-1);
         else if (c == 4) tv_dice();                              /* CarPlay: "Random module" */
+        else if (c == 5) rand_toggle();                          /* CarPlay: shuffle button (= RND) */
+        else if (c == 6) rpt_cycle();                            /* CarPlay: repeat button (= RPT) */
     }
     { static int cc; if (!cc && g_song && getenv("NGPLAYER_TEST_COVERCARD")) { cc = 1; cover_fallback(); } }         /* test hook: the cover of the background (the information screen with the card) also in the foreground */
     if (g_probe) probe_run(2);                                  /* a few ms of the length measurement per frame */
