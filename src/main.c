@@ -176,6 +176,7 @@ void ios_audio_longform(void);                                                  
 void ios_airplay_place(SDL_Window *win, float x, float y, float size, int visible);   /* ios_glue.m: the native AirPlay button over the window (points) */
 int ios_music_dir(char *out, int outlen);                                          /* ios_glue.m: Documents/Music, with the files bundled with the app copied in */
 void ios_pick_files(void);                                                       /* ios_glue.m: the document picker of the Files app; the chosen files are copied to Documents/Music and arrive as drop events */
+int ios_carplay_connected(void);                                                  /* ios_glue.m: a CarPlay screen is connected (the cover is then the information screen also in the foreground) */
 int ios_launched_in_background(void);                                         /* ios_glue.m: started by the system in the background (CarPlay / lock screen play command): do not play by itself */
 int ios_app_active(void);                                                        /* ios_glue.m: the app is in the foreground */
 int ios_hinge_status(SDL_Window *win);                                       /* ios_glue.m: -1 no hinge (iPhone, iPad), 1 closed, 2 partly open, 3 open (iPhone Duo) */
@@ -4445,7 +4446,10 @@ static void ios_media_sync(void) {
     snprintf(g_cover_by, sizeof g_cover_by, "%s", by);
     Uint32 tn = SDL_GetTicks();
     int newsong = strcmp(t, mt) || strcmp(artist, ma) || strcmp(album, mb);
-    if (newsong) { ios_media_set_cover(NULL, 0, 0); g_cover_gen++; cover_pending = g_song != NULL; if (g_bg && g_song) cover_fallback(); }      /* the cover of the previous song goes, the new one is drawn in the next frame (in the background: a cover from the CPU first, cover_pending stays) */
+    int cp = ios_carplay_connected(); static int cp_was;
+    if (newsong) { ios_media_set_cover(NULL, 0, 0); g_cover_gen++; cover_pending = g_song != NULL && !cp; if (g_song && (g_bg || cp)) cover_fallback(); }      /* the cover of the previous song goes, the new one is drawn in the next frame (in the background: a cover from the CPU first, cover_pending stays) */
+    else if (cp != cp_was && g_song) { if (cp) { cover_pending = 0; cover_fallback(); } else cover_pending = 1; }      /* CarPlay connected / gone while a song plays: the information screen (the stop motion) now, or the picture of the GPU again */
+    cp_was = cp;
     if (now != mp || newsong || g_len_s != mlen || tn - mt0 > 15000) {
         mlen = g_len_s; mp = now; mt0 = tn; snprintf(mt, sizeof mt, "%s", t); snprintf(ma, sizeof ma, "%s", artist); snprintf(mb, sizeof mb, "%s", album);
         ios_media_update(mt, ma, mb, now, (double)g_frames / g_rate, g_len_s > 0 ? g_len_s : 0);
