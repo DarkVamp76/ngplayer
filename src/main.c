@@ -3866,6 +3866,35 @@ static void probe_start(int idx) {
  * with the screen locked the browser stops requestAnimationFrame (the main loop), only the audio keeps running, so the loop alone would
  * leave the old title on the lock screen. */
 #endif
+/* Test tool (NGPLAYER_TEST_COVERFRAMES="kind,n,dir"): the sound card turning once around, n pictures of 600 x 600 (the card on the dark glow, no text, like the bundled card-<kind>.png) as BMP files
+ * dir/card-<kind>-<i>.bmp, for the CarPlay cover (the app changes the cover from picture to picture; there is no GPU for it in the background). */
+static void cover_frames_dump(int dw, int dh, int kind, int n, const char *dir) {
+    if (kind < 1 || kind > C3_N || n < 1) return;
+    static gfx_tex *ft; static unsigned char fb[600 * 600 * 4];
+    if (!ft) ft = gfx_tex_create(600, 600, GFX_RGBA8, NULL, GFX_TARGET);
+    c3_setup(kind - 1);
+    for (int i = 0; i < n; i++) {
+        c3_render(kind - 1, 6.2831853f * (float)i / (float)n, c3gl[kind - 1].color2, dw, dh);
+        if (!gfx_target_begin(ft, BG0.r, BG0.g, BG0.b, 1)) return;
+        gfx_set_params(600, 600, 1.0f); gfx_set_texture(fonttex);
+        set_additive(0);
+        col acc = C(0.20f, 0.45f, 0.90f, 1);
+        rect_grad(0, 0, 600, 600, mix(BG0, acc, 0.32f), BG0);
+        set_additive(1); blob(300, 235, 150, alpha(acc, 0.50f)); set_additive(0);
+        float cw = 500, chh = cw / c3_box_aspect(kind - 1);
+        tex_quad(c3_texture_swing(kind - 1), (600 - cw) / 2, 235 - chh / 2, cw, chh, C(1, 1, 1, 1));
+        flush();
+        gfx_read_pixels(600, 600, fb);
+        gfx_target_end(ft);
+        char path[600]; snprintf(path, sizeof path, "%s/card-%d-%02d.bmp", dir, kind, i);
+        FILE *f = fopen(path, "wb"); if (!f) return;
+        unsigned hdr[14] = {0}; unsigned short mg = 0x4d42; unsigned sz = 54 + 600 * 600 * 3;
+        fwrite(&mg, 2, 1, f); hdr[0] = sz; hdr[2] = 54; hdr[3] = 40; hdr[4] = 600; hdr[5] = 600; ((unsigned short *)&hdr[6])[0] = 1; ((unsigned short *)&hdr[6])[1] = 24; hdr[10] = 600 * 600 * 3;
+        fwrite(hdr, 4, 13, f);
+        for (int y = 0; y < 600; y++) for (int x = 0; x < 600; x++) { const unsigned char *q = fb + ((size_t)y * 600 + x) * 4; unsigned char o[3] = { q[2], q[1], q[0] }; fwrite(o, 1, 3, f); }
+        fclose(f);
+    }
+}
 #if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
 /* ---- The cover of the current song (Media Session: lock screen, CarPlay): drawn off screen with the player's own 2D renderer, 600 x 600:
  * a background gradient and glow in an accent colour taken from the title, the sound card of the song (the same picture as in the header,
@@ -4737,6 +4766,7 @@ static void iter(void) {
         draw_ctx_menu();
         set_additive(0);
         flush();
+        { const char *cf = getenv("NGPLAYER_TEST_COVERFRAMES"); static int cfd; if (cf && !cfd && frame >= 5) { cfd = 1; int k, n; char d[400]; if (sscanf(cf, "%d,%d,%399s", &k, &n, d) == 3) cover_frames_dump(dw, dh, k, n, d); running = 0; } }      /* test tool, see cover_frames_dump */
         if (shot && ++frame >= shot_frames) { save_screenshot(shot, dw, dh); running = 0; }
 #if defined(__APPLE__) && TARGET_OS_IPHONE
         {   /* the AirPlay button: view units -> points (the safe area offset vpx / vpy is in pixels, GL counts the bottom inset as y) */
