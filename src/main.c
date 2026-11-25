@@ -4110,7 +4110,7 @@ static void draw_info_tv(float x, float y, float w, float h) {
     float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
     float rx = x + boxw + 12, rw = w - boxw - 12 - 28;
     int maid = cur >= 0 && cur < npl ? pl[cur].ma_id : 0;                            /* a Mod Archive module: its ID is a row of the table too (to find it again) */
-    static const char *const best[8] = { "COMMODORE AMIGA", "GRAVIS ULTRASOUND", "GRAVIS ULTRASOUND PNP", "TERRATEC EWS 64", "ADLIB GOLD", "COMMODORE AMIGA", "ROLAND SOUND CANVAS", "ROLAND MT-32" };      /* the hardware the module sounds best on: the sound card shown on the left (chip_kind_of) */
+    static const char *const best[8] = { "COMMODORE AMIGA", "GRAVIS ULTRASOUND GF1", "GRAVIS ULTRASOUND PnP (AMD INTERWAVE)", "TERRATEC EWS 64", "ADLIB GOLD 1000", "COMMODORE AMIGA", "ROLAND SOUND CANVAS", "ROLAND MT-32" };      /* the hardware the module sounds best on: the sound card shown on the left (chip_kind_of) */
     int nrow = 4 + (maid > 0);
     float need = 40 * k + 12 * k + nrow * 30 * k + 4 * k + 12 * k + (isi.nextra > 0 ? isi.nextra : 0) * 25 * k;
     float ty = y + top + (boxh - need) / 2; if (ty < y + top) ty = y + top;
