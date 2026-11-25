@@ -43,6 +43,15 @@ static int load_smp(ITSmp *s, const uint8_t *b, size_t n, size_t o){
     for (int k = 0; k < nchn; k++) {
         buf[k] = calloc(1, bytes + 8);
         if (!buf[k] || pos >= n) { free(buf[0]); free(buf[1]); s->len = 0; return pos >= n ? -6 : -5; }
+        if (s->cvt == 0xFF && !(s->flags & 8) && !s->is16 && nchn == 1) {          /* ModPlug 4 bit ADPCM (convert flag 0xFF): 16 byte delta table, then two samples per byte (low nibble first) */
+            if (pos + 16 > n) { free(buf[0]); free(buf[1]); s->len = 0; return -6; }
+            size_t pk = 16 + ((size_t)s->len + 1) / 2; uint32_t cnt = s->len;
+            if (pos + pk > n) cnt = (uint32_t)((n - pos - 16) * 2);
+            int8_t *d = buf[k]; int dl = 0;
+            for (uint32_t i = 0; i < cnt; i++) { uint8_t by = b[pos + 16 + i / 2]; dl = (int8_t)(dl + (int8_t)b[pos + ((by >> ((i & 1) * 4)) & 15)]); d[i] = (int8_t)dl; }
+            pos += pk;
+            continue;
+        }
         if (s->flags & 8) {
             size_t used = 0;
             if (it_unpack(b + pos, n - pos, buf[k], s->len, s->is16, (s->cvt & 4) != 0, &used) < 0) { free(buf[0]); free(buf[1]); s->len = 0; return -7; }
