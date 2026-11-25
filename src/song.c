@@ -1062,6 +1062,16 @@ void song_info(const Song *s, SongInfo *o) {
 /* ---- MIDI ---- */
 int song_is_midi(const Song *s) { return s && s->kind == K_MIDI; }
 int song_is_fm_s3m(const Song *s) { return s && s->kind == K_S3M && s->xs.has_adlib; }      /* an S3M with AdLib (OPL2) instruments: made for an FM card */
+/* FM voices of a song: how many channels play FM (OPL) and how many play digital samples. Only the tracker formats that can hold both (S3M for now) have FM voices next to samples; the pure FM
+ * formats (K_OPL) are not counted here. Returns the FM channel count. */
+int song_fm_voices(const Song *s, int *digital_ch) {
+    XFmInfo fi; memset(&fi, 0, sizeof fi);
+    if (s && s->kind == K_S3M) xsong_fm_info(&s->xs, &fi);
+    if (digital_ch) *digital_ch = fi.smp_channels;
+    return fi.fm_channels;
+}
+/* 1 = FM in a format that can also hold samples (S3M with AdLib instruments, whether or not samples are used): the case that gets the AWE32 card */
+int song_fm_in_sample_format(const Song *s) { return s && s->kind == K_S3M && s->xs.has_adlib && song_fm_voices(s, NULL) > 0; }
 void song_midi_chan(const Song *s, int ch, SongMidiChan *o) {
     memset(o, 0, sizeof *o);
     if (!s || !s->mi || ch < 0 || ch > 15) return;
