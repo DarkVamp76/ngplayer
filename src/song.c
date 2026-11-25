@@ -1061,6 +1061,7 @@ void song_info(const Song *s, SongInfo *o) {
 
 /* ---- MIDI ---- */
 int song_is_midi(const Song *s) { return s && s->kind == K_MIDI; }
+int song_is_fm_s3m(const Song *s) { return s && s->kind == K_S3M && s->xs.has_adlib; }      /* an S3M with AdLib (OPL2) instruments: made for an FM card */
 void song_midi_chan(const Song *s, int ch, SongMidiChan *o) {
     memset(o, 0, sizeof *o);
     if (!s || !s->mi || ch < 0 || ch > 15) return;

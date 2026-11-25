@@ -59,6 +59,7 @@ void song_info(const Song *s, SongInfo *out);
 
 /* ---- MIDI files (desktop and web): channels, notes for the roll, fast seeking. The view grid is 4/4 measures of 16 rows (orders = measures). ---- */
 int  song_is_midi(const Song *s);
+int  song_is_fm_s3m(const Song *s);
 void song_midi_idle(Song *s);                                        /* the player is not rendering (pause, end): the MIDI hardware gets its panic */
 const char *song_midi_standard(const Song *s, int *known);          /* "MT-32", "GS", "XG", "GM2", "GM": what the SysEx messages of the file say it was written for (known = 0: none named) */
 const char *song_midi_lcd(const Song *s);                              /* the MT-32 display text the file sends ("Willy Beamish"), "" if there is none */

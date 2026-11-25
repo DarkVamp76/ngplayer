@@ -1649,6 +1649,7 @@ static int chip_kind_of(const char *f, int n) {
 }
 static int chip_kind_song(const Song *sg) {                    /* MIDI: the black module for files written for the MT-32, the other one for the rest */
     if (song_is_midi(sg)) { int known; return !strcmp(song_midi_standard(sg, &known), "MT-32") ? 7 : 6; }
+    if (song_is_fm_s3m(sg)) return 4;                                  /* an S3M with AdLib instruments: the FM card, a GF1 cannot play it */
     return chip_kind_of(song_format(sg), song_channels(sg));
 }
 static int chip_kind(void) { return chip_kind_song(g_song); }
