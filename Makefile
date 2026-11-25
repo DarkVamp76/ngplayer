@@ -29,6 +29,11 @@ build/ngrender: tools/render.c $(CORE)
 	@mkdir -p build
 	$(CC) $(CFLAGS) -o $@ tools/render.c $(filter-out src/core/it_load.c src/core/dtm_load.c src/core/it_replay.c,$(CORE)) $(LIBS)
 
+# Hilfswerkzeug: beliebiges Modul (alle Formate von song.c) -> WAV, fuer den Vergleich mit libopenmpt
+build/songrender: tools/songrender.c src/song.c $(CORE)
+	@mkdir -p build
+	$(CC) $(CFLAGS) -o $@ tools/songrender.c src/song.c $(CORE) -lm $(if $(filter Linux,$(shell uname -s)),-lasound)
+
 install: build/ngplayer
 	install -Dm755 build/ngplayer $(DESTDIR)$(PREFIX)/bin/ngplayer
 	install -Dm644 packaging/ngplayer.desktop $(DESTDIR)$(PREFIX)/share/applications/ngplayer.desktop
