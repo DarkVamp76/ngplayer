@@ -4153,37 +4153,43 @@ static void draw_info_tv(float x, float y, float w, float h) {
     { const char *tc = getenv("NGPLAYER_TEST_CHIP"); if (tc) ikind = atoi(tc); }          /* test hook: another card kind (0 = Paula strip, 1 .. 5 the 3D cards) */
     /* the room: the sound card (swinging) takes the left part at the largest size that fits, the text column the rest, centred in the height */
     const float top = 40;
-    float boxw = fminf(w * 0.46f, w - 400.0f), boxh = h - top - 16;           /* the cards differ in width (a flat strip, wide expansion cards, a compact computer): the column is as wide as the text on the right allows */
-    if (boxw < w * 0.34f) boxw = w * 0.34f;                                   /* (all sizes here are view units: this card is about 757 wide on the Apple TV) */
+    const int narrow = w < 520;                                               /* upright phone: the picture is narrower, the rows are stacked (the label small above the value) */
+    float boxw = narrow ? w * 0.36f : fminf(w * 0.46f, w - 400.0f), boxh = h - top - 16;           /* the cards differ in width (a flat strip, wide expansion cards, a compact computer): the column is as wide as the text on the right allows */
+    if (!narrow && boxw < w * 0.34f) boxw = w * 0.34f;                        /* (all sizes here are view units: this card is about 757 wide on the Apple TV) */
     float chh = fminf(boxh / 1.12f, 400.0f), cw = chips_width_k(ikind, chh);
     if (cw > boxw - 24) { chh *= (boxw - 24) / cw; cw = boxw - 24; }
     chip_swing = 1; draw_chip_k(ikind, x + (boxw - cw) / 2 + 8, y + top + (boxh - chh * 1.12f) / 2 + chh * 0.06f, chh, 0.0f); chip_swing = 0;
-    float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
     float rx = x + boxw + 12, rw = w - boxw - 12 - 28;
     int maid = cur >= 0 && cur < npl ? pl[cur].ma_id : 0;                            /* a Mod Archive module: its ID is a row of the table too (to find it again) */
     int nrow = 4 + (maid > 0);
-    float need = 40 * k + 12 * k + nrow * 30 * k + 4 * k + 12 * k + (isi.nextra > 0 ? isi.nextra : 0) * 25 * k;
+    const float rowp = narrow ? 40.0f : 30.0f;
+    float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
+    if (narrow) { k = (h - top - 16) / (40.0f + 12 + nrow * rowp + 4 + 12 + (isi.nextra > 0 ? isi.nextra : 0) * 25.0f); if (k > 1.3f) k = 1.3f; if (k < 0.7f) k = 0.7f; }
+    float need = 40 * k + 12 * k + nrow * rowp * k + 4 * k + 12 * k + (isi.nextra > 0 ? isi.nextra : 0) * 25 * k;
     float ty = y + top + (boxh - need) / 2; if (ty < y + top) ty = y + top;
-    char title[128]; snprintf(title, sizeof title, "%s", ilabel); fit_text(title, rw, 26 * k);
-    text(rx, ty, 26 * k, TXT, title);
+    float tsz = (narrow ? 20.0f : 26.0f) * k;
+    char title[128]; snprintf(title, sizeof title, "%s", ilabel); fit_text(title, rw, tsz);
+    text(rx, ty, tsz, TXT, title);
     ty += 40 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
     char vb[64]; snprintf(vb, sizeof vb, "%d %s", isi.voices, isi.voice_unit);
     char mb[32]; snprintf(mb, sizeof mb, "#%d", maid);
     const char *lab[5] = { "TRACKER", "FORMAT", "VOICES", "BEST PLAYED ON", "MOD ARCHIVE" }, *val[5] = { isi.tracker, isi.format, vb, best_played_on(ikind), mb };
     float vcol = 112 * k;                                                              /* the value column: right of the longest label */
     for (int i = 0; i < nrow; i++) { float lw = text_width(lab[i], 12 * k) + 16 * k; if (lw > vcol) vcol = lw; }
+    if (narrow) vcol = 0;                                                              /* narrow: the label above, the value below it over the whole width */
     for (int i = 0; i < nrow; i++) {
-        text(rx, ty + 3 * k, 12 * k, FAINT, lab[i]);
+        if (narrow) text(rx, ty, 11 * k, FAINT, lab[i]); else text(rx, ty + 3 * k, 12 * k, FAINT, lab[i]);
+        float vy = narrow ? ty + 13 * k : ty;
         char v[96]; snprintf(v, sizeof v, "%s", val[i]); fit_text(v, rw - vcol, 16 * k);
         if (i == 4 && !NG_TV) {                                                      /* the Mod Archive ID is a link to the module page (the Apple TV has no pointer) */
             float vx = rx + vcol, vs = 16 * k, tw = text_width(v, vs);
-            int hv = hit(vx - 4, ty - 3, tw + 8, vs + 8);
-            text(vx, ty, vs, hv ? TXT : VC[0], v);
-            rect(vx, ty + vs + 2, tw, 1, alpha(hv ? TXT : VC[0], 0.7f));
-            if (clicked(vx - 4, ty - 3, tw + 8, vs + 8)) { info_open(cur); click = 0; }
+            int hv = hit(vx - 4, vy - 3, tw + 8, vs + 8);
+            text(vx, vy, vs, hv ? TXT : VC[0], v);
+            rect(vx, vy + vs + 2, tw, 1, alpha(hv ? TXT : VC[0], 0.7f));
+            if (clicked(vx - 4, vy - 3, tw + 8, vs + 8)) { info_open(cur); click = 0; }
         }
-        else text(rx + vcol, ty, 16 * k, TXT, v);
-        ty += 30 * k;
+        else text(rx + vcol, vy, 16 * k, TXT, v);
+        ty += rowp * k;
     }
     ty += 4 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
     for (int i = 0; i < isi.nextra && ty < y + h - 22 * k; i++) {
