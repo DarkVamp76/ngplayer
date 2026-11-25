@@ -208,9 +208,10 @@ def make_back_generic(tag,comps,board,fingers,pal,lines):
     pimg=Image.new('P',(1,1));pimg.putpalette([c for col in pal for c in col]+[0]*(768-3*len(pal)))
     return np.asarray(im.quantize(palette=pimg,dither=Image.Dither.NONE)).astype(np.uint8)
 
-def bake_ews(tag,glb,texw,part_names=('cap_dark','chip_black','plastic_white','plastic_black','metal','pcb_green'),lines=('EWS64','AUDIOSYSTEM'),auto_outline=False):
+def bake_ews(tag,glb,texw,part_names=('cap_dark','chip_black','plastic_white','plastic_black','metal','pcb_green'),lines=('EWS64','AUDIOSYSTEM'),auto_outline=False,classify=None,scale=1.0):
+    """classify(node name) -> 'board' | 'finger' | 'part' | None replaces the name lists (a model with other node names); scale turns the model units into mm"""
     j,b=load(U+glb)
-    def tr(P): return np.column_stack([P[:,0],-P[:,2],P[:,1]])          # card coordinates: x, y = -z, z = up (a proper rotation)
+    def tr(P): return np.column_stack([P[:,0],-P[:,2],P[:,1]])*scale          # card coordinates: x, y = -z, z = up (a proper rotation)
     V=[];VC=[];I=[];pal=[];TV=[];TUV=[];TI=[];comps=[];fingers=[];board=None;outline=[]
     names=[n.get('name') for n in j['nodes']]
     for ni,n in enumerate(j['nodes']):
@@ -227,14 +228,18 @@ def bake_ews(tag,glb,texw,part_names=('cap_dark','chip_black','plastic_white','p
             for k in range(len(P)): V.append(P[k]);VC.append(pal.index(col))
             I+=[base+int(i) for i in ia]
             cps=components(P,ia.astype(int))
-            if names[ni] in ('pcb_bottom',):
+            kind=classify(names[ni]) if classify else ('board' if names[ni]=='pcb_bottom' else 'finger' if names[ni]=='gold' else 'part' if names[ni] in part_names else None)
+            if kind=='board':
                 board=(P[:,0].min(),P[:,1].min(),P[:,0].max(),P[:,1].max())
                 outline=[(lo[0],lo[1],hi[0],hi[1]) for lo,hi in cps]                  # the rectangles of the board bottom (the main part and the connector strip)
-            elif names[ni]=='gold':
+            elif kind=='finger':
                 for lo,hi in cps:                                              # the edge connector fingers: thin pieces lying on the board
-                    if hi[2]<=1.7 and lo[2]>=1.5 and (hi[1]-lo[1])>3: fingers.append((lo[0],lo[1],hi[0],hi[1]))
-            elif names[ni] in part_names:
+                    if hi[2]<=1.7 and (lo[2]>=1.5 or classify) and (hi[1]-lo[1])>3: fingers.append((lo[0],lo[1],hi[0],hi[1]))
+            elif kind=='part':
                 comps+= [(lo,hi) for lo,hi in cps if hi[2]>1.7]
+    if classify and fingers:                                                     # a model whose edge connector sticks out of the board: the back picture and its outline cover the strip too
+        board=(min(board[0],min(f[0] for f in fingers)),min(board[1],min(f[1] for f in fingers)),max(board[2],max(f[2] for f in fingers)),max(board[3],max(f[3] for f in fingers)))
+        outline=outline+[f for f in fingers]
     V=np.array(V);TV=np.array(TV);TUV=np.array(TUV,dtype=np.float64)
     allp=np.vstack([V,TV]);lo=allp.min(0);hi=allp.max(0)
     cx,cy=(lo[0]+hi[0])/2,(lo[1]+hi[1])/2;cz=0.8;half=(hi[0]-lo[0])/2
@@ -264,8 +269,9 @@ def bake_ews(tag,glb,texw,part_names=('cap_dark','chip_black','plastic_white','p
     s+=arr('c3_%s_bpal'%tag,'uint8_t',[x for c in PAL_EWS for x in c])+arr('c3_%s_bpix'%tag,'uint8_t',pack4(bimg),24)
     return s
 
-out='/* 3D models of the Gravis Ultrasound (GF1, rev 3.4) and Ultrasound PnP (AMD InterWave) cards and the Terratec EWS64. GPL-3.0-or-later */\n#include <stdint.h>\n'
-out+=bake('GF1','gus_ultrasound_rev34.glb',320)+bake('IW','gus_pnp_v30.glb',320)+bake_ews('EWS','ews64.glb',320)
-if os.path.exists(U+'adlib_gold.glb'):                                       # the AdLib Gold card (Yamaha OPL3): the FM formats
-    out+=bake_ews('GOLD','adlib_gold.glb',320,('cap_silver','cap_gold','chip_black','plastic_white','plastic_black','metal'),('ADLIB GOLD','1000 MUSIC CARD'),True)
-open(sys.argv[2] if len(sys.argv)>2 else 'src/card3d_data.h','w').write(out);print(len(out)//1024,'KB')
+if __name__=='__main__':
+    out='/* 3D models of the Gravis Ultrasound (GF1, rev 3.4) and Ultrasound PnP (AMD InterWave) cards and the Terratec EWS64. GPL-3.0-or-later */\n#include <stdint.h>\n'
+    out+=bake('GF1','gus_ultrasound_rev34.glb',320)+bake('IW','gus_pnp_v30.glb',320)+bake_ews('EWS','ews64.glb',320)
+    if os.path.exists(U+'adlib_gold.glb'):                                       # the AdLib Gold card (Yamaha OPL3): the FM formats
+        out+=bake_ews('GOLD','adlib_gold.glb',320,('cap_silver','cap_gold','chip_black','plastic_white','plastic_black','metal'),('ADLIB GOLD','1000 MUSIC CARD'),True)
+    open(sys.argv[2] if len(sys.argv)>2 else 'src/card3d_data.h','w').write(out);print(len(out)//1024,'KB')

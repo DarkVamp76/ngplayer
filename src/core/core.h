@@ -70,6 +70,9 @@ typedef struct {
 int  xmod_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok */
 int  xxm_load(XSong *s, const uint8_t *buf, size_t len);    /* 0 = ok */
 int  xs3m_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok */
+/* FM detection: how the voices of a tracker song split into FM (OPL) and digital (sample) ones. Counts what the patterns really play, not what the instrument list holds. */
+typedef struct { int fm_instr, smp_instr; int fm_notes, smp_notes; int fm_channels, smp_channels; } XFmInfo;
+void xsong_fm_info(const XSong *s, XFmInfo *o);
 int  stm_probe(const uint8_t *buf, size_t len);             /* 1 = Scream Tracker 2 file */
 int  xstm_load(XSong *s, const uint8_t *buf, size_t len);   /* 0 = ok (STM -> S3M replay) */
 int  ptm_probe(const uint8_t *buf, size_t len);             /* 1 = Poly Tracker file */

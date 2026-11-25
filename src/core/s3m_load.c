@@ -162,3 +162,20 @@ int xs3m_load(XSong *s, const uint8_t *b, size_t n){
     s->mixgain = s3m_preamp_gain(b, n, ordnum, insnum, insp, flags, ffi);
     return 0;
 }
+
+/* FM detection (S3M AdLib instruments; other formats have no FM instruments in the tracker engine, so all counters stay 0 for FM there). A channel counts as FM when it plays an FM
+ * instrument at least once, as digital when it plays a sample at least once (a channel can be both). The notes are counted per cell with an instrument number and a note. */
+void xsong_fm_info(const XSong *s, XFmInfo *o) {
+    memset(o, 0, sizeof *o);
+    if (!s || !s->pat || !s->has_adlib) return;
+    uint8_t fm_seen[100] = {0}, smp_seen[100] = {0}; uint8_t fm_ch[64] = {0}, smp_ch[64] = {0};
+    for (int p = 0; p < s->npat; p++) for (int r = 0; r < 64; r++) for (int c = 0; c < s->nch && c < 64; c++) {
+        const XCell *x = &s->pat[((size_t)p * 64 + r) * s->nch + c];
+        if (!x->inst || x->inst > 99 || x->note == 0 || x->note >= 254) continue;
+        const XSmp *m = &s->smp[x->inst];
+        if (m->is_adlib) { fm_seen[x->inst] = 1; fm_ch[c] = 1; o->fm_notes++; }
+        else if (m->len) { smp_seen[x->inst] = 1; smp_ch[c] = 1; o->smp_notes++; }
+    }
+    for (int i = 1; i < 100; i++) { o->fm_instr += fm_seen[i]; o->smp_instr += smp_seen[i]; }
+    for (int c = 0; c < 64; c++) { o->fm_channels += fm_ch[c]; o->smp_channels += smp_ch[c]; }
+}

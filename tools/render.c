@@ -25,6 +25,7 @@ int main(int argc, char **argv){
     v32 = 16; fwrite(&v32,4,1,o); v16 = 1; fwrite(&v16,2,1,o); v16 = 2; fwrite(&v16,2,1,o);
     v32 = rate; fwrite(&v32,4,1,o); v32 = rate*4; fwrite(&v32,4,1,o); v16 = 4; fwrite(&v16,2,1,o); v16 = 16; fwrite(&v16,2,1,o);
     fwrite("data",1,4,o); fwrite(&dl,4,1,o); fwrite(pcm,4,tot,o); fclose(o);
+    { XFmInfo fi; xsong_fm_info(&s, &fi); if (getenv("XFM")) printf("FM: %d instr / %d notes / %d ch | digital: %d instr / %d notes / %d ch\n", fi.fm_instr, fi.fm_notes, fi.fm_channels, fi.smp_instr, fi.smp_notes, fi.smp_channels); }
     printf("%s | \"%s\" %dch | %.1f s | peak %d (%.0f%%)\n", argv[1], s.title, s.nch, (double)tot/rate, pk, pk*100.0/32767);
     return 0;
 }
