@@ -169,7 +169,7 @@ int ios_media_poll(void);
 int ios_audio_event_poll(void);                                                    /* ios_glue.m: 1 = the route changed / an interruption ended (reopen the output), 2 = pause (the route fell back to the built-in speaker) */
 void ios_media_set_cover(const unsigned char *px, int w, int h);                    /* ios_glue.m: the cover of the song (RGBA, bottom row first, as glReadPixels gives it); NULL = none */
 void ios_media_set_cover_text(const char *title, const char *by, float ar, float ag, float ab, float br, float bg, float bb);   /* ios_glue.m: a cover drawn on the CPU (for the background, where the GPU may not be used): gradient from the colour a to b, title, artist */
-int ios_media_set_cover_card(int kind, const char *title, const char *by, float ar, float ag, float ab);   /* ios_glue.m: the bundled picture card-<kind>.png of the sound card (without text) with the title, the artist and "ngPlayer" written on it, as the cover; 0 = there is none (then the CPU cover is drawn) */
+int ios_media_set_cover_card(int kind, const char *title, const char *by, float ar, float ag, float ab, const char *rows);   /* ios_glue.m: the bundled picture card-<kind>.png of the sound card (without text) with the title, the artist and "ngPlayer" written on it, as the cover; 0 = there is none (then the CPU cover is drawn) */
 float ios_output_latency_ms(void);                                               /* ios_glue.m: latency of the current output route in ms (AirPlay: ~2000) */
 void ios_audio_longform(void);                                                    /* ios_glue.m: AirPlay 2 (HomePod) needs the long-form route sharing policy */
 void ios_airplay_place(SDL_Window *win, float x, float y, float size, int visible);   /* ios_glue.m: the native AirPlay button over the window (points) */
@@ -632,6 +632,7 @@ static double g_dt;
 static void draw_pattern(float x, float y, float w, float h);
 static void draw_voxel(float x, float y, float w, float h);
 static void draw_info_tv(float x, float y, float w, float h);
+static const char *best_played_on(int kind);
 /* Umschalter Pattern | Orb oben in der Karte (auch per Touch/Klick) */
 static float view_cw(void) { return g_portrait && !NG_TV ? 56 : 62; }      /* width of one tab (5 of them: on a phone they must leave room for the ORD / ROW text on the left) */
 static void view_switch(float x, float y, float w) {
@@ -3880,9 +3881,9 @@ static void cover_frames_dump(int dw, int dh, int kind, int n, const char *dir) 
         set_additive(0);
         col acc = C(0.20f, 0.45f, 0.90f, 1);
         rect_grad(0, 0, 600, 600, mix(BG0, acc, 0.32f), BG0);
-        set_additive(1); blob(300, 235, 150, alpha(acc, 0.50f)); set_additive(0);
-        float cw = 500, chh = cw / c3_box_aspect(kind - 1);
-        tex_quad(c3_texture_swing(kind - 1), (600 - cw) / 2, 235 - chh / 2, cw, chh, C(1, 1, 1, 1));
+        set_additive(1); blob(300, 92, 130, alpha(acc, 0.50f)); set_additive(0);
+        float cw = fminf(500.0f, 172.0f * C3M[kind - 1].aspect), chh = cw / c3_box_aspect(kind - 1);       /* the top 30% of the cover (180 px): the card; the rest holds the information of the Info page */
+        tex_quad(c3_texture_swing(kind - 1), (600 - cw) / 2, 92 - chh / 2, cw, chh, C(1, 1, 1, 1));
         flush();
         gfx_read_pixels(600, 600, fb);
         gfx_target_end(ft);
@@ -3971,7 +3972,11 @@ static col cover_title(char *title, size_t cap) {      /* the title on the cover
 static void cover_fallback(void) {                    /* in the background: no GPU, so the bundled picture of the sound card is the cover (or, without one, a cover drawn on the CPU) until the app is open again and cover_render draws the real one */
     if (!g_song) return;
     char title[160]; col acc = cover_title(title, sizeof title);
-    if (ios_media_set_cover_card(chip_kind(), title, g_cover_by, acc.r, acc.g, acc.b)) return;     /* the picture of the sound card (bundled with the app) with the title and the artist written on it */
+    char rows[900]; { SongInfo si; song_info(g_song, &si); int n = 0, maid = (cur >= 0 && cur < npl) ? pl[cur].ma_id : 0;      /* the rows of the Info page: "LABEL<TAB>value" per line, the extra lines with an empty label */
+        n += snprintf(rows + n, sizeof rows - n, "TRACKER\t%s\nFORMAT\t%s\nVOICES\t%d %s\nBEST PLAYED ON\t%s\n", si.tracker, si.format, si.voices, si.voice_unit, best_played_on(chip_kind()));
+        if (maid > 0) n += snprintf(rows + n, sizeof rows - n, "MOD ARCHIVE\t#%d\n", maid);
+        for (int i = 0; i < si.nextra && i < 3 && n < (int)sizeof rows - 100; i++) n += snprintf(rows + n, sizeof rows - n, "\t%s\n", si.extra[i]); }
+    if (ios_media_set_cover_card(chip_kind(), title, g_cover_by, acc.r, acc.g, acc.b, rows)) return;     /* the picture of the sound card (bundled with the app) with the title and the artist written on it */
     ios_media_set_cover_text(title, g_cover_by, acc.r, acc.g, acc.b, BG0.r, BG0.g, BG0.b);
 }
 #endif
@@ -4128,6 +4133,10 @@ static void info_open(int idx) {
 }
 
 /* ---- the Info page, one of the views: the sound card (swinging) on the left, title, tracker, format, voices and the technical details of the file on the right ---- */
+static const char *best_played_on(int kind) {            /* the hardware the module sounds best on: the sound card shown on the left (chip_kind_of) */
+    static const char *const best[9] = { "COMMODORE AMIGA", "GRAVIS ULTRASOUND (FORTE GF1)", "GRAVIS ULTRASOUND PnP (AMD INTERWAVE)", "TERRATEC EWS 64", "ADLIB GOLD 1000", "COMMODORE AMIGA", "ROLAND SOUND CANVAS", "ROLAND MT-32", "SOUND BLASTER AWE32" };
+    return best[kind >= 0 && kind < 9 ? kind : 1];
+}
 static void draw_info_tv(float x, float y, float w, float h) {
     card(x, y, w, h, 0);
     view_switch(x, y, w);
@@ -4149,7 +4158,6 @@ static void draw_info_tv(float x, float y, float w, float h) {
     float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
     float rx = x + boxw + 12, rw = w - boxw - 12 - 28;
     int maid = cur >= 0 && cur < npl ? pl[cur].ma_id : 0;                            /* a Mod Archive module: its ID is a row of the table too (to find it again) */
-    static const char *const best[9] = { "COMMODORE AMIGA", "GRAVIS ULTRASOUND (FORTE GF1)", "GRAVIS ULTRASOUND PnP (AMD INTERWAVE)", "TERRATEC EWS 64", "ADLIB GOLD 1000", "COMMODORE AMIGA", "ROLAND SOUND CANVAS", "ROLAND MT-32", "SOUND BLASTER AWE32" };      /* the hardware the module sounds best on: the sound card shown on the left (chip_kind_of) */
     int nrow = 4 + (maid > 0);
     float need = 40 * k + 12 * k + nrow * 30 * k + 4 * k + 12 * k + (isi.nextra > 0 ? isi.nextra : 0) * 25 * k;
     float ty = y + top + (boxh - need) / 2; if (ty < y + top) ty = y + top;
@@ -4158,7 +4166,7 @@ static void draw_info_tv(float x, float y, float w, float h) {
     ty += 40 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
     char vb[64]; snprintf(vb, sizeof vb, "%d %s", isi.voices, isi.voice_unit);
     char mb[32]; snprintf(mb, sizeof mb, "#%d", maid);
-    const char *lab[5] = { "TRACKER", "FORMAT", "VOICES", "BEST PLAYED ON", "MOD ARCHIVE" }, *val[5] = { isi.tracker, isi.format, vb, best[ikind >= 0 && ikind < 9 ? ikind : 1], mb };
+    const char *lab[5] = { "TRACKER", "FORMAT", "VOICES", "BEST PLAYED ON", "MOD ARCHIVE" }, *val[5] = { isi.tracker, isi.format, vb, best_played_on(ikind), mb };
     float vcol = 112 * k;                                                              /* the value column: right of the longest label */
     for (int i = 0; i < nrow; i++) { float lw = text_width(lab[i], 12 * k) + 16 * k; if (lw > vcol) vcol = lw; }
     for (int i = 0; i < nrow; i++) {
@@ -4411,6 +4419,7 @@ static void ios_media_sync(void) {
         else if (c == 3) next_user(-1);
         else if (c == 4) tv_dice();                              /* CarPlay: "Random module" */
     }
+    { static int cc; if (!cc && g_song && getenv("NGPLAYER_TEST_COVERCARD")) { cc = 1; cover_fallback(); } }         /* test hook: the cover of the background (the information screen with the card) also in the foreground */
     if (g_probe) probe_run(2);                                  /* a few ms of the length measurement per frame */
     static char mt[160], ma[96], mb[96]; static int mp = -1; static Uint32 mt0; static double mlen = -2;
     if (g_song && cur >= 0 && cur < npl && pl[cur].ma_id > 0) {      /* a Mod Archive song: the list shows its title, not "ModArchive #id" (also after a restart) */
