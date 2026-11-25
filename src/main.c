@@ -4380,6 +4380,7 @@ static void ios_media_sync(void) {
         else if (c == 1) g_paused = 1;
         else if (c == 2) next_user(1);
         else if (c == 3) next_user(-1);
+        else if (c == 4) tv_dice();                              /* CarPlay: "Random module" */
     }
     if (g_probe) probe_run(2);                                  /* a few ms of the length measurement per frame */
     static char mt[160], ma[96], mb[96]; static int mp = -1; static Uint32 mt0; static double mlen = -2;
