@@ -539,7 +539,7 @@ static int rclick, rclickx, rclicky;                       /* right mouse button
 static int lp_on, lp_fired, lp_swallow, lp_x, lp_y;        /* long press on a touch screen = right click */
 static Uint32 lp_t;
 static int sw_idx = -1; static float sw_off, sw_tgt;       /* swipe actions of a list row (touch): the entry and how far its row is shifted (< 0 left, > 0 right) */
-static int ctx_idx = -1; static float ctx_x, ctx_y;        /* context menu ("Share") of a Mod Archive entry in the list */
+static int ctx_idx = -1, ctx_favk = -1; static float ctx_x, ctx_y;      /* ctx_favk: the menu of an entry of the FAV tab (Share, Remove favorite) */        /* context menu ("Share") of a Mod Archive entry in the list */
 static float toast_t; static char toast_txt[48];
 /* ---- Favorites: Mod Archive modules (id + title), the FAV tab of the list. favorites.txt next to settings.ini ("id<TAB>title" per line), in the browser localStorage ---- */
 typedef struct { int id; char title[96]; } fav_t;
@@ -1826,7 +1826,7 @@ static void pl_remove(int i) {
     memmove(pl + i, pl + i + 1, sizeof(entry) * (size_t)(npl - i - 1));
     npl--;
     if (cur > i) cur--;
-    ctx_idx = -1;
+    ctx_idx = -1; ctx_favk = -1;
 #ifdef __EMSCRIPTEN__
     ma_sync_web(1);
 #endif
@@ -1874,6 +1874,13 @@ static void fav_rows(float x, float ry, float w, float rh, int first, int vis_ro
         if (hv || g_mobile) { if (xhv) rrect(xx, yy + 3, 26, rh - 8, 6, alpha(WARN, 0.22f)); text(xx + 7, yy + 5, 15, xhv ? WARN : alpha(WARN, 0.55f), "\xd7"); }
         int onx = use_tap ? (tap && mx >= xx && mx < xx + 26 && my >= yy && my < yy + rh) : clicked(xx, yy, 26, rh);
         int onrow = use_tap ? (tap && mx >= x + 8 && mx < x + w - 8 && my >= yy && my < yy + rh) : clicked(x + 8, yy, w - 16, rh);
+        if (rclick && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {      /* right click / long press: the menu of the favorite (Share, Remove favorite) */
+            ctx_favk = k; ctx_idx = -1; rclick = 0;
+            ctx_x = (float)rclickx; ctx_y = (float)rclicky;
+            if (ctx_x + CTX_W > view_w - 4) ctx_x = view_w - 4 - CTX_W;
+            if (ctx_y + 2 * CTX_ROW + 2 > view_h - 4) ctx_y = view_h - 4 - (2 * CTX_ROW + 2);
+            break;
+        }
         if (onx) { fav_toggle(g_fav[k].id, g_fav[k].title); if (!use_tap) click = 0; break; }
         if (onrow) { fav_play(g_fav[k].id); if (!use_tap) click = 0; }
     }
@@ -2579,6 +2586,7 @@ static void draw_seek_row(float bx, float ty, float bw);
 static int sw_drag, sw_nl = 1, sw_axis;                  /* a finger moves the row / its number of left buttons / the direction of the current touch: 0 undecided, 1 horizontal, 2 vertical */
 static float sw_base, sw_rw = 272, sw_px0, sw_apy0;
 static void share_link(int idx);
+static void share_id(int id);
 static void sw_close(void) { sw_tgt = 0; sw_drag = 0; if (sw_off == 0) sw_idx = -1; }
 static void sw_step(void) {                              /* once per frame: the row slides to where it settles */
     if (sw_idx < 0 || sw_drag) return;
@@ -4069,8 +4077,9 @@ static void web_on_gesture(int kind, const char *arg) {
 #endif
 
 /* ---- Share: right click on a Mod Archive entry -> menu "Share" copies https://ngplayer.org/player/#<ID> to the clipboard ---- */
-static void share_link(int idx) {
-    char url[96]; snprintf(url, sizeof url, "https://ngplayer.org/player/#%d", pl[idx].ma_id);
+static void share_link(int idx) { share_id(pl[idx].ma_id); }
+static void share_id(int id) {
+    char url[96]; snprintf(url, sizeof url, "https://ngplayer.org/player/#%d", id);
 #ifdef __EMSCRIPTEN__
     web_on_gesture(1, url);
 #else
@@ -4152,6 +4161,17 @@ static void draw_info_tv(float x, float y, float w, float h) {
 }
 
 static void draw_ctx_menu(void) {
+    if (ctx_favk >= 0 && ctx_favk < g_nfav) {                              /* the menu of a favorite */
+        static const char *const fi[2] = { "Share", "Remove favorite" };
+        rrect(ctx_x - 1, ctx_y - 1, CTX_W + 2, 2 * CTX_ROW + 4, 9, alpha(EDGE, 0.9f));
+        rrect(ctx_x, ctx_y, CTX_W, 2 * CTX_ROW + 2, 8, CARDHI);
+        for (int j = 0; j < 2; j++) {
+            float iy = ctx_y + 1 + j * CTX_ROW;
+            int hv = mx >= ctx_x && mx < ctx_x + CTX_W && my >= iy && my < iy + CTX_ROW;
+            if (hv) rrect(ctx_x + 3, iy + 2, CTX_W - 6, CTX_ROW - 4, 6, alpha(VC[0], 0.22f));
+            text(ctx_x + 14, iy + 7, 14, j == 1 ? (hv ? WARN : alpha(WARN, 0.75f)) : (hv ? TXT : DIM), fi[j]);
+        }
+    }
     if (ctx_idx >= 0 && ctx_idx < npl) {
         const char *item[5] = { "Share", "", "Info", "Remove", ctx_idx < npl && fav_find(pl[ctx_idx].ma_id) >= 0 ? "Remove favorite" : "Add favorite" };
         int act[5], n = ctx_acts(ctx_idx, act);
@@ -4659,6 +4679,15 @@ static void iter(void) {
         if (click) { clickx = (int)(clickx * k); clicky = (int)(clicky * k); }
         if (rclick) { rclickx = (int)(rclickx * k); rclicky = (int)(rclicky * k); }
 #endif
+        if (ctx_favk >= 0 && click) {                        /* the menu of a favorite: Share copies the link, Remove favorite takes it out; any click closes it */
+            float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;
+            if (ctx_favk < g_nfav && cmx >= ctx_x && cmx < ctx_x + CTX_W && cmy >= ctx_y && cmy < ctx_y + 2 * CTX_ROW + 2) {
+                int jj = (int)((cmy - ctx_y - 1) / CTX_ROW);
+                if (jj == 0) share_id(g_fav[ctx_favk].id); else if (jj == 1) fav_toggle(g_fav[ctx_favk].id, g_fav[ctx_favk].title);
+            }
+            ctx_favk = -1; click = 0; lp_swallow = 1;
+        }
+        if (rclick && ctx_favk >= 0) ctx_favk = -1;
         if (ctx_idx >= 0 && click) {                         /* click on the open menu: copy the link; any click closes it */
             float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;     /* touch: current pointer (the event coordinates are not reliable on iOS) */
             if (cmx >= ctx_x && cmx < ctx_x + CTX_W && cmy >= ctx_y && cmy < ctx_y + CTX_H(ctx_idx) && ctx_idx < npl) {
