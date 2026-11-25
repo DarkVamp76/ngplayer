@@ -1864,6 +1864,14 @@ static void fav_play(int id) {
     if (ma_busy()) { snprintf(toast_txt, sizeof toast_txt, "Still loading ..."); toast_t = 1.5f; return; }
     snprintf(toast_txt, sizeof toast_txt, "Loading the favorite ..."); toast_t = 2.0f; ma_start_id(id);
 }
+/* the FAV tab is the active list: next / previous and the end of a song step through the favorites (one that is not in the list yet is fetched from the Mod Archive).
+ * 0 = not in the favorites mode (the caller does what it did before) */
+static int fav_step(int d) {
+    if (g_pltab != 2 || g_nfav <= 0 || cur < 0 || cur >= npl || pl[cur].ma_id <= 0) return 0;
+    int k = fav_find(pl[cur].ma_id); if (k < 0) return 0;
+    fav_play(g_fav[((k + d) % g_nfav + g_nfav) % g_nfav].id);
+    return 1;
+}
 /* the rows of the FAV tab: title, #id and an x that removes the favorite (always on touch, on hover with a pointer); a click / tap plays it. use_tap: the tap flag (touch) instead of clicked() */
 static void fav_rows(float x, float ry, float w, float rh, int first, int vis_rows, float ybot, int use_tap, int tap) {
     if (g_nfav <= 0) { text(x + 18, ry + 6, 13, FAINT, "No favorites yet."); text(x + 18, ry + 26, 12, FAINT, "Right click or hold an entry: Add favorite (key S)"); return; }
@@ -1979,6 +1987,7 @@ static int last_of_group(int i) {
     return 1;
 }
 static void next_user(int d) {              /* next / previous as the user asks for it */
+    if (!(d > 0 && g_rand) && fav_step(d)) return;                                   /* FAV tab: the next / previous favorite (in random mode the dice decide as before) */
     if (d > 0 && g_rand && cur >= 0 && cur < npl && pl[cur].ma_id > 0 && last_of_group(cur)) {
         if (ma_take_prefetch()) return;                                              /* loaded in advance: no gap */
         if (ma_prefetch_running()) { ma_prefetch_adopt(); return; }                  /* still on its way: wait for it, with the dice */
@@ -2039,6 +2048,10 @@ static void tv_ctx_act(void) {
 static void song_end_advance(void) {        /* song ended -> next entry (a new random one at the end of the list in random mode) */
     if (!g_ended || cur < 0 || cur >= npl) return;
     if (g_rpt == 2) { play_index_sub(cur, g_open_sub); return; }                      /* RPT 1: the same song again */
+    if (!g_rand && g_pltab == 2 && g_nfav > 0 && pl[cur].ma_id > 0 && fav_find(pl[cur].ma_id) >= 0) {        /* FAV tab: the favorites play through (RPT: again from the first one), then it stops */
+        if (fav_find(pl[cur].ma_id) + 1 < g_nfav || g_rpt == 1) fav_step(1);
+        return;
+    }
     if (g_rpt == 1) { next_prev(1); return; }                                       /* RPT: the next song, after the last one the first (also with a single song) */
     if (g_rand) { if (npl > 1 || (npl == 1 && pl[cur].ma_id > 0)) next_user(1); return; }
     if (!last_of_group(cur)) next_prev(1);                                          /* no repeat: the list plays through and stops after its last song */
@@ -4864,9 +4877,12 @@ int main(int argc, char **argv) {
         }
     }
 #endif
-    if (!npl) {   /* ohne Argumente: Musikordner des Benutzers */
+    if (!npl) {   /* ohne Argumente: Musikordner des Benutzers, aber NUR ohne Favoriten (mit Favoriten spielen diese, die Liste bleibt leer) */
         const char *home = getenv("HOME");
-        if (home) {
+#ifndef __EMSCRIPTEN__
+        fav_load();
+#endif
+        if (home && g_nfav == 0) {
             static const char *const dirs[] = { "Musik", "Music" };
             for (int k = 0; k < 2 && !npl; k++) {
                 char dp[1024];
@@ -4965,6 +4981,9 @@ int main(int argc, char **argv) {
     g_launch_bg = ios_launched_in_background();
 #endif
     if (npl && !g_launch_bg && !(pl[0].ma_id > 0 && access(pl[0].path, R_OK))) play_index(0);
+#ifndef __EMSCRIPTEN__
+    else if (!npl && g_nfav > 0 && !g_launch_bg && (!shot || getenv("NGPLAYER_TEST_FAVPLAY"))) { g_pltab = 2; fav_play(g_fav[0].id); }     /* no files and favorites: the favorites play (the first one), the list of files stays empty */
+#endif
 
     running = 1;
 #if defined(__APPLE__) && TARGET_OS_TV
