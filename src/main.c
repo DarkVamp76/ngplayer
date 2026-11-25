@@ -167,6 +167,7 @@ void ios_media_setup(void);                                                     
 void ios_media_update(const char *title, const char *artist, const char *album, int playing, double pos, double duration);
 int ios_media_poll(void);
 void ios_media_modes(int rnd, int rpt);                                           /* ios_glue.m: RND / RPT state for the CarPlay buttons */
+void ios_media_set_list(int start, int n, const char *const *labels, const char *const *tags, const unsigned *rgb, int cur);      /* ios_glue.m: a window of the playlist for the first CarPlay screen (labels of the entries start .. start+n-1, their format tags and colours 0xRRGGBB, cur = the playing one) */
 int ios_audio_event_poll(void);                                                    /* ios_glue.m: 1 = the route changed / an interruption ended (reopen the output), 2 = pause (the route fell back to the built-in speaker) */
 void ios_media_set_cover(const unsigned char *px, int w, int h);                    /* ios_glue.m: the cover of the song (RGBA, bottom row first, as glReadPixels gives it); NULL = none */
 void ios_media_set_cover_text(const char *title, const char *by, float ar, float ag, float ab, float br, float bg, float bb);   /* ios_glue.m: a cover drawn on the CPU (for the background, where the GPU may not be used): gradient from the colour a to b, title, artist */
@@ -4423,7 +4424,11 @@ static void ios_media_sync(void) {
         else if (c == 4) tv_dice();                              /* CarPlay: "Random module" */
         else if (c == 5) rand_toggle();                          /* CarPlay: shuffle button (= RND) */
         else if (c == 6) rpt_cycle();                            /* CarPlay: repeat button (= RPT) */
+        else if (c >= 1000) { if (c - 1000 < npl) play_index(c - 1000); }          /* CarPlay: a song of the list (1000 + its number) */
     }
+    { static int lc = -2, ln = -1, was; int up = ios_carplay_connected();      /* the first CarPlay screen: a window of the list (two songs before the playing one, then the following), sent when it or the playing song changes */
+      if (up && (!was || lc != cur || ln != npl)) { lc = cur; ln = npl; int st = cur > 2 ? cur - 2 : 0, n = npl - st; if (n > 100) n = 100; if (n < 0) n = 0; const char *lab[100], *tag[100]; unsigned rgb[100]; for (int i = 0; i < n; i++) { lab[i] = pl[st + i].label; int f = entry_fmt(&pl[st + i]); if (f > 0 && f < FMT_COUNT) { tag[i] = FMT_NAME[f]; rgb[i] = ((unsigned)(FMT_COL[f].r * 255.0f + 0.5f) << 16) | ((unsigned)(FMT_COL[f].g * 255.0f + 0.5f) << 8) | (unsigned)(FMT_COL[f].b * 255.0f + 0.5f); } else { tag[i] = ""; rgb[i] = 0; } } ios_media_set_list(st, n, lab, tag, rgb, cur); }
+      was = up; }
     { static int cc; if (!cc && g_song && getenv("NGPLAYER_TEST_COVERCARD")) { cc = 1; cover_fallback(); } }         /* test hook: the cover of the background (the information screen with the card) also in the foreground */
     if (g_probe) probe_run(2);                                  /* a few ms of the length measurement per frame */
     static char mt[160], ma[96], mb[96]; static int mp = -1; static Uint32 mt0; static double mlen = -2;
