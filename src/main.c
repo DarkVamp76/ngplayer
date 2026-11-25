@@ -1638,7 +1638,7 @@ static void chip_dip(float x, float y, float h, float beat) {            /* Paul
     z = chip_tsz(14, k); text(cx - text_width("1589  27", z) / 2, y + 77 * k - z * 0.8f, z, ink, "1589  27");
 }
 /* Which chip: 5 = the Amiga 500 (TFMX, AHX, SoundFX, MOD and MED up to 4 channels; the drawn Paula chip, kind 0, is not used any more), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices),
- * 4 = the AdLib Gold card (the FM formats, Yamaha OPL3) */
+ * 4 = the AdLib Gold card (the pure FM formats, Yamaha OPL3), 8 = the Sound Blaster AWE32 (FM next to samples) */
 static int chip_kind_of(const char *f, int n) {
     if (!strcmp(f, "MIDI")) return 6;                                  /* the MIDI sound module */
     if (!strcmp(f, "AMD") || !strcmp(f, "MAD") || !strcmp(f, "A2M") || !strcmp(f, "HERAD") || !strcmp(f, "RAD") || !strcmp(f, "LDS")) return 4;
@@ -1649,7 +1649,7 @@ static int chip_kind_of(const char *f, int n) {
 }
 static int chip_kind_song(const Song *sg) {                    /* MIDI: the black module for files written for the MT-32, the other one for the rest */
     if (song_is_midi(sg)) { int known; return !strcmp(song_midi_standard(sg, &known), "MT-32") ? 7 : 6; }
-    if (song_is_fm_s3m(sg)) return 4;                                  /* an S3M with AdLib instruments: the FM card, a GF1 cannot play it */
+    if (song_fm_in_sample_format(sg)) return 8;                        /* FM in a format that can also hold samples (S3M with AdLib instruments): the Sound Blaster AWE32 (OPL3 and wavetable); the pure FM formats keep the AdLib Gold */
     return chip_kind_of(song_format(sg), song_channels(sg));
 }
 static int chip_kind(void) { return chip_kind_song(g_song); }
@@ -3031,7 +3031,7 @@ static void draw_ui(double t) {
             if (bend > tl) tl = bend;
             float x0 = 0.5f * (tl + tr) - chw / 2;
             if (x0 < tl + 8) x0 = tl + 8;
-            { static const float lift[8] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f, 0.0f, 0.0f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
+            { static const float lift[9] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f, 0.0f, 0.0f, 0.05f }; draw_chips(x0, hy + 7 - lift[chip_kind()] * chh, chh); }   /* the card model sits low in its texture: lifted so it stays inside the box with room above */
         }
     }
 
@@ -3312,7 +3312,7 @@ static void draw_ui_portrait(float W, float H) {
                 if (cx > tl) tl = cx;
                 if (tr - tl >= 40) { x0 = 0.5f * (tl + tr) - chw / 2; if (x0 < tl + 4) x0 = tl + 4; }   /* centred between the title and the time; on a phone it may reach into the time, not into the title */
                 else if (x0 < cx + 6) x0 = cx + 6;                                          /* a very long title: lower right, may cover part of the time */
-                if (chw > 0 && x0 + chw <= M + aw - 6) { static const float lift[8] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f, 0.0f, 0.0f };               /* the same lift per model as in the landscape header */
+                if (chw > 0 && x0 + chw <= M + aw - 6) { static const float lift[9] = { 0.0f, 0.05f, 0.03f, 0.08f, 0.07f, 0.0f, 0.0f, 0.0f, 0.05f };               /* the same lift per model as in the landscape header */
                     draw_chips(x0, chip_kind() == 0 ? hy + hh / 2 - chh / 2 : hy + (hh - chh) / 2 - lift[chip_kind()] * chh, chh); }   /* centred in the title card at every width */
             }
         }
@@ -4120,7 +4120,7 @@ static void draw_info_tv(float x, float y, float w, float h) {
     float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
     float rx = x + boxw + 12, rw = w - boxw - 12 - 28;
     int maid = cur >= 0 && cur < npl ? pl[cur].ma_id : 0;                            /* a Mod Archive module: its ID is a row of the table too (to find it again) */
-    static const char *const best[8] = { "COMMODORE AMIGA", "GRAVIS ULTRASOUND (FORTE GF1)", "GRAVIS ULTRASOUND PnP (AMD INTERWAVE)", "TERRATEC EWS 64", "ADLIB GOLD 1000", "COMMODORE AMIGA", "ROLAND SOUND CANVAS", "ROLAND MT-32" };      /* the hardware the module sounds best on: the sound card shown on the left (chip_kind_of) */
+    static const char *const best[9] = { "COMMODORE AMIGA", "GRAVIS ULTRASOUND (FORTE GF1)", "GRAVIS ULTRASOUND PnP (AMD INTERWAVE)", "TERRATEC EWS 64", "ADLIB GOLD 1000", "COMMODORE AMIGA", "ROLAND SOUND CANVAS", "ROLAND MT-32", "SOUND BLASTER AWE32" };      /* the hardware the module sounds best on: the sound card shown on the left (chip_kind_of) */
     int nrow = 4 + (maid > 0);
     float need = 40 * k + 12 * k + nrow * 30 * k + 4 * k + 12 * k + (isi.nextra > 0 ? isi.nextra : 0) * 25 * k;
     float ty = y + top + (boxh - need) / 2; if (ty < y + top) ty = y + top;
@@ -4129,7 +4129,7 @@ static void draw_info_tv(float x, float y, float w, float h) {
     ty += 40 * k; rect(rx, ty, rw, 1, alpha(EDGE, 0.5f)); ty += 12 * k;
     char vb[64]; snprintf(vb, sizeof vb, "%d %s", isi.voices, isi.voice_unit);
     char mb[32]; snprintf(mb, sizeof mb, "#%d", maid);
-    const char *lab[5] = { "TRACKER", "FORMAT", "VOICES", "BEST PLAYED ON", "MOD ARCHIVE" }, *val[5] = { isi.tracker, isi.format, vb, best[ikind >= 0 && ikind < 8 ? ikind : 1], mb };
+    const char *lab[5] = { "TRACKER", "FORMAT", "VOICES", "BEST PLAYED ON", "MOD ARCHIVE" }, *val[5] = { isi.tracker, isi.format, vb, best[ikind >= 0 && ikind < 9 ? ikind : 1], mb };
     float vcol = 112 * k;                                                              /* the value column: right of the longest label */
     for (int i = 0; i < nrow; i++) { float lw = text_width(lab[i], 12 * k) + 16 * k; if (lw > vcol) vcol = lw; }
     for (int i = 0; i < nrow; i++) {

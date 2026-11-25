@@ -9,7 +9,8 @@
 #include "module_data.h"    /* the MIDI sound module: the card of the MIDI files (no MIDI in the iOS / tvOS apps, so no data there) */
 #include "module_mt_data.h" /* the black one: for files written for the MT-32 */
 #endif
-#define C3_N (NG_MIDI ? 7 : 5)
+#include "awe32_data.h"       /* the Sound Blaster AWE32: the card (kind 8) of FM in the formats that can also hold samples */
+#define C3_N 8                 /* index = chip kind - 1; in the builds without MIDI the two module slots stay empty */
 
 typedef struct { const int16_t *v; const uint8_t *vc, *pal; const uint16_t *idx; int nv, nt; const int16_t *tv; const uint16_t *tuv, *tidx; int ntt, ntv; const uint16_t *tex; int tw, th; float aspect; const int16_t *bv; const uint16_t *buv, *bidx; int nbv, nbt; const uint8_t *bpal, *bpix; int bw, bh; float tilt, fit; } C3Model;   /* tilt and fit: 0 = the defaults of the sound cards (0.17 rad, 0.95) */
 static const C3Model C3M[C3_N] = {
@@ -25,6 +26,7 @@ static const C3Model C3M[C3_N] = {
     /* the MT-32 style module: wider and flatter (305 x 45 x 247) */
     { c3_MODULEMT_v, c3_MODULEMT_vc, c3_MODULEMT_pal, c3_MODULEMT_i, C3_MODULEMT_NV, C3_MODULEMT_NT, c3_MODULEMT_tv, c3_MODULEMT_tuv, c3_MODULEMT_ti, C3_MODULEMT_NTT, C3_MODULEMT_NTV, c3_MODULEMT_tex, C3_MODULEMT_TW, C3_MODULEMT_TH, 2.6f, c3_MODULEMT_bv, c3_MODULEMT_buv, c3_MODULEMT_bi, C3_MODULEMT_NBV, C3_MODULEMT_NBT, c3_MODULEMT_bpal, c3_MODULEMT_bpix, C3_MODULEMT_BW, C3_MODULEMT_BH, 0.50f, 0.62f },
 #endif
+    [7] = { c3_AWE_v, c3_AWE_vc, c3_AWE_pal, c3_AWE_i, C3_AWE_NV, C3_AWE_NT, c3_AWE_tv, c3_AWE_tuv, c3_AWE_ti, C3_AWE_NTT, C3_AWE_NTV, c3_AWE_tex, C3_AWE_TW, C3_AWE_TH, C3_AWE_ASPECT, c3_AWE_bv, c3_AWE_buv, c3_AWE_bi, C3_AWE_NBV, C3_AWE_NBT, c3_AWE_bpal, c3_AWE_bpix, C3_AWE_BW, C3_AWE_BH },
 };
 #define MT_LCD_X0 0.1344f                                  /* the display of the MT-32 module in its front picture (fractions of the picture, see tools/make_module_panel_mt.py) */
 #define MT_LCD_X1 0.4063f
