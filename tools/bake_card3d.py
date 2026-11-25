@@ -157,6 +157,7 @@ def components(P,I):
     return [(P[g].min(0),P[g].max(0)) for g in groups.values()]
 
 PAL_EWS=[(31,23,15),(22,16,11),(54,40,27),(205,205,198),(228,226,214),(216,172,62),(10,8,6),(160,140,100),(162,162,156),(40,30,20),(18,13,9),(70,52,36),(140,140,135),(238,200,110),(26,19,12),(14,10,7)]
+PAL_AWE=[(52,142,74),(38,110,58),(92,176,104),(205,205,198),(236,236,226),(216,172,62),(14,34,20),(172,152,112),(162,162,156),(40,122,62),(24,86,44),(70,158,88),(140,140,135),(238,200,110),(30,100,52),(18,70,36)]      # the AWE32: green like its solder mask
 def make_back_generic(tag,comps,board,fingers,pal,lines):
     """comps: [(lo,hi)] of the parts (card coordinates: x, y, z up); board = (x0,y0,x1,y1) of the whole image; fingers = edge connector rectangles"""
     global BX0,BX1,BY0,BY1
@@ -208,7 +209,7 @@ def make_back_generic(tag,comps,board,fingers,pal,lines):
     pimg=Image.new('P',(1,1));pimg.putpalette([c for col in pal for c in col]+[0]*(768-3*len(pal)))
     return np.asarray(im.quantize(palette=pimg,dither=Image.Dither.NONE)).astype(np.uint8)
 
-def bake_ews(tag,glb,texw,part_names=('cap_dark','chip_black','plastic_white','plastic_black','metal','pcb_green'),lines=('EWS64','AUDIOSYSTEM'),auto_outline=False,classify=None,scale=1.0):
+def bake_ews(tag,glb,texw,part_names=('cap_dark','chip_black','plastic_white','plastic_black','metal','pcb_green'),lines=('EWS64','AUDIOSYSTEM'),auto_outline=False,classify=None,scale=1.0,back_pal=None):
     """classify(node name) -> 'board' | 'finger' | 'part' | None replaces the name lists (a model with other node names); scale turns the model units into mm"""
     j,b=load(U+glb)
     def tr(P): return np.column_stack([P[:,0],-P[:,2],P[:,1]])*scale          # card coordinates: x, y = -z, z = up (a proper rotation)
@@ -247,7 +248,8 @@ def bake_ews(tag,glb,texw,part_names=('cap_dark','chip_black','plastic_white','p
     img_bv=j['bufferViews'][j['images'][0]['bufferView']];img=Image.open(io.BytesIO(b[img_bv.get('byteOffset',0):img_bv.get('byteOffset',0)+img_bv['byteLength']])).convert('RGB')
     th=int(round(texw*img.height/img.width));img=img.resize((texw,th),Image.LANCZOS)
     a=np.asarray(img).astype(np.uint16);t565=((a[:,:,0]>>3)<<11)|((a[:,:,1]>>2)<<5)|(a[:,:,2]>>3)
-    bimg=make_back_generic(tag,comps,board,fingers,PAL_EWS,lines)
+    bpal=back_pal or PAL_EWS
+    bimg=make_back_generic(tag,comps,board,fingers,bpal,lines)
     # the back picture: the board outline (the part with fingers is narrower) as two quads
     bq=[(board[0],-43.2,board[2],board[3]),(-36.6,board[1],board[2],-43.2)]       # the board outline: the main part and the strip with the edge connector
     if auto_outline: bq=outline                                                      # other boards: the rectangles of their own bottom
@@ -266,7 +268,7 @@ def bake_ews(tag,glb,texw,part_names=('cap_dark','chip_black','plastic_white','p
     s+=arr('c3_%s_tex'%tag,'uint16_t',t565.flatten(),12)
     s+='#define C3_%s_BW %d\n#define C3_%s_BH %d\n#define C3_%s_NBV %d\n#define C3_%s_NBT %d\n'%(tag,bimg.shape[1],tag,bimg.shape[0],tag,len(bv),tag,len(bi)//3)
     s+=arr('c3_%s_bv'%tag,'int16_t',quant(bv))+arr('c3_%s_buv'%tag,'uint16_t',np.round(buv.flatten()*65535).astype(int))+arr('c3_%s_bi'%tag,'uint16_t',bi)
-    s+=arr('c3_%s_bpal'%tag,'uint8_t',[x for c in PAL_EWS for x in c])+arr('c3_%s_bpix'%tag,'uint8_t',pack4(bimg),24)
+    s+=arr('c3_%s_bpal'%tag,'uint8_t',[x for c in bpal for x in c])+arr('c3_%s_bpix'%tag,'uint8_t',pack4(bimg),24)
     return s
 
 if __name__=='__main__':
