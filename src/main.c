@@ -1703,7 +1703,7 @@ static void module_bars_update(void) {
     if (!g_song || !song_is_midi(g_song) || chip_kind() != 6) return;
     const int mi = 5; c3_setup(mi);
     C3Gl *g = &c3gl[mi]; const C3Model *m = &C3M[mi];
-    int seg[16]; for (int c = 0; c < 16; c++) { SongMidiChan mc; song_midi_chan(g_song, c, &mc); float l = mc.level > 1 ? 1 : mc.level; seg[c] = (int)(powf(l, 0.55f) * 14.0f + 0.5f); }
+    int seg[16]; for (int c = 0; c < 16; c++) { SongMidiChan mc; song_midi_chan(g_song, c, &mc); float l = mc.level > 1 ? 1 : mc.level; seg[c] = (int)(powf(l, 0.55f) * 7.0f + 0.5f); }      /* half the swing of the first version: the real SC-155 display reaches about half the height (measured by eye) */
     static int shown[16]; static int have;
     if (g->lcd && have && !memcmp(shown, seg, sizeof seg)) return;
     if (!g->lcd) g->lcd = gfx_tex_create(m->tw, m->th, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET);
