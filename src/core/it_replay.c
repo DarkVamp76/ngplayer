@@ -627,7 +627,7 @@ static int process_tick(ITPlayer *p){
         const ITCell *m = s->pat[p->cur_pat] ? &s->pat[p->cur_pat][(size_t)p->row * 64] : NULL;
         for (int n = 0; n < 64; n++) {
             V *c = &p->ch[n]; ITCell z = {0}; const ITCell *x = m ? &m[n] : &z;
-            c->row_note = (x->has & IT_HAS_NOTE) ? (x->note < 120 ? x->note + 1 : x->note) : NONE;
+            c->row_note = (x->has & IT_HAS_NOTE) ? (x->note < 120 ? x->note + 1 : x->note < 254 ? NOTE_FADE : x->note) : NONE;      /* IT: every note byte from 120 to 253 is a note fade (OpenMPT writes 246), 254 cut, 255 off */
             c->row_inst = (x->has & IT_HAS_INST) ? x->inst : 0; if (c->row_inst) c->last_inst = c->row_inst;
             if (x->has & IT_HAS_VOL) decode_vol(x->vol, &c->row_vc, &c->row_vp); else { c->row_vc = V_NONE; c->row_vp = 0; }
             c->row_cmd = (x->has & IT_HAS_CMD) ? x->cmd : 0; c->row_par = (x->has & IT_HAS_CMD) ? x->par : 0;
