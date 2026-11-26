@@ -38,7 +38,7 @@ typedef struct {
     int pbdepth, pbspeed, pbpos, pbtype, pbdelta;
     int avdepth, avpos;
     int m_pitch, m_porta, m_vol, m_vc, m_off, m_arp, m_ret, m_trem, m_spec, m_tempo, m_pan, m_cvol, m_gvol;
-    int cd_ret, cd_trem, cd_cut, cd_delay, cd_loop, loop_row;
+    int cd_ret, cd_trem, cd_cut, cd_delay, cd_loop, loop_row, nna_ov;      /* nna_ov: NNA set by S73..S76 plus one (0: the one of the instrument) */
     int ncmd;
     double gl, gr, pgl, pgr; double step;
     int active; int rlen;                /* rlen > 0: Rampenlaenge dieses Ticks (Notenstart/Ausblendung), sonst Standard */
@@ -229,6 +229,7 @@ static void note_change(ITPlayer *p, V *c, int ch, int note, int porta, int retr
     if (in && in->pps && !porta) {
         int d = (c->note - in->ppc - 1) * in->pps / 2; c->pan = clampi(c->pan + d, 0, 256);
     }
+    if (!porta) c->nna_ov = 0;      /* the NNA of S73..S76 counts for the next note change only (check_nna ran before) */
     if (!porta) { c->cut = 0; c->fadeout = 65536; c->flags &= ~F_FADE; c->vpos = c->ppos = c->tpos = 0; c->kofp = 0; c->flags |= F_NEWNOTE;
         if (in) { if (in->ifr & 0x80) c->resonance = in->ifr & 0x7F; if (in->ifc & 0x80) c->cutoff = in->ifc & 0x7F; } }
     if (!(porta && (!(s->flags & 32) || !c->row_inst))) c->flags &= ~F_KEYOFF;
@@ -364,6 +365,14 @@ static void fx_special(ITPlayer *p, V *c, int ft, int param){
     case 0x40: c->tremtype = param; break;
     case 0x50: c->pbtype = param < 4 ? param : 0; c->pbpos = 0; break;
     case 0x60: if (ft) { p->frame_delay += param; p->tick_count += param; } break;
+    case 0x70:                                                /* S70..S72: the past notes of this channel (cut / note off / fade); S73..S76: NNA of the note (cut / continue / off / fade) */
+        if (!ft) break;
+        if (param <= 2) {
+            int n = (int)(c - p->ch);
+            for (int i = 64; i < 192; i++) { V *v = &p->ch[i]; if (v->master != n + 1) continue;
+                if (param == 1) key_off(p, v); else if (param == 2) v->flags |= F_FADE; else { v->flags |= F_FADE; v->fadeout = 0; } }
+        } else if (param <= 6) c->nna_ov = param - 2;
+        break;
     case 0x80: if (ft) { c->flags &= ~F_SURR; c->pbdelta = 0; c->pan = param * 17 + (param >= 7); c->flags |= F_FAST; } break;
     case 0x90:
         if (!ft) break;
@@ -484,7 +493,7 @@ static void check_nna(ITPlayer *p, int n, int instr, int note){
         if (k >= 0) {
             V *v = &p->ch[k]; *v = *c;
             v->flags &= ~(F_VIB | F_TREM | F_PORTA); v->tremdelta = 0; v->ncmd = 0; v->master = n + 1;
-            switch (c->ins->nna) {
+            switch (c->nna_ov ? c->nna_ov - 1 : c->ins->nna) {
             case 2: key_off(p, v); break;
             case 0: v->fadeout = 0; v->flags |= F_FADE; break;
             case 3: v->flags |= F_FADE; break;
