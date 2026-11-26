@@ -347,7 +347,7 @@ static void fx_retrig(ITPlayer *p, V *c, int ft, int param){
         c->pos = 0;
     }
 }
-static int g_mplmade;   /* files libopenmpt reads as 'made with ModPlug' (ModPlug 1.09-1.18, OpenMPT 1.17/1.18 compatibility): it switches its compatibility behaviours off, among them the loop start moving behind a finished pattern loop */
+static int g_mplmade, g_softpan;   /* files libopenmpt reads as 'made with ModPlug' (ModPlug 1.09-1.18, OpenMPT 1.17/1.18 compatibility): it switches its compatibility behaviours off, among them the loop start moving behind a finished pattern loop */
 static void pattern_loop(ITPlayer *p, V *c, int param){
     if (param) {
         if (c->cd_loop) {
@@ -806,6 +806,7 @@ static void update_channels(ITPlayer *p){
             double pan = (double)(fpan - 128) * s->sep / 128.0 + 128.0; pan = pan < 0 ? 0 : pan > 256 ? 256 : pan;
             double real = (double)fv * master / 128.0;
             if (c->flags & F_SURR) { c->gl = real * 0.5; c->gr = -real * 0.5; }      /* surround: the right channel is inverted, like libopenmpt (it cancels in a mono mix) */
+            else if (g_softpan) { c->gl = real * (pan < 128 ? 128.0 : 256.0 - pan) / 128.0; c->gr = real * (pan < 128 ? pan : 128.0) / 128.0; }   /* OpenMPT 1.17 RC3 mix levels: soft panning (the louder side stays at the centre level), no extra attenuation */
             else { c->gl = real * (256.0 - pan) / 256.0; c->gr = real * pan / 256.0; }
             c->gl *= p->K; c->gr *= p->K;
             c->active = 1;
@@ -864,6 +865,7 @@ static void mix_voice(ITPlayer *p, V *c, double *mix, int n, int fast_ramp_len, 
 ITPlayer *itp_new(const ITSong *s, int rate){
     ITPlayer *p = calloc(1, sizeof *p); p->s = s; p->rate = rate;
     g_mplmade = s->cmwt == 0x888 || s->cwt == 0x888 || (s->cwt == 0x217 && s->cmwt == 0x200 && s->rsv == 0) || (s->cwt == 0x214 && s->cmwt == 0x202 && s->rsv == 0);
+    g_softpan = s->mpt_mixlevels == 3;
     g_it200 = (s->cmwt == 0x200 && (s->cwt == 0x888 || ((s->cwt == 0x214 || s->cwt == 0x217) && s->rsv == 0)));   /* rsv != 0: real Impulse Tracker 2.14p4/p5, plain IT behaviour */ g_linear = (s->flags & 8) != 0;
     /* OpenMPT up to 1.28 (cwtv 0x5000..0x5128): table based periods too (measured: 0x5122, 0x5123, 0x5128 correlate much better with the table, 0x5130 and 0x5131 with the exact formula; 0x5129 not measured) */
     /* Schism Tracker: libopenmpt setzt kPeriodsAreHertz zurueck bei Datum < 2015-01-29 (1916 Tage nach 2009-10-31), und bei Datum < 2021-05-02 (4201) ohne Linear-Slides */
@@ -882,11 +884,11 @@ ITPlayer *itp_new(const ITSong *s, int rate){
     }
     /* IT files from OpenMPT 1.18 (cwtv 0x888 / cmwt 0x888): libopenmpt mixes them louder than the current OpenMPT levels (measured on one file, 10 channels,
      * mix volume 128: factor 1.62, RMS ratio 0.62 -> 1.00); the table periods are switched on above (correlation 0.77 -> 0.95). */
-    /* The levels follow the mix levels stored in the file (OpenMPT extension chunk). 3 (1.17 RC3): x1.62 (i_win_xd 1.09, soft_ice_planet 0.58 without). Original (0) and RC2 (2) levels:
+    /* The levels follow the mix levels stored in the file (OpenMPT extension chunk). 3 (1.17 RC3): soft panning (centre content is twice as loud as in the compatible mode). Original (0) and RC2 (2) levels:
      * the gain needed against libopenmpt depends on the number of used channels, hardly on mix volume or global volume; measured on 22 files from OpenMPT 1.18 (levels 0 and 2 lie on
      * the same curve), see it_legacy_k. A file without the chunk keeps the old x1.62. */
     if (s->cwt == 0x888 && s->cmwt == 0x888 && s->mpt_mixlevels < 0) p->K *= 1.62;
-    else if (s->cmwt == 0x888 && s->mpt_mixlevels == 3) p->K *= 1.62;
+    else if (s->cmwt == 0x888 && s->mpt_mixlevels == 3) p->K *= 1.0;
     else if (s->mpt_mixlevels == 0 || (s->cmwt == 0x888 && s->mpt_mixlevels == 2)) p->K *= it_legacy_k(s->nch > 0 ? s->nch : 1);
     { const char *e = getenv("ITGAIN"); if (e) p->K *= atof(e); }
     for (int i = 0; i < 64; i++) {
