@@ -89,7 +89,7 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
     for (int i = 0; i < 32; i++) { s->chen[i] = 1; s->chpan[i] = -1; }
     s->speed = tempo2 ? (int)tempo2 : 6;
     g_8ch = (flags & 0x40) != 0; g_soft = (flags2 & 0x80) != 0;
-    { double t = mmd_bpm((int)deftempo, bpm, rpb); s->tempo_exact = t; s->tempo = (int)(t + 0.5); if (s->tempo < 0x20) s->tempo = 0x20; if (s->tempo > 0xFF) s->tempo = 0xFF; if (t < 32.0 || t > 255.0) s->tempo_exact = 0; }
+    { double t = mmd_bpm((int)deftempo, bpm, rpb); s->tempo_exact = t; s->tempo = (int)(t + 0.5); if (s->tempo < 0x20) s->tempo = 0x20; if (s->tempo > 0xFF) s->tempo = 0xFF; if (t < 32.0) s->tempo_exact = 0; }      /* (a start tempo above 255, e.g. 290 in BPM mode, stays as it is) */
     if (s->speed < 1) s->speed = 1; if (s->speed > 32) s->speed = 32;
 
     /* block table + channel count */
@@ -141,6 +141,8 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
     if (npat > MAXPAT - 1) return -4;
     s->npat = npat + 1;                                   /* last one stays empty (target for invalid sequence entries) */
     s->pat = calloc((size_t)s->npat * 64 * nch + 1, sizeof(XCell));
+    s->plen = calloc((size_t)s->npat + 1, 1);
+    if (!s->plen) return -5;
     if (!s->pat) return -5;
 
     int norder = 0; int seqmap[4096];
@@ -173,11 +175,7 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
                 conv_fx(x, fx, par, hexvol, bpm, rpb, jm, (int)(nseq < 256 ? nseq : 256));
             }
         }
-        if (lines % 64) {                                 /* short (last) pattern: break after the last row */
-            XCell *row = &s->pat[((size_t)(map[bi].first + (lines - 1) / 64) * 64 + ((lines - 1) % 64)) * nch];
-            int done = 0;
-            for (int c = 0; c < nch && !done; c++) if (!row[c].eff) { row[c].eff = 0x0D; row[c].par = 0; done = 1; }
-        }
+        if (lines % 64) s->plen[map[bi].first + (lines - 1) / 64] = (uint8_t)(lines % 64);      /* a short (last) pattern ends after its last row (a break in a free effect column did not work when all columns were in use) */
     }
 
     /* instruments */

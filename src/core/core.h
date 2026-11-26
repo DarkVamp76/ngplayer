@@ -60,6 +60,7 @@ typedef struct {
     int xm_ft2;                /* XM: written by FastTracker 2 itself (arpeggio order as in FT2); other trackers use the order of libopenmpt */
     int restart;
     int *prows;                /* XM: Zeilen je Pattern (sonst 64) */
+    uint8_t *plen;             /* fmt 1 (MED): Zeilen je Pattern, wenn kuerzer als 64 (0 oder NULL: 64) */
     int amiga;                 /* MOD: echtes Amiga-Format (M.K., M!K!, FLT4, 15 Samples) -> Paula-Tiefpass */
     int linpan;                /* 1 = linear pan law (DSM, like libopenmpt) instead of the S3M law */
     int has_adlib; uint8_t adlib_ch[64];   /* S3M: AdLib instruments are used; adlib_ch[ch] = OPL channel + 1 (0 = a sample channel) */
