@@ -8,6 +8,17 @@ extern unsigned long long xplay_mute;
 #include <string.h>
 #include <stdint.h>
 #include <stdio.h>
+/* gain of the original / RC2 mix levels of OpenMPT 1.18 files against the used channel count (measured against libopenmpt, linear between the points, flat below 5, slowly falling above 41) */
+static double it_legacy_k(int n){
+    static const int cn[] = { 5, 6, 8, 9, 11, 12, 14, 15, 16, 19, 20, 41 };
+    static const double ck[] = { 0.665, 0.572, 0.505, 0.500, 0.470, 0.445, 0.420, 0.405, 0.393, 0.363, 0.360, 0.314 };
+    const int m = (int)(sizeof cn / sizeof cn[0]);
+    if (n <= cn[0]) return ck[0];
+    if (n >= cn[m - 1]) return ck[m - 1] * pow((double)cn[m - 1] / n, 0.3);
+    for (int i = 1; i < m; i++) if (n <= cn[i]) return ck[i - 1] + (ck[i] - ck[i - 1]) * (double)(n - cn[i - 1]) / (cn[i] - cn[i - 1]);
+    return ck[m - 1];
+}
+
 
 enum { F_LOOP = 1, F_PP = 2, F_PPREV = 4, F_SUS = 8, F_KEYOFF = 16, F_FADE = 32, F_VIB = 64, F_TREM = 128, F_PORTA = 256,
        F_FAST = 512, F_SURR = 1024, F_GLISS = 2048, F_MUTE = 4096, F_FILT = 8192, F_NEWNOTE = 16384 };
@@ -860,12 +871,12 @@ ITPlayer *itp_new(const ITSong *s, int rate){
     }
     /* IT files from OpenMPT 1.18 (cwtv 0x888 / cmwt 0x888): libopenmpt mixes them louder than the current OpenMPT levels (measured on one file, 10 channels,
      * mix volume 128: factor 1.62, RMS ratio 0.62 -> 1.00); the table periods are switched on above (correlation 0.77 -> 0.95). */
-    /* The levels follow the mix levels stored in the file (OpenMPT extension chunk), measured against libopenmpt on four files: 3 (1.17 RC3): x1.62 (i_win_xd 1.09, soft_ice_planet
-     * 0.58 without), 0 (original, also in OpenMPT 1.2x/1.3x files): x8.25 / used channels (greenday 11 ch: 2.0 too loud, sandcastle 23 ch: 2.7), 2 (RC2): x0.33 (carl: 4.9 too loud). A file without the chunk keeps the old x1.62. */
+    /* The levels follow the mix levels stored in the file (OpenMPT extension chunk). 3 (1.17 RC3): x1.62 (i_win_xd 1.09, soft_ice_planet 0.58 without). Original (0) and RC2 (2) levels:
+     * the gain needed against libopenmpt depends on the number of used channels, hardly on mix volume or global volume; measured on 22 files from OpenMPT 1.18 (levels 0 and 2 lie on
+     * the same curve), see it_legacy_k. A file without the chunk keeps the old x1.62. */
     if (s->cwt == 0x888 && s->cmwt == 0x888 && s->mpt_mixlevels < 0) p->K *= 1.62;
     else if (s->cmwt == 0x888 && s->mpt_mixlevels == 3) p->K *= 1.62;
-    else if (s->mpt_mixlevels == 0) p->K *= 8.25 / (s->nch > 0 ? s->nch : 1);   /* original levels: x0.73 with 11 used channels (greenday), x0.37 with 23 (sandcastle) */
-    else if (s->cmwt == 0x888 && s->mpt_mixlevels == 2) p->K *= 0.33;
+    else if (s->mpt_mixlevels == 0 || (s->cmwt == 0x888 && s->mpt_mixlevels == 2)) p->K *= it_legacy_k(s->nch > 0 ? s->nch : 1);
     { const char *e = getenv("ITGAIN"); if (e) p->K *= atof(e); }
     for (int i = 0; i < 64; i++) {
         V *c = &p->ch[i];
