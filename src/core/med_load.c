@@ -65,6 +65,7 @@ static void conv_fx(XCell *x, int e, int p, int hexvol, int bpm, int rpb, const 
 int xmed_load(XSong *s, const uint8_t *b, size_t n){
     memset(s, 0, sizeof *s);
     s->fmt = 1; s->maxvol = 0x40; s->gvol = 255; s->speed = 6; s->tempo = 125;
+    s->mixgain = 0.677;      /* libopenmpt mixes MED 3.4 dB quieter than the MOD gain of the replayer (median of 1100 songs with the same length: 3.39 dB, 90 % between 3.24 and 3.53) */
     if (!med_probe(b, n)) return -1;
     int ver = b[3] - '0';
     uint32_t so = be32(b + 8), bao = be32(b + 16), smo = be32(b + 24), exo = be32(b + 32);
