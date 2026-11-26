@@ -3384,7 +3384,7 @@ static void draw_ui_portrait(float W, float H) {
         }
     }
     /* ---------------- Mitte */
-    int nosp = g_song && song_channels(g_song) > 8;      /* many voices: drop spectrum/level, the room goes to channels + pattern */
+    int nosp = g_song && (song_channels(g_song) > 8 || (H < 760 && !g_duo && !NG_TV));      /* many voices: drop spectrum/level, the room goes to channels + pattern */
     int has_seek = g_song && song_norders(g_song) > 1 && !g_duo && !NG_TV;   /* order slider row above the buttons */
     float botH = BOT + (has_seek ? SEEK_ROW : 0);
     float by = H - M - botH, sh = nosp ? 0 : 96, sy = nosp ? by : by - M - sh, cy0 = hy + hh + M;
@@ -4225,14 +4225,15 @@ static void draw_info_tv(float x, float y, float w, float h) {
     /* the room: the sound card (swinging) takes the left part at the largest size that fits, the text column the rest, centred in the height */
     const float top = 40;
     const int narrow = w < 520;                                               /* upright phone: the card on top (a band of 30 percent), the table below it at the full width */
-    float boxw = narrow ? w - 24 : fminf(w * 0.46f, w - 400.0f), boxh = narrow ? fminf(h * 0.30f, 150.0f) : h - top - 16;           /* the cards differ in width (a flat strip, wide expansion cards, a compact computer): the column is as wide as the text on the right allows */
+    float boxw = narrow ? w - 24 : fminf(w * 0.46f, w - 400.0f), boxh = narrow ? fminf(h * 0.36f, 180.0f) : h - top - 16;           /* the cards differ in width (a flat strip, wide expansion cards, a compact computer): the column is as wide as the text on the right allows */
     if (!narrow && boxw < w * 0.34f) boxw = w * 0.34f;                        /* (all sizes here are view units: this card is about 757 wide on the Apple TV) */
+    int maid = cur >= 0 && cur < npl ? pl[cur].ma_id : 0;                            /* a Mod Archive module: its ID is a row of the table too (to find it again) */
+    int nrow = 4 + (maid > 0);
+    if (narrow) { float need1 = 40.0f + 12 + nrow * 30.0f + 4 + 12 + (isi.nextra > 0 ? isi.nextra : 0) * 25.0f; float mx = h - top - 12 - 0.62f * need1; if (boxh > mx) boxh = mx; if (boxh < 60) boxh = 60; }      /* the model gets what the table does not need (never so much that its rows run out of the card) */
     float chh = fminf(boxh / 1.12f, 400.0f), cw = chips_width_k(ikind, chh);
     if (cw > boxw - 24) { chh *= (boxw - 24) / cw; cw = boxw - 24; }
     chip_swing = 1; draw_chip_k(ikind, x + (boxw - cw) / 2 + 8, y + top + (boxh - chh * 1.12f) / 2 + chh * 0.06f, chh, 0.0f); chip_swing = 0;
     float rx = narrow ? x + 18 : x + boxw + 12, rw = narrow ? w - 36 : w - boxw - 12 - 28;
-    int maid = cur >= 0 && cur < npl ? pl[cur].ma_id : 0;                            /* a Mod Archive module: its ID is a row of the table too (to find it again) */
-    int nrow = 4 + (maid > 0);
     float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
     if (narrow) { k = (h - top - boxh - 12) / (40.0f + 12 + nrow * 30.0f + 4 + 12 + (isi.nextra > 0 ? isi.nextra : 0) * 25.0f); if (k > 1.2f) k = 1.2f; if (k < 0.6f) k = 0.6f; }
     float need = 40 * k + 12 * k + nrow * 30 * k + 4 * k + 12 * k + (isi.nextra > 0 ? isi.nextra : 0) * 25 * k;
