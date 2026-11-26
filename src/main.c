@@ -3107,7 +3107,7 @@ static void draw_ui(double t) {
     float oh = g_song ? overview_height(song_channels(g_song) > 64 ? 64 : song_channels(g_song)) : 60.0f;
     float avail = sy - M - cy0;
     int nosp = 0;
-    if (g_song && song_channels(g_song) > 8 && avail - oh - M < 190) {      /* many voices and the height runs out: drop spectrum and level, the room goes to channels + pattern */
+    if (g_song && ((song_channels(g_song) > 8 && avail - oh - M < 190) || (song_channels(g_song) > 32 && !NG_TV && !(g_mobile && W >= H * 1.7f)))) {      /* (not on a phone held sideways: touch and a wide screen) */      /* many voices and the height runs out (more than 32: always): drop spectrum and level, the room goes to channels + pattern */
         nosp = 1; sh = 0; sy = by; avail = sy - M - cy0;
     }
     if (avail - oh - M < 190) oh = avail - M - 190;
