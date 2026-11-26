@@ -580,7 +580,7 @@ static void advance(XPlayer *p){
         p->row = loopto; p->loop_jump = 1; return;
     }
     if (jo >= 0) { p->order = jo; p->row = jr < 0 ? 0 : jr; }
-    else if (++p->row >= 64) { p->row = 0; p->order++; }
+    else if (++p->row >= (s->plen && s->plen[s->orders[p->order]] ? s->plen[s->orders[p->order]] : 64)) { p->row = 0; p->order++; }
     if (p->row >= 64) p->row = 0;
     if (p->order >= s->nord) { p->done = 1; }
     else skip_markers(p);
