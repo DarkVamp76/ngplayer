@@ -110,6 +110,13 @@ def bake(tag,glb,texw):
     if DESK:
         th_=np.radians(DESK); RM=np.array([[np.cos(th_),np.sin(th_)],[-np.sin(th_),np.cos(th_)]])-np.eye(2); CEN=np.array([103.2,53.34])      # the centre of the photo in model units
     M=np.array(j['nodes'][0]['matrix']).reshape(4,4).T
+    BIGBOX=[]      # the big untextured parts (memory module, slot bracket) stay; the parts that sit on them stay with them
+    if DESK:
+        for n in j['nodes']:
+            at=j['meshes'][n['mesh']]['primitives'][0]['attributes']
+            if 'TEXCOORD_0' in at: continue
+            q,_=acc(j,b,at['POSITION']); q=q.astype(np.float64)
+            if max(q.max(0)[0]-q.min(0)[0],q.max(0)[1]-q.min(0)[1])>=40: BIGBOX.append((q.min(0),q.max(0)))
     V=[];VC=[];I=[];pal=[];TV=[];TUV=[];TI=[];PRIMS=[];QUADS=[]
     for ni,n in enumerate(j['nodes']):
         m=j['meshes'][n['mesh']];pr=m['primitives'][0];at=pr['attributes']
@@ -118,7 +125,9 @@ def bake(tag,glb,texw):
         if DESK:
             BMIN=p_.min(0) if BMIN is None else np.minimum(BMIN,p_.min(0)); BMAX=p_.max(0) if BMAX is None else np.maximum(BMAX,p_.max(0))      # the frame of the card stays what the original model gave
         if DESK and 'TEXCOORD_0' not in at and max(p_.max(0)[0]-p_.min(0)[0],p_.max(0)[1]-p_.min(0)[1])<40:       # the small parts follow the photo (the slot bracket and the memory module are big: they stay)
-            d_=RM@(((p_.min(0)+p_.max(0))/2)[:2]-CEN); p_=p_.copy(); p_[:,0]+=d_[0]; p_[:,1]+=d_[1]
+            c_=((p_.min(0)+p_.max(0))/2)[:2]
+            if not any(lo_[0]<=c_[0]<=hi_[0] and lo_[1]<=c_[1]<=hi_[1] for lo_,hi_ in BIGBOX):
+                d_=RM@(c_-CEN); p_=p_.copy(); p_[:,0]+=d_[0]; p_[:,1]+=d_[1]
         if DESK and tag in STRIP_CUT_ROW and 'TEXCOORD_0' in at and p_[:,1].max()<=5.5:       # a strip with fingers below the board: shortened to where the fingers end
             uv,_=acc(j,b,at['TEXCOORD_0']); uv=uv.astype(np.float64).copy(); p_=p_.copy()
             ycut=106.68-STRIP_CUT_ROW[tag]*206.4/1602.0; low=p_[:,1]<p_[:,1].max()-1e-6
