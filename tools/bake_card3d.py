@@ -1,5 +1,5 @@
 # usage: python3 tools/bake_card3d.py DIR_WITH_GLB_FILES > src/card3d_data.h   (needs numpy and Pillow)
-# DIR must hold gus_ultrasound_rev34.glb (GF1), gus_pnp_v30.glb (InterWave), ews64.glb and adlib_gold.glb; output goes to the file given as second argument
+# DIR must hold gus_ultrasound_rev34.glb (GF1), gus_pnp_v10.glb (InterWave, made by tools/make_gus_pnp_v10.py), ews64.glb and adlib_gold.glb; output goes to the file given as second argument
 import os,sys,io,numpy as np
 sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
 from glb import *
@@ -78,7 +78,7 @@ def make_back(tag,PRIMS,QUADS):
         d.ellipse([pxx-r,pyy-r,pxx+r,pyy+r],fill=PAL[7]);r2=r*0.45;d.ellipse([pxx-r2,pyy-r2,pxx+r2,pyy+r2],fill=PAL[6])
     # silkscreen text
     big=ImageFont.load_default(size=int(4.2*sc*S))
-    txt={'GF1':('ULTRASOUND','REV 3.4','ADVANCED GRAVIS COMPUTER TECHNOLOGY LTD.'),'IW':('ULTRASOUND PnP','V3.0','ADVANCED GRAVIS COMPUTER TECHNOLOGY LTD.')}[tag]
+    txt={'GF1':('ULTRASOUND','REV 3.4','ADVANCED GRAVIS COMPUTER TECHNOLOGY LTD.'),'IW':('ULTRASOUND PnP','V1.0','ADVANCED GRAVIS COMPUTER TECHNOLOGY LTD.')}[tag]
     d.text((6*sc*S,(BY1-30)*sc*S),txt[0],fill=PAL[4],font=big);d.text((6*sc*S,(BY1-23)*sc*S),txt[1],fill=PAL[4],font=big);d.text((6*sc*S,(BY1-14)*sc*S),txt[2],fill=PAL[4],font=font)
     # gold fingers on the card edge (the quads below y = 8)
     for (x0,y0,x1,y1) in QUADS[1:]:
@@ -95,8 +95,8 @@ def make_back(tag,PRIMS,QUADS):
 
 # The photo of the Ultrasound PnP was taken tilted by about 3.1 degrees (the lettering and the gold fingers rise to the right, the right fingers sat 50 px higher than the left ones): it is turned back
 # and the small 3D parts follow it. The strips with the fingers below the board end where the fingers end (row 799 of the 828 of the photo: where the shortest group of fingers ends).
-DESKEW_DEFAULT={'IW':3.1}
-STRIP_CUT_ROW={'IW':799.0}
+DESKEW_DEFAULT={}
+STRIP_CUT_ROW={}
 def deskew_image(img,deg):
     # the photo of the card was taken slightly tilted: turn it clockwise by deg degrees about its centre (the empty corners repeat the edge pixels)
     a=np.asarray(img); pad=int(max(img.size)*0.06)
@@ -310,7 +310,7 @@ def bake_ews(tag,glb,texw,part_names=('cap_dark','chip_black','plastic_white','p
 
 if __name__=='__main__':
     out='/* 3D models of the Gravis Ultrasound (GF1, rev 3.4) and Ultrasound PnP (AMD InterWave) cards and the Terratec EWS64. GPL-3.0-or-later */\n#include <stdint.h>\n'
-    out+=bake('GF1','gus_ultrasound_rev34.glb',320)+bake('IW','gus_pnp_v30.glb',320)+bake_ews('EWS','ews64.glb',320)
+    out+=bake('GF1','gus_ultrasound_rev34.glb',320)+bake('IW','gus_pnp_v10.glb',640)+bake_ews('EWS','ews64.glb',320)
     if os.path.exists(U+'adlib_gold.glb'):                                       # the AdLib Gold card (Yamaha OPL3): the FM formats
         out+=bake_ews('GOLD','adlib_gold.glb',320,('cap_silver','cap_gold','chip_black','plastic_white','plastic_black','metal'),('ADLIB GOLD','1000 MUSIC CARD'),True)
     open(sys.argv[2] if len(sys.argv)>2 else 'src/card3d_data.h','w').write(out);print(len(out)//1024,'KB')
