@@ -140,7 +140,7 @@ static void set_loop(V *c){
 
 static void key_off(ITPlayer *p, V *c){
     c->flags |= F_KEYOFF;
-    if ((p->s->flags & 4) && c->ins) { /* ohne Volume-Envelope: Fade */ if (!(c->ins->venv.flg & 1)) c->flags |= F_FADE; }
+    if ((p->s->flags & 4) && c->ins) { /* ohne Volume-Envelope: Fade; mit Loop in der Volume-Envelope und Fadeout ebenfalls (die Envelope endet dann nie, libopenmpt) */ if (!(c->ins->venv.flg & 1) || ((c->ins->venv.flg & 2) && c->ins->fadeout)) c->flags |= F_FADE; }
     if (!c->len || !c->smp) return;
     if ((c->flags & F_SUS) && c->smp->sloop && c->smp->loop) {      /* Sustain-Loop -> normaler Loop */
         c->flags &= ~(F_SUS | F_PP); c->flags |= F_LOOP; if (c->smp->pingpong) c->flags |= F_PP;
