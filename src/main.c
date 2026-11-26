@@ -4232,7 +4232,10 @@ static void draw_info_tv(float x, float y, float w, float h) {
     if (narrow) { float need1 = 40.0f + 12 + nrow * 30.0f + 4 + 12 + (isi.nextra > 0 ? isi.nextra : 0) * 25.0f; float mx = h - top - 12 - 0.62f * need1; if (boxh > mx) boxh = mx; if (boxh < 60) boxh = 60; }      /* the model gets what the table does not need (never so much that its rows run out of the card) */
     float chh = fminf(boxh / 1.12f, 400.0f), cw = chips_width_k(ikind, chh);
     if (cw > boxw - 24) { chh *= (boxw - 24) / cw; cw = boxw - 24; }
-    chip_swing = 1; draw_chip_k(ikind, x + (boxw - cw) / 2 + 8, y + top + (boxh - chh * 1.12f) / 2 + chh * 0.06f, chh, 0.0f); chip_swing = 0;
+    /* every card is centred by what is visible: where the drawn picture sits inside its box differs by kind (measured: the vertical centre of the picture as a fraction of the height, from the top of the box) */
+    static const float vcen[9] = { 0.50f, 0.625f, 0.615f, 0.618f, 0.608f, 0.628f, 0.636f, 0.625f, 0.628f };
+    float vc = ikind >= 0 && ikind < 9 ? vcen[ikind] : 0.56f;
+    chip_swing = 1; draw_chip_k(ikind, x + (boxw - cw) / 2 + 8, y + top + boxh / 2 - vc * chh, chh, 0.0f); chip_swing = 0;
     float rx = narrow ? x + 18 : x + boxw + 12, rw = narrow ? w - 36 : w - boxw - 12 - 28;
     float k = fminf(h / 330.0f, 1.45f); if (k < 0.8f) k = 0.8f;
     if (narrow) { k = (h - top - boxh - 12) / (40.0f + 12 + nrow * 30.0f + 4 + 12 + (isi.nextra > 0 ? isi.nextra : 0) * 25.0f); if (k > 1.2f) k = 1.2f; if (k < 0.6f) k = 0.6f; }
