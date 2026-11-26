@@ -22,6 +22,7 @@ def pack4(img):
     return (f[0::2]<<4)|f[1::2]
 def make_back(tag,PRIMS,QUADS):
     global BX0,BX1,BY0,BY1
+    PAL=PAL_AWE if tag=='AWE' else globals()['PAL']
     from PIL import ImageDraw,ImageFont
     import random
     random.seed(7)
@@ -78,7 +79,7 @@ def make_back(tag,PRIMS,QUADS):
         d.ellipse([pxx-r,pyy-r,pxx+r,pyy+r],fill=PAL[7]);r2=r*0.45;d.ellipse([pxx-r2,pyy-r2,pxx+r2,pyy+r2],fill=PAL[6])
     # silkscreen text
     big=ImageFont.load_default(size=int(4.2*sc*S))
-    txt={'GF1':('ULTRASOUND','REV 3.4','ADVANCED GRAVIS COMPUTER TECHNOLOGY LTD.'),'IW':('ULTRASOUND PnP','V1.0','ADVANCED GRAVIS COMPUTER TECHNOLOGY LTD.')}[tag]
+    txt={'GF1':('ULTRASOUND','REV 3.4','ADVANCED GRAVIS COMPUTER TECHNOLOGY LTD.'),'IW':('ULTRASOUND PnP','V1.0','ADVANCED GRAVIS COMPUTER TECHNOLOGY LTD.'),'AWE':('SOUND BLASTER','AWE32','CREATIVE TECHNOLOGY LTD.')}[tag]
     d.text((6*sc*S,(BY1-30)*sc*S),txt[0],fill=PAL[4],font=big);d.text((6*sc*S,(BY1-23)*sc*S),txt[1],fill=PAL[4],font=big);d.text((6*sc*S,(BY1-14)*sc*S),txt[2],fill=PAL[4],font=font)
     # gold fingers on the card edge (the quads below y = 8)
     for (x0,y0,x1,y1) in QUADS[1:]:
