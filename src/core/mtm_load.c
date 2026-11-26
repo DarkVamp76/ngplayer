@@ -66,8 +66,30 @@ int xmtm_load(XSong *s, const uint8_t *b, size_t n){
                 if (q[0] >> 2) x->note = (uint8_t)((q[0] >> 2) + 24);       /* same note numbering as the MOD loader's period index */
                 x->inst = (uint8_t)(((q[0] & 3) << 4) | (q[1] >> 4));
                 x->eff = q[1] & 15; x->par = q[2];
+                /* what MultiTracker does not support (libopenmpt drops it): 8xx panning (only E8x), E0x/E3x/E4x/E6x/E7x/EFx; Axy slides only one way (the upper nibble wins) */
+                if (x->eff == 0x0A) { if (x->par & 0xF0) x->par &= 0xF0; else x->par &= 0x0F; }
+                else if (x->eff == 0x08) x->eff = x->par = 0;
+                else if (x->eff == 0x0E) switch (x->par & 0xF0) { case 0x00: case 0x30: case 0x40: case 0x60: case 0x70: case 0xF0: x->eff = x->par = 0; break; }
             }
             if (rows < 64) { XCell *x = &s->pat[((size_t)p * 64 + rows - 1) * nch + c]; if (!x->eff && c == 0) { x->eff = 0x0D; x->par = 0; } }   /* short pattern: break after the last row */
         }
+    /* MultiTracker: a speed command resets the tempo to 125 and a tempo command the speed to 6. Players of the time did not do that and many songs rely on theirs, so libopenmpt
+     * keeps the ProTracker way when a speed and a tempo command ever share a row, and the MultiTracker way when they never do: then every row with such a command gets the
+     * opposite one added in the first channel that has no effect there. */
+    {
+        int hasS = 0, hasT = 0, same = 0;
+        for (unsigned p = 0; p < npat; p++) for (unsigned r = 0; r < 64; r++) {
+            int rs = 0, rt = 0;
+            for (unsigned c = 0; c < nch; c++) { const XCell *x = &s->pat[((size_t)p * 64 + r) * nch + c]; if (x->eff == 0x0F) { if (x->par < 0x20) rs = 1; else rt = 1; } }
+            hasS |= rs; hasT |= rt; if (rs && rt) same = 1;
+        }
+        if (hasS && hasT && !same)
+            for (unsigned p = 0; p < npat; p++) for (unsigned r = 0; r < 64; r++) {
+                int kind = 0;
+                for (unsigned c = 0; c < nch && !kind; c++) { const XCell *x = &s->pat[((size_t)p * 64 + r) * nch + c]; if (x->eff == 0x0F) kind = x->par < 0x20 ? 1 : 2; }
+                if (!kind) continue;
+                for (unsigned c = 0; c < nch; c++) { XCell *x = &s->pat[((size_t)p * 64 + r) * nch + c]; if (!x->eff && !x->par) { x->eff = 0x0F; x->par = kind == 1 ? 125 : 6; break; } }
+            }
+    }
     return 0;
 }
