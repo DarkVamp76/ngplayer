@@ -4,6 +4,7 @@
 #include "core.h"
 #include "tables.h"
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 
 static unsigned rd16(const uint8_t *p){ return p[0] | (p[1] << 8); }
@@ -38,7 +39,7 @@ int xmtm_load(XSong *s, const uint8_t *b, size_t n){
         const uint8_t *h = b + so + (size_t)(i - 1) * 37; XSmp *m = &s->smp[i];
         uint32_t len = rd32(h + 22), ls = rd32(h + 26), le = rd32(h + 30);
         int is16 = h[36] & 1;
-        m->vol = h[35] > 64 ? 64 : h[35]; m->c2spd = ngp_finetune_c2spd[h[34] & 15];
+        m->vol = h[35] > 64 ? 64 : h[35]; m->c2spd = ((int8_t)h[34] >= -8 && (int8_t)h[34] <= 7) ? ngp_finetune_c2spd[h[34] & 15] : (uint32_t)(8363.0 * pow(2.0, (int8_t)h[34] / 96.0) + 0.5);   /* MultiTracker allows the whole signed byte (1/8 semitone per step): the MOD table inside -8..7 (fits libopenmpt best there), the formula beyond */
         if (!len) continue;
         size_t avail = d < n ? n - d : 0, take = len < avail ? len : avail;
         if (is16) { len >>= 1; ls >>= 1; le >>= 1; take >>= 1; }
@@ -47,9 +48,10 @@ int xmtm_load(XSong *s, const uint8_t *b, size_t n){
         m->data = calloc((size_t)len * (is16 ? 2 : 1) + 4, 1);
         if (!m->data) return -5;
         m->is16 = is16;
-        if (is16) { int16_t *w = (int16_t *)m->data; for (uint32_t k = 0; k < take; k++) w[k] = (int16_t)rd16(b + d + 2 * k); }
+        if (is16) { int16_t *w = (int16_t *)m->data; for (uint32_t k = 0; k < take; k++) w[k] = (int16_t)(rd16(b + d + 2 * k) ^ 0x8000); }      /* 16 bit samples are unsigned too (libopenmpt) */
         else for (uint32_t k = 0; k < take; k++) m->data[k] = (int8_t)(b[d + k] ^ 0x80);      /* unsigned 8 bit */
-        if (le > ls && le > 2) { m->loop = 1; m->ls = ls; m->le = le > len ? len : le; if (m->ls >= m->le) m->loop = 0; }
+        { uint32_t e = (le > 1 ? le : 1) - 1; if (e > len) e = len; uint32_t st = ls; if (st + 4 >= e) st = e = 0;      /* libopenmpt: the loop end is one less, and a loop of 4 samples or less is none */
+          if (e > 2) { m->loop = 1; m->ls = st; m->le = e; } }
         d += (size_t)len * (is16 ? 2 : 1);
     }
 
