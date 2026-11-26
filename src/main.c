@@ -545,7 +545,7 @@ static int sw_idx = -1; static float sw_off, sw_tgt;       /* swipe actions of a
 static int ctx_idx = -1, ctx_favk = -1; static float ctx_x, ctx_y;      /* ctx_favk: the menu of an entry of the FAV tab (Share, Remove favorite) */        /* context menu ("Share") of a Mod Archive entry in the list */
 static float toast_t; static char toast_txt[48];
 /* ---- Favorites: Mod Archive modules (id + title), the FAV tab of the list. favorites.txt next to settings.ini ("id<TAB>title" per line), in the browser localStorage ---- */
-typedef struct { int id; char title[96]; } fav_t;
+typedef struct { int id; char title[96]; char path[512]; } fav_t;      /* id > 0: a Mod Archive module; id == 0: a file on the disk (path; gone = removed from the favorites) */
 #define FAV_MAX 512
 static fav_t g_fav[FAV_MAX]; static int g_nfav;
 static int settings_path(char *out, size_t n, int mkdir_p);
@@ -555,18 +555,19 @@ static int ma_busy(void);
 EM_JS(void, web_fav_store, (const char *s), { try { localStorage.setItem('ngp.favs', UTF8ToString(s)); } catch (e) {} });
 EM_JS(void, web_fav_fetch, (char *buf, int cap), { var s = ''; try { s = localStorage.getItem('ngp.favs') || ''; } catch (e) {} stringToUTF8(s, buf, cap); });
 #endif
-static int fav_find(int id) { for (int i = 0; i < g_nfav; i++) if (g_fav[i].id == id) return i; return -1; }
+static int fav_find(int id) { if (id <= 0) return -1; for (int i = 0; i < g_nfav; i++) if (g_fav[i].id == id) return i; return -1; }
+static int fav_find_path(const char *p) { if (!p || !*p) return -1; for (int i = 0; i < g_nfav; i++) if (g_fav[i].id == 0 && !strcmp(g_fav[i].path, p)) return i; return -1; }
 static void fav_save(void) {
 #ifdef __EMSCRIPTEN__
     static char t[FAV_MAX * 112 + 16]; size_t n = 0; t[0] = 0;
-    for (int i = 0; i < g_nfav; i++) n += (size_t)snprintf(t + n, sizeof t - n, "%d\t%s\n", g_fav[i].id, g_fav[i].title);
+    for (int i = 0; i < g_nfav; i++) if (g_fav[i].id > 0) n += (size_t)snprintf(t + n, sizeof t - n, "%d\t%s\n", g_fav[i].id, g_fav[i].title);
     web_fav_store(t);
 #else
     char path[1000], *sl; FILE *f;
     if (!settings_path(path, sizeof path, 1) || !(sl = strrchr(path, '/'))) return;
     snprintf(sl + 1, sizeof path - (size_t)(sl + 1 - path), "favorites.txt");
     if (!(f = fopen(path, "w"))) return;
-    for (int i = 0; i < g_nfav; i++) fprintf(f, "%d\t%s\n", g_fav[i].id, g_fav[i].title);
+    for (int i = 0; i < g_nfav; i++) { if (g_fav[i].id > 0) fprintf(f, "%d\t%s\n", g_fav[i].id, g_fav[i].title); else fprintf(f, "F\t%s\t%s\n", g_fav[i].path, g_fav[i].title); }      /* "F<TAB>path<TAB>title": a file (older versions skip the line) */
     fclose(f);
 #endif
 }
@@ -583,11 +584,21 @@ static void fav_load(void) {
     if (!settings_path(path, sizeof path, 0) || !(sl = strrchr(path, '/'))) return;
     snprintf(sl + 1, sizeof path - (size_t)(sl + 1 - path), "favorites.txt");
     if (!(f = fopen(path, "r"))) return;
+    int gone = 0;
     while (fgets(line, sizeof line, f) && g_nfav < FAV_MAX) {
-        char *tab = strchr(line, '\t'), *nl = strpbrk(line, "\r\n"); int id = atoi(line); if (nl) *nl = 0; if (id <= 0) continue;
-        g_fav[g_nfav].id = id; snprintf(g_fav[g_nfav].title, sizeof g_fav[g_nfav].title, "%s", tab && tab[1] ? tab + 1 : "ModArchive"); g_nfav++;
+        char *nl = strpbrk(line, "\r\n"); if (nl) *nl = 0;
+        if (line[0] == 'F' && line[1] == '\t') {                  /* a file on the disk: kept only while it exists */
+            char *pa = line + 2, *tb = strchr(pa, '\t'); if (tb) *tb++ = 0;
+            if (!*pa) continue;
+            if (access(pa, R_OK)) { gone = 1; continue; }
+            fav_t *e = &g_fav[g_nfav]; e->id = 0; snprintf(e->path, sizeof e->path, "%s", pa); snprintf(e->title, sizeof e->title, "%s", tb && *tb ? tb : "file"); g_nfav++;
+            continue;
+        }
+        char *tab = strchr(line, '\t'); int id = atoi(line); if (id <= 0) continue;
+        g_fav[g_nfav].id = id; g_fav[g_nfav].path[0] = 0; snprintf(g_fav[g_nfav].title, sizeof g_fav[g_nfav].title, "%s", tab && tab[1] ? tab + 1 : "ModArchive"); g_nfav++;
     }
     fclose(f);
+    if (gone) fav_save();                                          /* files that are no longer there are taken out of the favorites file too */
 #endif
 }
 static void fav_toggle(int id, const char *title) {                  /* a favorite on / off (the title is what the FAV tab shows) */
@@ -600,13 +611,39 @@ static void fav_toggle(int id, const char *title) {                  /* a favori
     }
     toast_t = 1.8f; fav_save();
 }
+static int fav_find_entry(int i) { if (i < 0 || i >= npl) return -1; return pl[i].ma_id > 0 ? fav_find(pl[i].ma_id) : fav_find_path(pl[i].path); }      /* the favorite of a list entry (a Mod Archive id or the path of a file) */
+static void fav_remove_k(int k) {
+    if (k < 0 || k >= g_nfav) return;
+    memmove(g_fav + k, g_fav + k + 1, sizeof(fav_t) * (size_t)(g_nfav - k - 1)); g_nfav--;
+    snprintf(toast_txt, sizeof toast_txt, "Removed from favorites"); toast_t = 1.8f; fav_save();
+}
+static void fav_toggle_entry(int idx) {          /* a list entry: favorite on / off (a Mod Archive module by its id, a file by its path) */
+    if (idx < 0 || idx >= npl) return;
+    if (pl[idx].ma_id > 0) { fav_toggle(pl[idx].ma_id, pl[idx].label); return; }
+#ifndef __EMSCRIPTEN__
+    if (!pl[idx].path || !pl[idx].path[0]) return;
+    char ab[PATH_MAX]; const char *pa = realpath(pl[idx].path, ab) ? ab : pl[idx].path;
+    int k = fav_find_path(pa);
+    if (k >= 0) { fav_remove_k(k); return; }
+    if (g_nfav >= FAV_MAX || strlen(pa) >= sizeof g_fav[0].path) return;
+    fav_t *e = &g_fav[g_nfav]; e->id = 0; snprintf(e->path, sizeof e->path, "%s", pa); snprintf(e->title, sizeof e->title, "%s", pl[idx].label);
+    for (char *c = e->title; *c; c++) if (*c == '\t' || *c == '\n' || *c == '\r') *c = ' ';
+    g_nfav++; snprintf(toast_txt, sizeof toast_txt, "Added to favorites"); toast_t = 1.8f; fav_save();
+#endif
+}
 #define CTX_W 150.0f
 #define CTX_ROW 30.0f
 /* The list menu: Share for Mod Archive entries, Remove for all. Items are numbered 0 Share, 3 Remove (the Mod Archive page is a link on the Info page). */
 static int ctx_acts(int idx, int *act) {
     int n = 0, ma = idx >= 0 && idx < npl && pl[idx].ma_id;
-    if (ma) act[n++] = 0;                                     /* Share; the Mod Archive page is a link in the Info window now */
-    if (ma) act[n++] = 4;                                     /* add / remove favorite */
+#ifdef __EMSCRIPTEN__
+    if (ma) {
+#endif
+    act[n++] = 0;                                             /* Share (a Mod Archive module: the link, a file: its path); the Mod Archive page is a link in the Info window now */
+    act[n++] = 4;                                             /* add / remove favorite (also files, not in the browser) */
+#ifdef __EMSCRIPTEN__
+    }
+#endif
     act[n++] = 3;
     return n;
 }
@@ -1864,12 +1901,23 @@ static void fav_play(int id) {
     if (ma_busy()) { snprintf(toast_txt, sizeof toast_txt, "Still loading ..."); toast_t = 1.5f; return; }
     snprintf(toast_txt, sizeof toast_txt, "Loading the favorite ..."); toast_t = 2.0f; ma_start_id(id);
 }
+/* a favorite plays: a Mod Archive module as above, a file from its path (it joins the list; a file that is gone is taken out of the favorites) */
+static void fav_play_k(int k) {
+    if (k < 0 || k >= g_nfav) return;
+    if (g_fav[k].id > 0) { fav_play(g_fav[k].id); return; }
+#ifndef __EMSCRIPTEN__
+    if (access(g_fav[k].path, R_OK)) { snprintf(toast_txt, sizeof toast_txt, "File is gone: favorite removed"); toast_t = 2.5f; memmove(g_fav + k, g_fav + k + 1, sizeof(fav_t) * (size_t)(g_nfav - k - 1)); g_nfav--; fav_save(); return; }
+    for (int i = 0; i < npl; i++) if (pl[i].path && !strcmp(pl[i].path, g_fav[k].path)) { play_index(i); return; }
+    add_path(g_fav[k].path, 0);
+    for (int i = 0; i < npl; i++) if (pl[i].path && !strcmp(pl[i].path, g_fav[k].path)) { play_index(i); return; }
+#endif
+}
 /* the FAV tab is the active list: next / previous and the end of a song step through the favorites (one that is not in the list yet is fetched from the Mod Archive).
  * 0 = not in the favorites mode (the caller does what it did before) */
 static int fav_step(int d) {
-    if (g_pltab != 2 || g_nfav <= 0 || cur < 0 || cur >= npl || pl[cur].ma_id <= 0) return 0;
-    int k = fav_find(pl[cur].ma_id); if (k < 0) return 0;
-    fav_play(g_fav[((k + d) % g_nfav + g_nfav) % g_nfav].id);
+    if (g_pltab != 2 || g_nfav <= 0 || cur < 0 || cur >= npl) return 0;
+    int k = fav_find_entry(cur); if (k < 0) return 0;
+    fav_play_k(((k + d) % g_nfav + g_nfav) % g_nfav);
     return 1;
 }
 /* the rows of the FAV tab: title, #id and an x that removes the favorite (always on touch, on hover with a pointer); a click / tap plays it. use_tap: the tap flag (touch) instead of clicked() */
@@ -1877,11 +1925,11 @@ static void fav_rows(float x, float ry, float w, float rh, int first, int vis_ro
     if (g_nfav <= 0) { text(x + 18, ry + 6, 13, FAINT, "No favorites yet."); text(x + 18, ry + 26, 12, FAINT, "Right click or hold an entry: Add favorite (key S)"); return; }
     for (int r = 0; r < vis_rows + 1 && first + r < g_nfav; r++) {
         int k = first + r; float yy = ry + r * rh; if (yy + rh > ybot) break;
-        int isc = cur >= 0 && cur < npl && pl[cur].ma_id == g_fav[k].id, hv = !g_mobile && hit(x + 8, yy, w - 16, rh);
+        int isc = cur >= 0 && cur < npl && fav_find_entry(cur) == k, hv = !g_mobile && hit(x + 8, yy, w - 16, rh);
         if (isc) rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(VC[0], 0.16f)); else if (hv) rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(EDGE, 0.25f));
         char lab[128]; snprintf(lab, sizeof lab, "%s", g_fav[k].title); fit_text(lab, w - 36 - 96, 14);
         text(x + 20, yy + 5, 14, isc ? TXT : DIM, lab);
-        char idb[16]; snprintf(idb, sizeof idb, "#%d", g_fav[k].id);
+        char idb[16]; if (g_fav[k].id > 0) snprintf(idb, sizeof idb, "#%d", g_fav[k].id); else { int ff = fmt_from_name(g_fav[k].path); snprintf(idb, sizeof idb, "%s", ff > 0 && ff < FMT_COUNT ? FMT_NAME[ff] : "FILE"); }
         text_right(x + w - 44, yy + 5, 14, VC[1], idb);
         float xx = x + w - 38; int xhv = hit(xx, yy + 2, 26, rh - 6);
         if (hv || g_mobile) { if (xhv) rrect(xx, yy + 3, 26, rh - 8, 6, alpha(WARN, 0.22f)); text(xx + 7, yy + 5, 15, xhv ? WARN : alpha(WARN, 0.55f), "\xd7"); }
@@ -1894,8 +1942,8 @@ static void fav_rows(float x, float ry, float w, float rh, int first, int vis_ro
             if (ctx_y + 2 * CTX_ROW + 2 > view_h - 4) ctx_y = view_h - 4 - (2 * CTX_ROW + 2);
             break;
         }
-        if (onx) { fav_toggle(g_fav[k].id, g_fav[k].title); if (!use_tap) click = 0; break; }
-        if (onrow) { fav_play(g_fav[k].id); if (!use_tap) click = 0; }
+        if (onx) { fav_remove_k(k); if (!use_tap) click = 0; break; }
+        if (onrow) { fav_play_k(k); if (!use_tap) click = 0; }
     }
 }
 
@@ -2048,8 +2096,8 @@ static void tv_ctx_act(void) {
 static void song_end_advance(void) {        /* song ended -> next entry (a new random one at the end of the list in random mode) */
     if (!g_ended || cur < 0 || cur >= npl) return;
     if (g_rpt == 2) { play_index_sub(cur, g_open_sub); return; }                      /* RPT 1: the same song again */
-    if (!g_rand && g_pltab == 2 && g_nfav > 0 && pl[cur].ma_id > 0 && fav_find(pl[cur].ma_id) >= 0) {        /* FAV tab: the favorites play through (RPT: again from the first one), then it stops */
-        if (fav_find(pl[cur].ma_id) + 1 < g_nfav || g_rpt == 1) fav_step(1);
+    if (!g_rand && g_pltab == 2 && g_nfav > 0 && fav_find_entry(cur) >= 0) {        /* FAV tab: the favorites play through (RPT: again from the first one), then it stops */
+        if (fav_find_entry(cur) + 1 < g_nfav || g_rpt == 1) fav_step(1);
         return;
     }
     if (g_rpt == 1) { next_prev(1); return; }                                       /* RPT: the next song, after the last one the first (also with a single song) */
@@ -2605,6 +2653,7 @@ static int sw_drag, sw_nl = 1, sw_axis;                  /* a finger moves the r
 static float sw_base, sw_rw = 272, sw_px0, sw_apy0;
 static void share_link(int idx);
 static void share_id(int id);
+static void share_path(const char *path);
 static void sw_close(void) { sw_tgt = 0; sw_drag = 0; if (sw_off == 0) sw_idx = -1; }
 static void sw_step(void) {                              /* once per frame: the row slides to where it settles */
     if (sw_idx < 0 || sw_drag) return;
@@ -2820,7 +2869,7 @@ static void draw_playlist_tv(float x, float y, float w, float h) {
         if (i == cur) { rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(VC[0], 0.30f)); rect(x + 8, yy + 4, 3, rh - 10, VC[0]); }
         char lb[128]; snprintf(lb, sizeof lb, "%s", pl[i].label); fit_text(lb, w - 52, 15);
         text(x + 22, yy + (rh - 15) / 2 - 2, 15, i == cur ? TXT : DIM, lb);
-        if (pl[i].ma_id > 0 && fav_find(pl[i].ma_id) >= 0) text_right(x + w - 20, yy + (rh - 15) / 2 - 2, 15, WARN, "*");     /* a favorite */
+        if (fav_find_entry(i) >= 0) text_right(x + w - 20, yy + (rh - 15) / 2 - 2, 15, WARN, "*");     /* a favorite */
     }
     if (npl > vis) {   /* scrollbar */
         float th = area * (float)vis / (float)npl; if (th < 24) th = 24;
@@ -2956,7 +3005,7 @@ static void draw_ui(double t) {
         draw_rand_chip(x + 18 + 38 + 6, y + h - 44, 38);
         draw_dice(x + w - 50, y + h - 38, 18.0f);
         if (npl && !nvis && g_pltab != 2) text(x + 18, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
-        if (!npl) {
+        if (!npl && !(g_pltab == 2 && g_nfav > 0)) {        /* (not behind the favorites) */
             text(x + 18, y + 60, 14, DIM, "No files.");
             {   /* word-wrapped format list: the sidebar can be narrow */
                 const char *fl = "MOD, S3M, STM, PTM, ULT, 669, MTM, MED, PSM, FAR, MDL, XM, IT, DMF or TFMX";
@@ -3207,7 +3256,7 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
             play_index(i); g_plopen = 0; was_open = 0; return;
         }
     }
-    if (!npl) text(x + 16, y + 64, 14, DIM, "No files.");
+    if (!npl && !(g_pltab == 2 && g_nfav > 0)) text(x + 16, y + 64, 14, DIM, "No files.");
     else if (!nvis && g_pltab != 2) text(x + 16, ry + 6, 13, FAINT, g_pltab ? "Nothing loaded from The Mod Archive yet." : "No local files.");
 }
 
@@ -4128,7 +4177,16 @@ static void web_on_gesture(int kind, const char *arg) {
 #endif
 
 /* ---- Share: right click on a Mod Archive entry -> menu "Share" copies https://ngplayer.org/player/#<ID> to the clipboard ---- */
-static void share_link(int idx) { share_id(pl[idx].ma_id); }
+static void share_link(int idx) { if (pl[idx].ma_id > 0) share_id(pl[idx].ma_id); else share_path(pl[idx].path); }
+static void share_path(const char *path) {        /* a file: its full path goes to the clipboard */
+#ifndef __EMSCRIPTEN__
+    char ab[PATH_MAX]; if (!path || !*path) return;
+    SDL_SetClipboardText(realpath(path, ab) ? ab : path);
+    snprintf(toast_txt, sizeof toast_txt, "Path copied"); toast_t = 2.0f;
+#else
+    (void)path;
+#endif
+}
 static void share_id(int id) {
     char url[96]; snprintf(url, sizeof url, "https://ngplayer.org/player/#%d", id);
 #ifdef __EMSCRIPTEN__
@@ -4229,7 +4287,7 @@ static void draw_ctx_menu(void) {
         }
     }
     if (ctx_idx >= 0 && ctx_idx < npl) {
-        const char *item[5] = { "Share", "", "Info", "Remove", ctx_idx < npl && fav_find(pl[ctx_idx].ma_id) >= 0 ? "Remove favorite" : "Add favorite" };
+        const char *item[5] = { "Share", "", "Info", "Remove", fav_find_entry(ctx_idx) >= 0 ? "Remove favorite" : "Add favorite" };
         int act[5], n = ctx_acts(ctx_idx, act);
         rrect(ctx_x - 1, ctx_y - 1, CTX_W + 2, CTX_H(ctx_idx) + 2, 9, alpha(EDGE, 0.9f));
         rrect(ctx_x, ctx_y, CTX_W, CTX_H(ctx_idx), 8, CARDHI);
@@ -4599,7 +4657,7 @@ static void iter(void) {
 #endif
                 switch (e.key.keysym.sym) {
                 case SDLK_o: ma_show(1); break;
-                case SDLK_s: if (cur >= 0 && cur < npl && pl[cur].ma_id > 0) fav_toggle(pl[cur].ma_id, pl[cur].label); break;     /* the module that plays: favorite on / off */
+                case SDLK_s: fav_toggle_entry(cur); break;     /* the song that plays: favorite on / off */
                 case SDLK_h: midi_toggle_output(); break;                              /* MIDI files: the SoundFont or the MIDI hardware */
                 case SDLK_v: { int t = 0; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % NVIEW]; view_persist(); } break;
 #if !(defined(__APPLE__) && TARGET_OS_TV)
@@ -4751,7 +4809,7 @@ static void iter(void) {
             float cmx = g_mobile ? mx : (float)clickx, cmy = g_mobile ? my : (float)clicky;
             if (ctx_favk < g_nfav && cmx >= ctx_x && cmx < ctx_x + CTX_W && cmy >= ctx_y && cmy < ctx_y + 2 * CTX_ROW + 2) {
                 int jj = (int)((cmy - ctx_y - 1) / CTX_ROW);
-                if (jj == 0) share_id(g_fav[ctx_favk].id); else if (jj == 1) fav_toggle(g_fav[ctx_favk].id, g_fav[ctx_favk].title);
+                if (jj == 0) { if (g_fav[ctx_favk].id > 0) share_id(g_fav[ctx_favk].id); else share_path(g_fav[ctx_favk].path); } else if (jj == 1) fav_remove_k(ctx_favk);
             }
             ctx_favk = -1; click = 0; lp_swallow = 1;
         }
@@ -4761,7 +4819,7 @@ static void iter(void) {
             if (cmx >= ctx_x && cmx < ctx_x + CTX_W && cmy >= ctx_y && cmy < ctx_y + CTX_H(ctx_idx) && ctx_idx < npl) {
                 int act[5], na = ctx_acts(ctx_idx, act), jj = (int)((cmy - ctx_y - 1) / CTX_ROW);
                 int j = jj >= 0 && jj < na ? act[jj] : -1;                                 /* 0 Share, 3 Remove, 4 favorite */
-                if (j == 0) share_link(ctx_idx); else if (j == 4) fav_toggle(pl[ctx_idx].ma_id, pl[ctx_idx].label); else if (j == 3) pl_remove(ctx_idx);
+                if (j == 0) share_link(ctx_idx); else if (j == 4) fav_toggle_entry(ctx_idx); else if (j == 3) pl_remove(ctx_idx);
             }
             ctx_idx = -1; click = 0; lp_swallow = 1;
         }
@@ -4982,7 +5040,7 @@ int main(int argc, char **argv) {
 #endif
     if (npl && !g_launch_bg && !(pl[0].ma_id > 0 && access(pl[0].path, R_OK))) play_index(0);
 #ifndef __EMSCRIPTEN__
-    else if (!npl && g_nfav > 0 && !g_launch_bg && (!shot || getenv("NGPLAYER_TEST_FAVPLAY"))) { g_pltab = 2; fav_play(g_fav[0].id); }     /* no files and favorites: the favorites play (the first one), the list of files stays empty */
+    else if (!npl && g_nfav > 0 && !g_launch_bg && (!shot || getenv("NGPLAYER_TEST_FAVPLAY"))) { g_pltab = 2; fav_play_k(0); }     /* no files and favorites: the favorites play (the first one), the list of files stays empty */
 #endif
 
     running = 1;
