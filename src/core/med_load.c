@@ -23,9 +23,19 @@ int med_probe(const uint8_t *b, size_t n){
 
 typedef struct { int first, cnt; } BlkMap;
 
+static int g_8ch, g_soft;       /* the song: 5-8 channel mode (flags 0x40), mixing mode (flags2 0x80) */
+/* the BPM of a MED tempo value, as libopenmpt reads it (MMDTempoToBPM) */
+static double mmd_bpm(int v, int bpm, int rpb){
+    static const int t8[10] = { 179, 164, 152, 141, 131, 123, 116, 110, 104, 99 };
+    if (bpm && !g_8ch) return v < 7 ? 111.5 : v * rpb / 4.0;
+    if (g_8ch && v > 0) return t8[(v > 10 ? 10 : v) - 1];
+    if (!g_soft && v > 0 && v <= 10) return (6.0 * 1773447.0 / 14500.0) / v;
+    if (g_soft && v < 8) return 157.86;
+    return v / 0.264;
+}
 static int conv_tempo(int v, int bpm, int rpb){
-    int t = bpm ? (v * rpb + 2) / 4 : (v * 125 + 16) / 33;
-    return t < 0x21 ? 0x21 : t > 0xFF ? 0xFF : t;
+    int t = v < 3 ? 0x70 : (int)(mmd_bpm(v, bpm, rpb) + 0.5);       /* F01 and F02: a bug of OctaMED that libopenmpt keeps (112 BPM) */
+    return t < 0x20 ? 0x20 : t > 0xFF ? 0xFF : t;
 }
 
 static void conv_fx(XCell *x, int e, int p, int hexvol, int bpm, int rpb, const BlkMap *map, int nmap){
@@ -40,8 +50,7 @@ static void conv_fx(XCell *x, int e, int p, int hexvol, int bpm, int rpb, const 
     case 0x0C: { int v = hexvol ? p : (p >> 4) * 10 + (p & 15); if (v > 64) v = 64; x->eff = 0x0C; x->par = (uint8_t)v; } break;
     case 0x0F:
         if (p == 0) { x->eff = 0x0D; x->par = 0; }
-        else if (!bpm && p <= 10) { x->eff = 0x0F; x->par = (uint8_t)p; }                /* non-BPM mode: 1..10 = ticks per row */
-        else if (p <= 0xF0) { x->eff = 0x0F; x->par = (uint8_t)conv_tempo(p, bpm, rpb); }
+        else if (p <= 0xF0) { int t = conv_tempo(p, bpm, rpb); if (t > 0x20) { x->eff = 0x0F; x->par = (uint8_t)t; } else { x->eff = 0x16; x->par = (uint8_t)t; } }   /* (0x0F with 0x20 or less would be a speed) */
         else if (p == 0xFF) { x->eff = 0x0C; x->par = 0; }
         else if (p == 0xF1) { x->eff = 0x0E; x->par = 0x93; }          /* play note twice (approx.: retrigger every 3 ticks) */
         else if (p == 0xF2) { x->eff = 0x0E; x->par = 0xD3; }
@@ -79,10 +88,9 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
 
     for (int i = 0; i < 32; i++) { s->chen[i] = 1; s->chpan[i] = -1; }
     s->speed = tempo2 ? (int)tempo2 : 6;
-    s->tempo = bpm ? (int)(deftempo * rpb / 4) : (int)(deftempo * 125 / 33);
-    if (s->tempo < 0x21) s->tempo = 0x21;
-    if (s->tempo > 0xFF) s->tempo = 0xFF;
-    if (!bpm && deftempo <= 10) { s->speed = (int)deftempo ? (int)deftempo : 6; s->tempo = 125; }  /* tiny old-style values = PT speeds */
+    g_8ch = (flags & 0x40) != 0; g_soft = (flags2 & 0x80) != 0;
+    { double t = mmd_bpm((int)deftempo, bpm, rpb); s->tempo_exact = t; s->tempo = (int)(t + 0.5); if (s->tempo < 0x20) s->tempo = 0x20; if (s->tempo > 0xFF) s->tempo = 0xFF; if (t < 32.0 || t > 255.0) s->tempo_exact = 0; }
+    if (s->speed < 1) s->speed = 1; if (s->speed > 32) s->speed = 32;
 
     /* block table + channel count */
     uint32_t bo[1024]; unsigned bl[1024], bt[1024]; int nch = 0;
