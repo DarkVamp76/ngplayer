@@ -93,16 +93,41 @@ def make_back(tag,PRIMS,QUADS):
     if os.environ.get('BACK_PREVIEW'): Image.fromarray(q,'P').convert('RGB') if False else im.save(os.environ['BACK_PREVIEW']+tag+'.png')
     return q,[(core[0][0],8.0,core[1][0],core[1][1])]+[(a,b,c,dd) for a,b,c,dd in QUADS[1:]],PAL
 
+# The photo of the Ultrasound PnP was taken tilted by about 3.1 degrees (the lettering and the gold fingers rise to the right, the right fingers sat 50 px higher than the left ones): it is turned back
+# and the small 3D parts follow it. The strips with the fingers below the board end where the fingers end (row 799 of the 828 of the photo: where the shortest group of fingers ends).
+DESKEW_DEFAULT={'IW':3.1}
+STRIP_CUT_ROW={'IW':799.0}
+def deskew_image(img,deg):
+    # the photo of the card was taken slightly tilted: turn it clockwise by deg degrees about its centre (the empty corners repeat the edge pixels)
+    a=np.asarray(img); pad=int(max(img.size)*0.06)
+    big=Image.fromarray(np.pad(a,((pad,pad),(pad,pad),(0,0)),mode='edge'))
+    r=big.rotate(-deg,resample=Image.BICUBIC,center=(big.size[0]/2,big.size[1]/2))
+    return r.crop((pad,pad,pad+img.size[0],pad+img.size[1]))
 def bake(tag,glb,texw):
     j,b=load(U+glb)
+    BMIN=BMAX=None
+    DESK=float(os.environ.get('DESKEW_'+tag,str(DESKEW_DEFAULT.get(tag,0))))        # degrees: turn the photo clockwise; the 3D parts follow (their centres, not their orientation)
+    if DESK:
+        th_=np.radians(DESK); RM=np.array([[np.cos(th_),np.sin(th_)],[-np.sin(th_),np.cos(th_)]])-np.eye(2); CEN=np.array([103.2,53.34])      # the centre of the photo in model units
     M=np.array(j['nodes'][0]['matrix']).reshape(4,4).T
     V=[];VC=[];I=[];pal=[];TV=[];TUV=[];TI=[];PRIMS=[];QUADS=[]
     for ni,n in enumerate(j['nodes']):
         m=j['meshes'][n['mesh']];pr=m['primitives'][0];at=pr['attributes']
         p_,_=acc(j,b,at['POSITION']);ia,_=acc(j,b,pr['indices'])
         p_=p_.astype(np.float64)
+        if DESK:
+            BMIN=p_.min(0) if BMIN is None else np.minimum(BMIN,p_.min(0)); BMAX=p_.max(0) if BMAX is None else np.maximum(BMAX,p_.max(0))      # the frame of the card stays what the original model gave
+        if DESK and 'TEXCOORD_0' not in at and max(p_.max(0)[0]-p_.min(0)[0],p_.max(0)[1]-p_.min(0)[1])<40:       # the small parts follow the photo (the slot bracket and the memory module are big: they stay)
+            d_=RM@(((p_.min(0)+p_.max(0))/2)[:2]-CEN); p_=p_.copy(); p_[:,0]+=d_[0]; p_[:,1]+=d_[1]
+        if DESK and tag in STRIP_CUT_ROW and 'TEXCOORD_0' in at and p_[:,1].max()<=5.5:       # a strip with fingers below the board: shortened to where the fingers end
+            uv,_=acc(j,b,at['TEXCOORD_0']); uv=uv.astype(np.float64).copy(); p_=p_.copy()
+            ycut=106.68-STRIP_CUT_ROW[tag]*206.4/1602.0; low=p_[:,1]<p_[:,1].max()-1e-6
+            p_[low,1]=ycut; uv[low,1]=STRIP_CUT_ROW[tag]/828.0
+            uv_override=uv
+        else: uv_override=None
         if 'TEXCOORD_0' in at:
             uv,_=acc(j,b,at['TEXCOORD_0']);base=len(TV)
+            if uv_override is not None: uv=uv_override
             for k in range(len(p_)): TV.append(p_[k]);TUV.append(uv[k])
             TI+= [base+int(i) for i in ia]
             QUADS.append((p_[:,0].min(),p_[:,1].min(),p_[:,0].max(),p_[:,1].max()))
@@ -115,10 +140,13 @@ def bake(tag,glb,texw):
             PRIMS.append((p_.min(0),p_.max(0),col))
     V=np.array(V);TV=np.array(TV);TUV=np.array(TUV,dtype=np.float64)
     allp=np.vstack([V,TV]);lo=allp.min(0);hi=allp.max(0)
+    if DESK: lo,hi=BMIN,BMAX
     cx,cy=(lo[0]+hi[0])/2,(lo[1]+hi[1])/2;cz=0.8
     half=(hi[0]-lo[0])/2
     def quant(P): return np.round(np.column_stack([(P[:,0]-cx)/half,(P[:,1]-cy)/half,(P[:,2]-cz)/half])*Q).astype(int).flatten()
-    img_bv=j['bufferViews'][j['images'][0]['bufferView']];img=Image.open(io.BytesIO(b[img_bv.get('byteOffset',0):img_bv.get('byteOffset',0)+img_bv['byteLength']])).convert('RGB');th=int(round(texw*img.height/img.width));img=img.resize((texw,th),Image.LANCZOS)
+    img_bv=j['bufferViews'][j['images'][0]['bufferView']];img=Image.open(io.BytesIO(b[img_bv.get('byteOffset',0):img_bv.get('byteOffset',0)+img_bv['byteLength']])).convert('RGB')
+    if DESK: img=deskew_image(img,DESK)
+    th=int(round(texw*img.height/img.width));img=img.resize((texw,th),Image.LANCZOS)
     a=np.asarray(img).astype(np.uint16);t565=((a[:,:,0]>>3)<<11)|((a[:,:,1]>>2)<<5)|(a[:,:,2]>>3)
     bimg,bq,bpal=make_back(tag,PRIMS,QUADS)
     bv=[];buv=[];bi=[]
