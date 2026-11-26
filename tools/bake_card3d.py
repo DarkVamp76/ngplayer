@@ -22,6 +22,7 @@ def pack4(img):
     return (f[0::2]<<4)|f[1::2]
 def make_back(tag,PRIMS,QUADS):
     global BX0,BX1,BY0,BY1
+    PAL={'AWE':PAL_AWE,'EWS':PAL_EWS}.get(tag,globals()['PAL'])
     from PIL import ImageDraw,ImageFont
     import random
     random.seed(7)
@@ -78,7 +79,7 @@ def make_back(tag,PRIMS,QUADS):
         d.ellipse([pxx-r,pyy-r,pxx+r,pyy+r],fill=PAL[7]);r2=r*0.45;d.ellipse([pxx-r2,pyy-r2,pxx+r2,pyy+r2],fill=PAL[6])
     # silkscreen text
     big=ImageFont.load_default(size=int(4.2*sc*S))
-    txt={'GF1':('ULTRASOUND','REV 3.4','ADVANCED GRAVIS COMPUTER TECHNOLOGY LTD.'),'IW':('ULTRASOUND PnP','V1.0','ADVANCED GRAVIS COMPUTER TECHNOLOGY LTD.')}[tag]
+    txt={'GF1':('ULTRASOUND','REV 3.4','ADVANCED GRAVIS COMPUTER TECHNOLOGY LTD.'),'IW':('ULTRASOUND PnP','V1.0','ADVANCED GRAVIS COMPUTER TECHNOLOGY LTD.'),'AWE':('SOUND BLASTER','AWE32','CREATIVE TECHNOLOGY LTD.'),'EWS':('EWS64','AUDIOSYSTEM','TERRATEC ELECTRONIC GMBH')}[tag]
     d.text((6*sc*S,(BY1-30)*sc*S),txt[0],fill=PAL[4],font=big);d.text((6*sc*S,(BY1-23)*sc*S),txt[1],fill=PAL[4],font=big);d.text((6*sc*S,(BY1-14)*sc*S),txt[2],fill=PAL[4],font=font)
     # gold fingers on the card edge (the quads below y = 8)
     for (x0,y0,x1,y1) in QUADS[1:]:
@@ -310,7 +311,7 @@ def bake_ews(tag,glb,texw,part_names=('cap_dark','chip_black','plastic_white','p
 
 if __name__=='__main__':
     out='/* 3D models of the Gravis Ultrasound (GF1, rev 3.4) and Ultrasound PnP (AMD InterWave) cards and the Terratec EWS64. GPL-3.0-or-later */\n#include <stdint.h>\n'
-    out+=bake('GF1','gus_ultrasound_rev34.glb',320)+bake('IW','gus_pnp_v10.glb',640)+bake_ews('EWS','ews64.glb',320)
+    out+=bake('GF1','gus_ultrasound_rev34.glb',320)+bake('IW','gus_pnp_v10.glb',640)+bake('EWS','ews64_photo.glb',640)
     if os.path.exists(U+'adlib_gold.glb'):                                       # the AdLib Gold card (Yamaha OPL3): the FM formats
         out+=bake_ews('GOLD','adlib_gold.glb',320,('cap_silver','cap_gold','chip_black','plastic_white','plastic_black','metal'),('ADLIB GOLD','1000 MUSIC CARD'),True)
     open(sys.argv[2] if len(sys.argv)>2 else 'src/card3d_data.h','w').write(out);print(len(out)//1024,'KB')
