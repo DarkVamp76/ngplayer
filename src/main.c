@@ -4247,7 +4247,9 @@ static void draw_info_tv(float x, float y, float w, float h) {
     for (int i = 0; i < nrow; i++) { float lw = text_width(lab[i], 12 * k) + 16 * k; if (lw > vcol) vcol = lw; }
     for (int i = 0; i < nrow; i++) {
         text(rx, ty + 3 * k, 12 * k, FAINT, lab[i]);
-        char v[96]; snprintf(v, sizeof v, "%s", val[i]); fit_text(v, rw - vcol, 16 * k);
+        char v[96]; snprintf(v, sizeof v, "%s", val[i]);
+        if (i == 3 && !strncmp(v, "GRAVIS ULTRASOUND", 17) && text_width(v, 16 * k) > rw - vcol) { char t[96]; snprintf(t, sizeof t, "GUS%s", v + 17); snprintf(v, sizeof v, "%s", t); }      /* too long for the column: GUS instead of GRAVIS ULTRASOUND */
+        fit_text(v, rw - vcol, 16 * k);
         if (i == 4 && !NG_TV) {                                                      /* the Mod Archive ID is a link to the module page (the Apple TV has no pointer) */
             float vx = rx + vcol, vs = 16 * k, tw = text_width(v, vs);
             int hv = hit(vx - 4, ty - 3, tw + 8, vs + 8);
