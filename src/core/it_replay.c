@@ -346,10 +346,11 @@ static void fx_retrig(ITPlayer *p, V *c, int ft, int param){
         c->pos = 0;
     }
 }
+static int g_mplmade;   /* files libopenmpt reads as 'made with ModPlug' (ModPlug 1.09-1.18, OpenMPT 1.17/1.18 compatibility): it switches its compatibility behaviours off, among them the loop start moving behind a finished pattern loop */
 static void pattern_loop(ITPlayer *p, V *c, int param){
     if (param) {
         if (c->cd_loop) {
-            if (!--c->cd_loop) { c->loop_row = p->row + 1; return; }
+            if (!--c->cd_loop) { if (!g_mplmade) c->loop_row = p->row + 1; return; }
         } else c->cd_loop = param;
         p->process_row = c->loop_row - 1; p->jumped = 0;
     } else c->loop_row = p->row;
@@ -853,6 +854,7 @@ static void mix_voice(ITPlayer *p, V *c, double *mix, int n, int fast_ramp_len, 
 /* ---------------- Oeffentliche API ---------------- */
 ITPlayer *itp_new(const ITSong *s, int rate){
     ITPlayer *p = calloc(1, sizeof *p); p->s = s; p->rate = rate;
+    g_mplmade = s->cmwt == 0x888 || s->cwt == 0x888 || (s->cwt == 0x217 && s->cmwt == 0x200 && s->rsv == 0) || (s->cwt == 0x214 && s->cmwt == 0x202 && s->rsv == 0);
     g_it200 = (s->cmwt == 0x200 && (s->cwt == 0x888 || ((s->cwt == 0x214 || s->cwt == 0x217) && s->rsv == 0)));   /* rsv != 0: real Impulse Tracker 2.14p4/p5, plain IT behaviour */ g_linear = (s->flags & 8) != 0;
     /* OpenMPT up to 1.28 (cwtv 0x5000..0x5128): table based periods too (measured: 0x5122, 0x5123, 0x5128 correlate much better with the table, 0x5130 and 0x5131 with the exact formula; 0x5129 not measured) */
     /* Schism Tracker: libopenmpt setzt kPeriodsAreHertz zurueck bei Datum < 2015-01-29 (1916 Tage nach 2009-10-31), und bei Datum < 2021-05-02 (4201) ohne Linear-Slides */
