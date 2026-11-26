@@ -4,9 +4,9 @@
 import sys,io,json,struct,numpy as np
 from PIL import Image
 from PIL import ImageEnhance
-im=ImageEnhance.Brightness(Image.open(sys.argv[1]).convert('RGB')).enhance(0.86)
+im=ImageEnhance.Contrast(ImageEnhance.Brightness(Image.open(sys.argv[1]).convert('RGB')).enhance(0.74)).enhance(1.3)
 X0,X1,Y0,Y1=95,1448,290,728                  # board in the photo (px), and where the gold fingers end
-s=206.4/(X1-X0); YF=Y1+int(round(8.0/s)); YB=8.0                       # model units per px; height of the finger strips
+s=206.4/(X1-X0); YF=758; YB=8.0              # the gold fingers end at row 758 of the photo                       # model units per px; height of the finger strips
 im=im.crop((X0,Y0,X1,YF)); W,H=im.size
 def mx(px): return (px-X0)*s
 def my(py): return YB+(Y1-py)*s                     # y up; the board bottom edge sits at YB
