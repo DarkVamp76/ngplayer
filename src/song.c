@@ -71,12 +71,21 @@ static void detect_tracker(Song *s, const uint8_t *b, long n) {
     if (!strcmp(f, "XM") && n >= 58 && !memcmp(b, "Extended Module: ", 17)) trim_copy(t, 64, b + 38, 20);
     else if (!strcmp(f, "S3M") && n > 0x2A) {
         unsigned v = b[0x28] | (b[0x29] << 8), mj = (v >> 8) & 15;
+        unsigned flg = b[0x26] | (b[0x27] << 8), ordn = b[0x20] | (b[0x21] << 8), special = b[0x3E] | (b[0x3F] << 8);
         switch (v >> 12) {
-        case 1: snprintf(t, 64, "Scream Tracker %u.%02x", mj, v & 0xFF); break;
+        case 1:
+            /* ModPlug Tracker (and the first OpenMPT versions) wrote "ST3.20" into the header; libopenmpt recognises them by the other fields:
+             * no GUS click removal, the panning table present, nothing in the special field, an even order count and only the flags 16 / 64 */
+            if (v == 0x1320 && b[0x34] == 0 && b[0x35] == 0xFC && special == 0 && (flg & ~0x50u) == 0 && !(ordn & 1)) snprintf(t, 64, "ModPlug Tracker");
+            else snprintf(t, 64, "Scream Tracker %u.%02x", mj, v & 0xFF);
+            break;
         case 2: snprintf(t, 64, "Imago Orpheus %u.%02x", mj, v & 0xFF); break;
         case 3: snprintf(t, 64, "Impulse Tracker %u.%02x", mj, v & 0xFF); break;
         case 4: snprintf(t, 64, "Schism Tracker"); break;
-        case 5: snprintf(t, 64, "OpenMPT"); break;
+        case 5:                                          /* OpenMPT 1.xx (BCD); from 1.29 the file also names the last two parts of the version (bytes 0x37, 0x36), like libopenmpt shows it */
+            if (v >= 0x5129) snprintf(t, 64, "OpenMPT %u.%02x.%02x.%02x", mj, v & 0xFF, b[0x37], b[0x36]);
+            else snprintf(t, 64, "OpenMPT %u.%02x", mj, v & 0xFF);
+            break;
         case 6: snprintf(t, 64, "BeRoTracker"); break;
         case 7: snprintf(t, 64, "CreamTracker"); break;
         default: snprintf(t, 64, "Scream Tracker compatible"); break;

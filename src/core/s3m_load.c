@@ -98,6 +98,16 @@ int xs3m_load(XSong *s, const uint8_t *b, size_t n){
         size_t d = ((size_t)h[0x0D] << 20) | ((size_t)rd16(h + 0x0E) << 4);
         size_t bytes = (size_t)m->len * (m->is16 ? 2 : 1);
         if (m->len > 16000000 || d >= n) { m->len = 0; continue; }
+        if (h[0x1E] == 4 && !m->is16) {              /* ModPlug 4 bit ADPCM (pack byte 4): 16 byte delta table, then two samples per byte (low nibble first), like libopenmpt and the XM loader */
+            if (d + 16 > n) { m->len = 0; continue; }
+            size_t pk = 16 + ((size_t)m->len + 1) / 2;
+            if (d + pk > n) m->len = (uint32_t)((n - d - 16) * 2);
+            m->data = calloc((size_t)m->len + 4, 1);
+            int dl = 0;
+            for (uint32_t k = 0; k < m->len; k++) { uint8_t by = b[d + 16 + k / 2]; dl = (int8_t)(dl + (int8_t)b[d + ((by >> ((k & 1) * 4)) & 15)]); m->data[k] = (int8_t)dl; }
+            if (m->le > m->len) m->le = m->len;
+            continue;
+        }
         if (d + bytes > n) { bytes = n - d; m->len = bytes / (m->is16 ? 2 : 1); }
         m->data = calloc(m->len * (m->is16 ? 2 : 1) + 4, 1);
         if (m->is16) {
