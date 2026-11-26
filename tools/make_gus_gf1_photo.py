@@ -1,0 +1,51 @@
+# usage: python3 tools/make_gus_gf1_photo.py PHOTO.jpg OUT.glb
+# Builds the model of the Gravis UltraSound (GF1, rev 3.73) for bake_card3d.py from a straight photo of the card (taken by the maintainer):
+# the photo  is the texture of the board, the big chips, the connectors and the sockets are boxes placed by hand (photo pixels).
+import sys,io,json,struct,numpy as np
+from PIL import Image
+from PIL import ImageEnhance
+im=ImageEnhance.Brightness(Image.open(sys.argv[1]).convert('RGB')).enhance(1.0)
+X0,X1,Y0,Y1=42,1674,82,654                  # board in the photo (px), and where the gold fingers end
+s=206.4/(X1-X0); YF=698; YB=8.0                       # model units per px; height of the finger strips
+im=im.crop((X0,Y0,X1,YF)); W,H=im.size
+def mx(px): return (px-X0)*s
+def my(py): return YB+(Y1-py)*s                     # y up; the board bottom edge sits at YB
+def uv(px,py): return ((px-X0)/W,(py-Y0)/H)
+bufs=[];views=[];accs=[];nodes=[];meshes=[]
+def add(data,target=None):
+    while len(b''.join(bufs))%4: bufs.append(b'\0')
+    off=len(b''.join(bufs)); bufs.append(data); views.append({'buffer':0,'byteOffset':off,'byteLength':len(data)}); return len(views)-1
+def accessor(arr,ct,typ,mm=False):
+    bv=add(arr.tobytes()); a={'bufferView':bv,'componentType':ct,'count':len(arr),'type':typ}
+    if mm: a['min']=arr.min(0).tolist(); a['max']=arr.max(0).tolist()
+    accs.append(a); return len(accs)-1
+BOXI=np.array([0,1,2,0,2,3,4,6,5,4,7,6,0,4,5,0,5,1,1,5,6,1,6,2,2,6,7,2,7,3,3,7,4,3,4,0],dtype=np.uint32)
+def node(P,I,color=None,UV=None):
+    at={'POSITION':accessor(np.array(P,dtype=np.float32),5126,'VEC3',True)}
+    if UV is not None: at['TEXCOORD_0']=accessor(np.array(UV,dtype=np.float32),5126,'VEC2')
+    else: at['COLOR_0']=accessor(np.array([list(color)+[255]]*len(P),dtype=np.uint8),5121,'VEC4')
+    meshes.append({'primitives':[{'attributes':at,'indices':accessor(np.array(I,dtype=np.uint32),5125,'SCALAR',True),'mode':4}]})
+    nodes.append({'name':'n%d'%len(nodes),'mesh':len(meshes)-1,'matrix':[1,0,0,0,0,0,-1,0,0,1,0,0,0,0,0,1]})
+def box(x0,y0,z0,x1,y1,z1,col): node([(x0,y0,z0),(x1,y0,z0),(x1,y1,z0),(x0,y1,z0),(x0,y0,z1),(x1,y0,z1),(x1,y1,z1),(x0,y1,z1)],BOXI,col)
+def quad(px0,py0,px1,py1,z=1.6):
+    P=[(mx(px0),my(py1),z),(mx(px1),my(py1),z),(mx(px1),my(py0),z),(mx(px0),my(py0),z)]
+    node(P,[0,1,2,0,2,3],None,[uv(px0,py1),uv(px1,py1),uv(px1,py0),uv(px0,py0)])
+FR4=(150,32,28); CHIP=(28,26,26); SIL=(162,162,156); WHT=(205,205,198)
+box(0,YB,0,206.4,my(Y0),1.6,FR4)
+quad(X0,Y0,X1,Y1)
+quad(760,Y1,1038,YF); quad(1068,Y1,1538,YF)                # the two groups of gold fingers
+PARTS=[(448,155,640,330,4.5,CHIP),(680,262,832,318,3,CHIP),(905,272,972,380,3.5,CHIP),(708,425,832,582,4,CHIP),(433,472,587,525,3,CHIP),
+ (440,552,560,598,3,CHIP),(985,345,1075,395,6,CHIP),(985,410,1075,462,6,CHIP),(1295,205,1425,245,2.5,CHIP),(1380,312,1475,345,2.5,CHIP),
+ (1215,310,1265,345,2.5,CHIP),(1180,447,1265,487,2.5,CHIP),(1420,455,1475,490,2.5,CHIP),(1500,455,1555,490,2.5,CHIP),(1090,205,1145,240,2.5,CHIP),
+ (1595,200,1674,255,10,CHIP),(1595,262,1674,318,10,CHIP),(1600,325,1674,555,11,CHIP),(1595,582,1674,640,10,CHIP),
+ (822,165,872,195,6,WHT),(975,165,1025,195,6,WHT),(705,615,972,642,5,CHIP),(1060,615,1520,642,5,CHIP)]
+for (x0,y0,x1,y1,h,c) in PARTS: box(mx(x0),my(y1),1.6,mx(x1),my(y0),1.6+h,c)
+for (x0,x1) in ((55,208),(237,388)):                    # the eight DRAM chips
+    for (y0,y1) in ((130,190),(211,268),(292,348),(369,425)): box(mx(x0),my(y1),1.6,mx(x1),my(y0),5.0,CHIP)
+box(206.6,-4,-3,207.6,YB+(Y1-Y0)*s+4,15.4,SIL)         # the slot bracket
+buf=io.BytesIO(); im.save(buf,'JPEG',quality=92); ib=add(buf.getvalue())
+js={'asset':{'version':'2.0'},'scene':0,'scenes':[{'nodes':list(range(len(nodes)))}],'nodes':nodes,'meshes':meshes,'accessors':accs,'bufferViews':views,'buffers':[{'byteLength':0}],'images':[{'bufferView':ib,'mimeType':'image/jpeg'}]}
+bd=b''.join(bufs); bd+=b'\0'*((4-len(bd)%4)%4); js['buffers'][0]['byteLength']=len(bd)
+jd=json.dumps(js).encode(); jd+=b' '*((4-len(jd)%4)%4)
+open(sys.argv[2],'wb').write(struct.pack('<III',0x46546C67,2,28+len(jd)+len(bd))+struct.pack('<II',len(jd),0x4E4F534A)+jd+struct.pack('<II',len(bd),0x004E4942)+bd)
+print('ok',len(nodes),'nodes',W,H)
