@@ -377,7 +377,7 @@ static void do_effect(XPlayer *p, int chn, Ch *c, int tick){
     case 0x08: if (!tick && p->s->fmt == 1 && p->s->pt_tuning == 3) c->pan5c = par; break;   /* DSM: set panning (the loader scales 0..0x80 to 0..255) */
     case 0x0C: { int v = par > mx ? mx : par; c->vD8 = c->vE8 = v; } break;
     case 0x0E: e_sub(p, chn, c, par, tick); break;
-    case 0x0F: if (!tick && !p->in_delay && par) { if (par <= 0x20) p->speed = par; else { p->tempo = par; p->tempof = 0; } } break;
+    case 0x0F: if (!tick && !p->in_delay && par) { if (par < 0x20 || (par == 0x20 && !(p->s->fmt == 1 && p->s->pt_tuning == 1))) p->speed = par;   /* MTM (libopenmpt): 0x20 is already a tempo */ else { p->tempo = par; p->tempof = 0; } } break;
     case 0x10: if (!tick && !p->in_delay && (par & 0x7f)) p->speed = par & 0x7f; break;
     case 0x11: case 0x17: case 0x18: dslide(p, c, par, tick); c->vE8 = c->vD8; break;
     case 0x16: if (!tick && !p->in_delay && par >= 0x20) { p->tempo = par; p->tempof = 0; } break;
