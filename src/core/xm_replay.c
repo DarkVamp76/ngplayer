@@ -42,7 +42,8 @@ struct XXPlayer {
     int d_ord, d_row;          /* Anzeigeposition */
     float *scb; int scl; unsigned scn;   /* Scope-Ringpuffer */
     int loop_row[MAXCH], loop_cnt[MAXCH];
-    int jump_ord, jump_row, pdelay, repeat;     /* repeat: the row is being repeated by a pattern delay (EEx): no new notes/effects at tick 0 */
+    int jump_ord, jump_row, brk_row, pj_set, pdelay, repeat;     /* brk_row / pj_set: a Dxx and a Bxx of the same row work together (Bxx the order, Dxx the row) */
+        /* repeat: the row is being repeated by a pattern delay (EEx): no new notes/effects at tick 0 */
     double acc;
     int first, eloop; double tsec;
     int tkpos, tklen;          /* Position im aktuellen Tick / Ticklaenge in Samples */
@@ -123,7 +124,7 @@ XXPlayer *xxm_new(const XSong *s, int rate){
     p->s = s; p->rate = rate; p->speed = s->speed; p->tempo = s->tempo; p->gvol = 64;
     echo_init(p);
     p->nrows = s->npat ? s->prows[s->orders[0]] : 64; p->first = 1;
-    p->jump_ord = p->jump_row = -1;
+    p->jump_ord = p->jump_row = p->brk_row = -1; p->pj_set = 0;
     p->seen[0] |= 1;                       /* the start position counts as visited: a jump back to order 0 row 0 ends the song (it played twice before) */
     for (int i = 0; i < MAXCH; i++) { p->ch[i].smpi = -1; p->ch[i].pan = 128; p->ch[i].fade = 32768; }
     return p;
@@ -213,9 +214,9 @@ static void do_row_cell(XXPlayer *p, int chn, XCh *c, const XCell *x, int second
     case 5: case 6: case 0xA: if (par) c->m_vsl = par; break;
     case 7: if (hi) c->m_ts = hi; if (lo) c->m_td = lo; break;
     case 8: c->pan = par; c->pinst = 1; break;
-    case 0xB: p->jump_ord = par; p->jump_row = 0; break;
+    case 0xB: p->jump_ord = par; p->pj_set = 1; p->jump_row = p->brk_row >= 0 ? p->brk_row : 0; break;      /* Bxx: the order; the row is the one of a Dxx of the same row (either channel order), else 0 */
     case 0xC: c->vol = clampi(par, 0, 64); c->vinst = 1; break;
-    case 0xD: p->jump_ord = p->order + 1; p->jump_row = hi * 10 + lo; break;
+    case 0xD: p->brk_row = hi * 10 + lo; if (!p->pj_set) p->jump_ord = p->order + 1; p->jump_row = p->brk_row; break;      /* Dxx: the row (decimal); the order is the next one unless a Bxx of the same row names one */
     case 0x0F: if (par) { if (par < 32) p->speed = par; else p->tempo = par; } break;
     case 0x22: if (par) p->speed = par; break;  /* any speed 1..255 (MDL) */
     case 0x10: p->gvol = clampi(par, 0, 64); break;
@@ -368,7 +369,7 @@ static void advance(XXPlayer *p){
     if (p->jump_ord >= 0) { jumped = (p->jump_ord != p->order || p->jump_row <= p->row) && !p->eloop; no = p->jump_ord; nr = p->jump_row; p->jump_ord = -1; if (no != p->order && p->jump_row >= 0) { } }
     else if (nr >= p->nrows) { no++; nr = 0; }
     if (p->jump_row >= 0 && p->jump_ord < 0) { }
-    p->jump_row = -1;
+    p->jump_row = -1; p->brk_row = -1; p->pj_set = 0;
     if (no >= s->nord) { p->done = 1; return; }
     if (jumped) { if (p->seen[(no * 256 + nr) >> 3] & (1 << ((no * 256 + nr) & 7))) { p->done = 1; return; } }
     p->order = no; p->row = nr; p->eloop = 0;
