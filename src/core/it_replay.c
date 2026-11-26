@@ -874,13 +874,12 @@ ITPlayer *itp_new(const ITSong *s, int rate){
     p->visited = calloc((size_t)(s->nord + 1) * 1024, 1);
     p->K = 1.0 / 65536.0;     /* gegen libopenmpt kalibriert (Faktor 4 gegenueber Schism-Skalierung) */
     /* Files saved by ModPlug Tracker (1.09-1.18: cwtv 0x217 / cmwt 0x200 without a value in the reserved header field, and b3.2-1.09: 0x214 / 0x202):
-     * libopenmpt mixes them with its older, quieter levels. The gain depends on the channel count and a little on the mix volume. Fitted on 6 files of the
-     * first class (8..18 channels, mix volume 32..100, max error 7 %: factor 0.375..0.630; a constant 0.42 was off by up to 33 %):
-     *     factor = 2.927 * channels^-0.4925 * mv^-0.1522
-     * The second class (one file, 9 channels, mv 65, measured 0.515) was not part of the fit; the law predicts 0.526 for it. */
+     * libopenmpt mixes them with its original mix levels: the master volume is divided by PreAmpTable[min(channels, 31) / 2] (the table of Sndmix.cpp) and does not
+     * depend on the mix volume (measured on 81 files, 4..62 channels, mix volume 32..100: within 0.5 dB up to 31 channels, the 0.665 * 0x60 is the calibration). */
     if ((s->cwt == 0x217 && s->cmwt == 0x200 && s->rsv == 0) || (s->cwt == 0x214 && s->cmwt == 0x202)) {
-        int nch = s->nch > 0 ? s->nch : 1, mvv = s->mv > 0 ? s->mv : 1;
-        p->K *= 2.927 * pow(nch, -0.4925) * pow(mvv, -0.1522);
+        static const int pre[16] = { 0x60, 0x60, 0x60, 0x70, 0x80, 0x88, 0x90, 0x98, 0xA0, 0xA4, 0xA8, 0xAC, 0xB0, 0xB4, 0xB8, 0xBC };
+        int nch = s->nch > 0 ? s->nch : 1; if (nch > 31) nch = 31;
+        p->K *= 0.665 * 0x60 / pre[nch / 2];
     }
     /* IT files from OpenMPT 1.18 (cwtv 0x888 / cmwt 0x888): libopenmpt mixes them louder than the current OpenMPT levels (measured on one file, 10 channels,
      * mix volume 128: factor 1.62, RMS ratio 0.62 -> 1.00); the table periods are switched on above (correlation 0.77 -> 0.95). */
