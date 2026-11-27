@@ -1823,26 +1823,40 @@ static void module_bars_update(void) {
     if (!g_song || !song_is_midi(g_song) || chip_kind() != 6) return;
     const int mi = 5; c3_setup(mi);
     C3Gl *g = &c3gl[mi]; const C3Model *m = &C3M[mi];
-    /* the bar of a part follows the level of the sound it makes (the peak of its dry signal, dB), like the display of the real module: rows = 15.0 + 0.52 * dB of 15 rows (first fit 13.0: the measured heights were too low, raised after a check by eye) above the lit bottom row,
-     * fitted on two videos of an SC-155 (Doom 2 songs: Barrels 'o' Fun and ENTRYWAY, 12 parts, residual 1.5 rows); this display has 14 segments */
-    int seg[16]; for (int c = 0; c < 16; c++) { SongMidiChan mc; song_midi_chan(g_song, c, &mc); float rows = mc.out > 1e-4f ? 15.0f + 0.52f * 20.0f * log10f(mc.out) : 0.0f; rows = rows < 0 ? 0 : rows > 15 ? 15 : rows; seg[c] = (int)(rows * 14.0f / 15.0f + 0.5f); }
-    static int shown[16]; static int have;
-    if (g->lcd && have && !memcmp(shown, seg, sizeof seg)) return;
+    /* the bar of a part follows the level of the sound it makes (the peak of its dry signal, dB), like the display of the real module: rows = 15.0 + 0.52 * dB of the 15 rows above the bottom row
+     * (first fit 13.0: the measured heights were too low, raised after a check by eye), fitted on two videos of an SC-155 (Doom 2 songs: Barrels 'o' Fun and ENTRYWAY, 12 parts, residual 1.5 rows).
+     * Like the real display: 16 rows, the bottom one always lit, and a single peak segment above the bar that stays for 0.7 s and then falls about 2 rows a second (measured on the same videos). */
+    static float pk[16], hold[16]; static int bar_shown[16], mark_shown[16], have;
+    float dt = (float)g_dt; if (dt > 0.1f) dt = 0.1f;
+    int bar[16], mark[16];
+    for (int c = 0; c < 16; c++) {
+        SongMidiChan mc; song_midi_chan(g_song, c, &mc);
+        float rf = mc.out > 1e-4f ? 15.0f + 0.52f * 20.0f * log10f(mc.out) : 0.0f; rf = rf < 0 ? 0 : rf > 15 ? 15 : rf;
+        if (rf >= pk[c]) { pk[c] = rf; hold[c] = 0.7f; } else if (hold[c] > 0) hold[c] -= dt; else pk[c] -= 2.0f * dt;
+        if (pk[c] < rf) pk[c] = rf;
+        bar[c] = (int)(rf + 0.5f); int mk = (int)(pk[c] + 0.5f); mark[c] = mk > bar[c] ? mk : 0;
+    }
+    if (g->lcd && have && !memcmp(bar_shown, bar, sizeof bar) && !memcmp(mark_shown, mark, sizeof mark)) return;
     if (!g->lcd) g->lcd = gfx_tex_create(m->tw, m->th, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET);
     if (!g->lcd || !gfx_target_begin(g->lcd, 0, 0, 0, 1)) return;
     gfx_set_params((float)m->tw, (float)m->th, 1.0f); gfx_set_texture(fonttex);
     set_additive(0);
     tex_quad(g->tex, 0, 0, (float)m->tw, (float)m->th, C(1, 1, 1, 1));                              /* the baked front */
-    const float kx = (float)m->tw / 1744.0f, ky = (float)m->th / 352.0f;                              /* the bar graph of tools/make_module_panel.py (1744 x 352): x 668 .. 1030, 14 segments of 9 px, bottom at 262 - 10 */
-    const float bx0 = 668.0f, cw = (1030.0f - 668.0f) / 16.0f;
+    const float kx = (float)m->tw / 1744.0f, ky = (float)m->th / 352.0f;                              /* the bar graph of tools/make_module_panel.py (1744 x 352): x 668 .. 1030, its bottom row at 252 */
+    const float bx0 = 668.0f, cw = (1030.0f - 668.0f) / 16.0f, pitch = 7.8f;
     const col on = C(64 / 255.0f, 36 / 255.0f, 4 / 255.0f, 1), off = C(244 / 255.0f, 186 / 255.0f, 38 / 255.0f, 1);
-    for (int c = 0; c < 16; c++) for (int k = 0; k < 14; k++) {
-        float x = bx0 + c * cw, yy = 262.0f - 10.0f - k * 9.0f;
-        rect((x + 2) * kx, (yy - 6) * ky, (cw - 6) * kx, 6.0f * ky + 1.0f, k < seg[c] ? on : off);
+    {   /* the amber of the display over the 14 rows of the baked picture (the same lamp gradient), then 16 rows */
+        float y0 = 124.0f, y1 = 257.0f, k0 = 1.0f - 0.07f * (y0 - 70.0f) / 210.0f, k1 = 1.0f - 0.07f * (y1 - 70.0f) / 210.0f;
+        rect_grad(bx0 * kx, y0 * ky, (1030.0f - bx0) * kx, (y1 - y0) * ky, C(k0, 201.0f / 255.0f * k0, 48.0f / 255.0f * k0, 1), C(k1, 201.0f / 255.0f * k1, 48.0f / 255.0f * k1, 1));
+    }
+    for (int c = 0; c < 16; c++) for (int k = 0; k < 16; k++) {
+        float x = bx0 + c * cw, yy = 252.0f - k * pitch;
+        int lit = k == 0 || k <= bar[c] || k == mark[c];
+        rect((x + 2) * kx, (yy - 5.4f) * ky, (cw - 6) * kx, 5.4f * ky + 0.5f, lit ? on : off);
     }
     flush();
     gfx_target_end(g->lcd);
-    memcpy(shown, seg, sizeof seg); have = 1;
+    memcpy(bar_shown, bar, sizeof bar); memcpy(mark_shown, mark, sizeof mark); have = 1;
 #endif
 }
 #include "lcd_font.h"
