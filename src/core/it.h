@@ -53,6 +53,7 @@ typedef struct {
 
 ITSong *it_load(const uint8_t *buf, size_t len, int *err);   /* NULL bei Fehler, err < 0 */
 void it_free(ITSong *s);
+size_t umx_extract(uint8_t *b, size_t n);                        /* Unreal package: moves the tracker module to the start of b, returns its length (0 = none) */
 int  dtm_probe(const uint8_t *buf, size_t len);              /* 1 = Digital Tracker module ("D.T.") */
 ITSong *dtm_load(const uint8_t *buf, size_t len, int *err);   /* DTM -> ITSong, played by the IT engine */
 
