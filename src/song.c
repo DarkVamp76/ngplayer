@@ -196,6 +196,7 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
     if (!b || fread(b, 1, (size_t)n, f) != (size_t)n) { fclose(f); free(b); snprintf(err, errcap, "read error"); return NULL; }
     fclose(f);
 
+    { size_t um = umx_extract(b, (size_t)n); if (um) n = (long)um; }          /* Unreal package: play the module inside */
     Song *s = (Song *)calloc(1, sizeof *s);
     int r = 0;
     const char *dot = strrchr(path, '.');
