@@ -363,6 +363,35 @@ static int g_open_sub;   /* gewaehlter Subsong (TFMX), bleibt bei R/Spulen erhal
 
 /* List label: Mod Archive titles are cut to 20 characters + "..." and always get a separate "#ID" tag (drawn after the title,
  * so fit_text can never cut it off), so the module can always be found again. tag stays empty for other entries. */
+/* A title that is too long for its row: for the playing row (and the row under the pointer) the text runs slowly to the end and back
+ * instead of being cut with "...". There is no clipping in the drawing layer, so the text moves in whole characters. slot 0 = playing row,
+ * slot 1 = row under the pointer; the run starts (with a pause) when the row becomes active. */
+static void marquee_fit(char *s, float maxw, float size, int slot, int id, int active) {
+    if (!active || text_width(s, size) <= maxw) { fit_text(s, maxw, size); return; }
+    static int mid[2] = { -1, -1 }; static Uint32 mt0[2], mlast[2];
+    Uint32 now = SDL_GetTicks();
+    if (mid[slot] != id || now - mlast[slot] > 300) { mid[slot] = id; mt0[slot] = now; }
+    mlast[slot] = now;
+    int off[300], nc = 0;                                           /* byte offset of every character (UTF-8) */
+    for (int i = 0; s[i] && nc < 299; i++) if (((unsigned char)s[i] & 0xC0) != 0x80) off[nc++] = i;
+    off[nc] = (int)strlen(s);
+    int last = 0;                                                    /* the first start from which the rest fits */
+    while (last < nc - 1) { if (text_width(s + off[last], size) <= maxw) break; last++; }
+    if (last <= 0) { fit_text(s, maxw, size); return; }
+    const float pause = 1.4f, speed = 5.0f;                          /* seconds, characters per second */
+    float run = (float)last / speed, per = 2 * (pause + run), t = fmodf((now - mt0[slot]) / 1000.0f, per), pos;
+    if (t < pause) pos = 0; else if (t < pause + run) pos = (t - pause) * speed; else if (t < 2 * pause + run) pos = (float)last; else pos = (float)last - (t - 2 * pause - run) * speed;
+    int a = (int)(pos + 0.5f); if (a < 0) a = 0; if (a > last) a = last;
+    int e = a; char tmp[300];
+    while (e < nc) {                                                 /* as many characters as fit */
+        int n = off[e + 1] - off[a]; if (n >= (int)sizeof tmp) break;
+        memcpy(tmp, s + off[a], (size_t)n); tmp[n] = 0;
+        if (text_width(tmp, size) > maxw) break;
+        e++;
+    }
+    int n = off[e] - off[a]; memmove(s, s + off[a], (size_t)n); s[n] = 0;
+}
+
 static void list_label(char *dst, size_t cap, char *tag, size_t tcap, const entry *e) {
     snprintf(dst, cap, "%s", e->label); tag[0] = 0;
     if (e->ma_id <= 0) return;
@@ -3115,7 +3144,7 @@ static void draw_ui(double t) {
             tx += draw_fmt_badge(tx, yy + 6, &pl[i], isc);      /* file format in its own colour */
             float tgw = tg[0] ? text_width(tg, 14) : 0;
             /* the title gets all the room: the #ID is flush right, and while the pointer is over a desktop row the x takes the place of the ID (touch: swipe the row instead) */
-            fit_text(lab, w - 36 + ol - (tg[0] ? 10 : 0) - (tx - (x + 20 + orr)) - tgw, 14);
+            marquee_fit(lab, w - 36 + ol - (tg[0] ? 10 : 0) - (tx - (x + 20 + orr)) - tgw, 14, isc ? 0 : 1, i, isc || hv);
             text(tx, yy + 5, 14, isc ? TXT : DIM, lab);
             if (tg[0] && !hv) text_right(x + w - 16 + ox, yy + 5, 14, VC[1], tg);      /* #ID */
             int xhv = hit(x + w - 38, yy + 2, 26, rh - 6);
@@ -3380,7 +3409,7 @@ static void draw_playlist_overlay(float x, float y, float w, float h) {
         float tx = x + 20 + orr;
         tx += draw_fmt_badge(tx, yy + 8, &pl[i], isc);          /* file format in its own colour */
         float tgw = tg[0] ? text_width(tg, 14) : 0;
-        fit_text(lab, w - 40 + ol - (tx - (x + 20 + orr)) - tgw, 14);
+        marquee_fit(lab, w - 40 + ol - (tx - (x + 20 + orr)) - tgw, 14, 0, i, isc);
         text(tx, yy + 8, 14, isc ? TXT : DIM, lab);
         if (tg[0]) text_right(x + w - 20 + ox, yy + 8, 14, VC[1], tg);      /* #ID flush right */
         if (rclick && !moved && rclickx >= x + 8 && rclickx < x + w - 8 && rclicky >= yy && rclicky < yy + rh) {       /* long press: Share/Info (Mod Archive) and Remove (every entry); not while dragging */
