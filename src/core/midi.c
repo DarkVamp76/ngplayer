@@ -124,6 +124,7 @@ struct Midi {
     MidiNote *notes; size_t nnotes; double maxdur;
     Reverb rev; Chorus cho; float rev_level, cho_level;
     float rev_base, cho_base, mvol;       /* the start values of the reverb / chorus level and the GS master volume (a GS reset sets them back) */
+    float mtune; int mkey; int8_t kshift[NCH]; uint8_t tune_nib[4];     /* GS master tune (cents / 100 as semitones), master key shift, the key shift of each part, the nibbles of a tune message on their way */
     uint8_t drumch[NCH];                  /* the channel plays a drum kit: 10, and the parts a GS file turns into rhythm parts (SysEx 40 1x 15) */
     float dry[2 * MIDI_BLOCK], wrev[2 * MIDI_BLOCK], wcho[2 * MIDI_BLOCK], orev[2 * MIDI_BLOCK], ocho[2 * MIDI_BLOCK];
     float scblk[NCH * MIDI_BLOCK];        /* the dry signal of each channel for one block (tsf scopeBlk) */
@@ -253,6 +254,9 @@ static int evcmp(const void *x, const void *y) {
 }
 
 /* ---------------------------------------------------------------- the channels */
+static void apply_shift(Midi *m, int ch) {
+    tsf_channel_set_keyshift(m->f, ch, (float)m->kshift[ch] + m->mtune + (m->drumch[ch] ? 0.0f : (float)m->mkey));
+}
 static void chan_reset(Midi *m, int ch) {
     tsf_channel_midi_control(m->f, ch, 121, 0);
     tsf_channel_drum_reset(m->f, ch);
@@ -260,27 +264,32 @@ static void chan_reset(Midi *m, int ch) {
     tsf_channel_sounds_off_all(m->f, ch);
     tsf_channel_set_bank(m->f, ch, 0);
     tsf_channel_set_presetnumber(m->f, ch, 0, m->drumch[ch]);
-    tsf_channel_set_keyshift(m->f, ch, 0.0f);
+    m->kshift[ch] = 0; apply_shift(m, ch);
     tsf_channel_midi_control(m->f, ch, 7, 100); tsf_channel_midi_control(m->f, ch, 10, 64);      /* the General MIDI defaults: volume 100, pan centre */
     m->prog[ch] = 0; m->bank[ch] = 0; m->vol[ch] = 100; m->pan[ch] = 64; m->cc1[ch] = 0;
 }
 static void all_reset(Midi *m) {
     m->mvol = 1.0f; m->rev_level = m->rev_base; m->cho_level = m->cho_base; m->rev.feedback = 0.7f * 0.28f + 0.7f;      /* (the start values of the effects) */
-    memset(m->drumch, 0, sizeof m->drumch); m->drumch[9] = 1;
+    memset(m->drumch, 0, sizeof m->drumch); m->drumch[9] = 1; m->mtune = 0.0f; m->mkey = 0;
     for (int c = 0; c < NCH; c++) chan_reset(m, c);
 }
 /* the Roland GS parameters the synth follows (SysEx 41 dev 42 12 aa aa aa data cs F7): master volume 40 00 04, reverb level 40 01 33 and time 40 01 34, chorus level 40 01 3A (the reverb and chorus macros and the other
  * effect parameters are not used: one reverb and one chorus), and per part (blocks 40 1x: 10 is part 10, 11 .. 19 the parts 1 .. 9, 1A .. 1F the parts 11 .. 16): 15 use for rhythm part, 16 pitch key shift */
 static void gs_param(Midi *m, unsigned a, int v) {
-    if (a == 0x400004) m->mvol = (v / 127.0f) * (v / 127.0f);
+    if (a >= 0x400000 && a <= 0x400003) {                                                             /* the master tune: four nibbles, 0x0400 = A 440, 0.1 cent a step */
+        m->tune_nib[a - 0x400000] = (uint8_t)(v & 15);
+        if (a == 0x400003) { int t = m->tune_nib[0] << 12 | m->tune_nib[1] << 8 | m->tune_nib[2] << 4 | m->tune_nib[3]; if (t >= 0x18 && t <= 0x7E8) { m->mtune = (t - 1024) / 1000.0f; for (int c = 0; c < NCH; c++) apply_shift(m, c); } }
+    }
+    else if (a == 0x400005) { if (v >= 0x28 && v <= 0x58) { m->mkey = v - 0x40; for (int c = 0; c < NCH; c++) apply_shift(m, c); } }      /* the master key shift (not for the drum parts) */
+    else if (a == 0x400004) m->mvol = (v / 127.0f) * (v / 127.0f);
     else if (a == 0x400133) m->rev_level = m->rev_base * (v / 64.0f);
     else if (a == 0x400134) { float room = 0.7f + (v - 64) / 64.0f * 0.28f; if (room < 0.05f) room = 0.05f; if (room > 0.99f) room = 0.99f; m->rev.feedback = room * 0.28f + 0.7f; }
     else if (a == 0x40013A) m->cho_level = m->cho_base * (v / 64.0f);
     else if ((a >> 16) == 0x40 && ((a >> 8) & 0xF0) == 0x10) {
         unsigned blk = (a >> 8) & 0xFF, off = a & 0xFF; int ch = blk == 0x10 ? 9 : blk <= 0x19 ? (int)blk - 0x11 : (int)blk - 0x1A + 10;
         if (ch < 0 || ch >= NCH) return;
-        if (off == 0x15) { int dr = v != 0; if (dr != m->drumch[ch]) { m->drumch[ch] = (uint8_t)dr; tsf_channel_set_presetnumber(m->f, ch, m->prog[ch], dr); } }
-        else if (off == 0x16 && v >= 0x28 && v <= 0x58) tsf_channel_set_keyshift(m->f, ch, (float)(v - 0x40));
+        if (off == 0x15) { int dr = v != 0; if (dr != m->drumch[ch]) { m->drumch[ch] = (uint8_t)dr; tsf_channel_set_presetnumber(m->f, ch, m->prog[ch], dr); apply_shift(m, ch); } }
+        else if (off == 0x16 && v >= 0x28 && v <= 0x58) { m->kshift[ch] = (int8_t)(v - 0x40); apply_shift(m, ch); }
     }
 }
 static void apply_sysex(Midi *m, const Ev *e) {
