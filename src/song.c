@@ -1114,6 +1114,11 @@ int song_midi_seek_by(Song *s, double delta, double *sec) {
     return 1;
 }
 const char *song_midi_program_name(int program, int drum) { return midi_gm_name(program, drum); }
+int song_midi_mt32_reverb(const Song *s, int out[3]) {
+    MidiInfo mi; if (!s || !s->mi) return 0;
+    midi_info(s->mi, &mi); for (int k = 0; k < 3; k++) out[k] = mi.mt_reverb[k];
+    return out[0] >= 0 || out[1] >= 0 || out[2] >= 0;
+}
 const char *song_midi_standard(const Song *s, int *known) {
     static char b[12]; MidiInfo mi; b[0] = 0;
     if (known) *known = 0;

@@ -28,7 +28,7 @@ double midi_length(const Midi *m);                                   /* seconds 
 double midi_position(const Midi *m);
 
 typedef struct { double t0, t1; uint8_t ch, key, vel; } MidiNote;     /* a note of the file: start, end (seconds), channel, key, velocity */
-typedef struct { char title[96], copyright[96], standard[12], lcd[24], syx[48]; int syx_msgs, format, ntracks, division, notes, tempo_bpm, standard_known; } MidiInfo;       /* standard: "MT-32", "GS", "XG", "GM2" or "GM" (from the SysEx messages of the file; standard_known = 0: none named, played as GM); lcd: the display text a MT-32 / SC-55 file sends */
+typedef struct { char title[96], copyright[96], standard[12], lcd[24], syx[48]; int syx_msgs, format, ntracks, division, notes, tempo_bpm, standard_known; int mt_reverb[3]; } MidiInfo;       /* standard: "MT-32", "GS", "XG", "GM2" or "GM" (from the SysEx messages of the file; standard_known = 0: none named, played as GM); lcd: the display text a MT-32 / SC-55 file sends */
 void  midi_info(const Midi *m, MidiInfo *out);
 void  midi_hint_mt32(Midi *m);
 void  midi_add_syx(Midi *m, const char *name, const uint8_t *data, size_t len);       /* the .syx file next to the MIDI file (read first; the standard and the display text come from it) */                                       /* the file name says MT-32 (.m32) */

@@ -924,6 +924,13 @@ static void draw_mixer(float x, float y, float w, float h) {
     if (!g_portrait) text(x + 18, y + 12, 12, DIM, "MIXER");
     view_switch(x, y, w);
     if (!g_song || !song_is_midi(g_song)) return;
+    int kn = 0; const int mt32 = !strcmp(song_midi_standard(g_song, &kn), "MT-32");      /* the MT-32 has one reverb for all parts (set by SysEx) and no chorus: no send knobs, the reverb of the file in the header instead */
+    if (mt32 && !g_portrait) {
+        int rv[3]; static const char *const RM[4] = { "Room", "Hall", "Plate", "Tap delay" }; char rb[96];
+        if (song_midi_mt32_reverb(g_song, rv) && rv[0] >= 0 && rv[0] < 4) snprintf(rb, sizeof rb, "MT-32 REVERB  %s   time %d   level %d", RM[rv[0]], rv[1] >= 0 ? rv[1] + 1 : 0, rv[2] >= 0 ? rv[2] : 0);
+        else snprintf(rb, sizeof rb, "MT-32: one reverb for all parts, no chorus");
+        text(x + 18 + text_width("MIXER", 12) + 18, y + 12, 11, alpha(DIM, 0.9f), rb);
+    }
     float ax = x + 12, ay = y + 40, aw = w - 24, ah = h - 40 - (g_portrait ? 42 : 10), gap = 4;      /* (a phone: the RPT / RND buttons sit in the bottom corner of the card) */
     int cols = (aw - gap * 15) / 16 >= 46 ? 16 : 8, rows = 16 / cols;
     float sw = (aw - gap * (cols - 1)) / cols, sh = (ah - gap * (rows - 1)) / rows;
@@ -963,9 +970,14 @@ static void draw_mixer(float x, float y, float w, float h) {
         float ky = iy + ih + 8 + kr, kx0 = sx + sw / 2 - (2 * 2.35f * kr);
         float pan01 = mc.pan / 127.0f, rv = mc.reverb / 127.0f, ch = mc.chorus / 127.0f;
         float kxs[3] = { sx + sw * 0.22f, sx + sw * 0.5f, sx + sw * 0.78f }; (void)kx0;
-        mx_knob(kxs[0], ky, kr, pan01, alpha(hue, dim)); mx_knob(kxs[1], ky, kr, rv, alpha(VC[0], dim)); mx_knob(kxs[2], ky, kr, ch, alpha(VC[2], dim));
-        const char *kl[3] = { slim ? "P" : "PAN", slim ? "R" : "REV", slim ? "C" : "CHO" };
-        for (int k = 0; k < 3; k++) text(kxs[k] - text_width(kl[k], fs - 2) / 2, ky + kr + 3, fs - 2, alpha(DIM, 0.8f), kl[k]);
+        if (mt32) {                                                                              /* only the pan knob, in the middle */
+            mx_knob(sx + sw / 2, ky, kr * 1.15f, pan01, alpha(hue, dim));
+            const char *pl = slim ? "P" : "PAN"; text(sx + sw / 2 - text_width(pl, fs - 2) / 2, ky + kr * 1.15f + 3, fs - 2, alpha(DIM, 0.8f), pl);
+        } else {
+            mx_knob(kxs[0], ky, kr, pan01, alpha(hue, dim)); mx_knob(kxs[1], ky, kr, rv, alpha(VC[0], dim)); mx_knob(kxs[2], ky, kr, ch, alpha(VC[2], dim));
+            const char *kl[3] = { slim ? "P" : "PAN", slim ? "R" : "REV", slim ? "C" : "CHO" };
+            for (int k = 0; k < 3; k++) text(kxs[k] - text_width(kl[k], fs - 2) / 2, ky + kr + 3, fs - 2, alpha(DIM, 0.8f), kl[k]);
+        }
         /* the meter, the fader and the expression */
         float my0 = ky + kr + 3 + fs + 6, my1 = sy + sh - fs - 12, mh = my1 - my0;
         if (mh < 30) continue;
