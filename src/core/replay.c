@@ -74,7 +74,7 @@ typedef struct {
     int swap;                        /* Sample live tauschen (Note+Inst+3xx) */
     uint32_t len, ls, le; int loop;  /* Kopie der Sampledaten */
     const int8_t *data;
-    int loop_row, loop_cnt;
+    int loop_row, loop_cnt, loop_ord;     /* loop_ord: the order (chunk) of the loop start: a MED block of more than 64 lines is several orders */
     int is16, m168, mA4, mA8;
     int sd_on, sd_tick; XCell sd_cell;   /* S3M SDx: verzoegerte Zeile */
     const XSyn *sy; int sv_pos, sv_cnt, sv_spd, sv_wait, sv_slide, sv_env, sv_envpos, sv_envloop, sv_halt, sv_vol;  /* MED synth volume table */
@@ -95,7 +95,7 @@ struct XPlayer {
     float *scb; int scl; unsigned scn;   /* Scope-Ringpuffer je Kanal (scb[ch*scl + pos]) */
     int delay_cnt, in_delay;
     int jump_ord, jump_row, have_jump, loop_jump;
-    uint8_t vis[256][64];
+    uint8_t vis[1024][64];
     int gvol, fix_e8;
     int done; double acc;
     int lp; double lpa, lpl, lpr;    /* Paula-Tiefpass (A500: RC ca. 4,9 kHz): an/aus, Koeffizient, Zustand L/R */
@@ -561,22 +561,28 @@ static void advance(XPlayer *p){
     p->tick = 0;
     if (p->delay_cnt > 0) { p->delay_cnt--; if (p->delay_cnt > 0) { p->in_delay = 1; return; } }
     p->in_delay = 0;
-    int pat = s->orders[p->order], jo = -1, jr = -1, loopto = -1;
+    int pat = s->orders[p->order], jo = -1, jr = -1, loopto = -1, loop_ord_to = -1;
     for (int i = 0; pat < s->npat && i < s->nch; i++) {
         const XCell *x = &s->pat[((size_t)pat*64 + p->row)*s->nch + i];
         Ch *c = &p->ch[i];
         if (x->eff == 0x0B) { jo = x->par; if (jr < 0) jr = 0; }
-        else if (x->eff == 0x0D) { jr = (x->par >> 4) * 10 + (x->par & 15); if (jo < 0) jo = p->order + 1; }
+        else if (x->eff == 0x0D) { jr = (x->par >> 4) * 10 + (x->par & 15); if (jo < 0) jo = p->order + 1 + (s->prem ? s->prem[pat] : 0); }
         else if (x->eff == 0x0E && (x->par >> 4) == 6) {
             int n = x->par & 15;
-            if (!n) c->loop_row = p->row;
+            if (!n) { c->loop_row = p->row; c->loop_ord = p->order; }
             else { if (c->loop_cnt == 0) c->loop_cnt = n; else c->loop_cnt--;
-                   if (c->loop_cnt > 0) loopto = c->loop_row; }
+                   if (c->loop_cnt > 0) { loopto = c->loop_row; if (s->prem && c->loop_ord < p->order && p->order - c->loop_ord <= s->prem[s->orders[c->loop_ord]]) loop_ord_to = c->loop_ord; } }
         }
     }
     if (loopto >= 0 && (jo < 0 || s->fmt == 2)) {      /* S3M: a pattern loop that jumps wins over a break or jump on the same row (libopenmpt: edge_-_abraham.s3m, SB3 and C16 on row 63) */
         /* E6x pattern loop: the rows of the loop are meant to be played again, so forget that they were visited
          * (otherwise the song-end detection takes the repeat for a loop of the whole song and stops after the first pass) */
+        if (loop_ord_to >= 0) {          /* the loop runs over several chunks of one block: forget them all, go back to the first */
+            for (int r = loopto; r < 64; r++) p->vis[loop_ord_to][r] = 0;
+            for (int o = loop_ord_to + 1; o < p->order; o++) for (int r = 0; r < 64; r++) p->vis[o][r] = 0;
+            for (int r = 0; r <= p->row && r < 64; r++) p->vis[p->order][r] = 0;
+            p->order = loop_ord_to;
+        } else
         for (int r = loopto; r <= p->row && r < 64; r++) p->vis[p->order][r] = 0;
         p->row = loopto; p->loop_jump = 1; return;
     }
