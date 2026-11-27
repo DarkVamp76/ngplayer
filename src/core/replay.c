@@ -75,7 +75,7 @@ typedef struct {
     int swap;                        /* Sample live tauschen (Note+Inst+3xx) */
     uint32_t len, ls, le; int loop;  /* Kopie der Sampledaten */
     const int8_t *data;
-    int loop_row, loop_cnt, loop_ord;     /* loop_ord: the order (chunk) of the loop start: a MED block of more than 64 lines is several orders */
+    int loop_row, loop_cnt, loop_ord, loop_g;     /* loop_ord: the order (chunk) of the loop start: a MED block of more than 64 lines is several orders */
     int is16, m168, mA4, mA8;
     int sd_on, sd_tick; XCell sd_cell;   /* S3M SDx: verzoegerte Zeile */
     const XSyn *sy; int sw_wave; SynS sx[2];  /* MED synth: volume script [0] and waveform script [1] (OctaMED instrument scripts) */
@@ -483,6 +483,7 @@ static void do_effect(XPlayer *p, int chn, Ch *c, int tick){
     case 9: if (par) c->mcc = par << 8;
             { uint32_t off = (uint32_t)c->mcc;
               if (p->s->fmt == 1 && p->s->pt_tuning == 1 && c->loop && c->le > c->ls && off >= c->le) off = (off - c->ls) % (c->le - c->ls) + c->ls;      /* MTM (libopenmpt): an offset beyond the loop end wraps around in the loop */
+              if (p->s->med && (off >= (uint32_t)c->len || (c->loop && off >= (uint32_t)c->le))) off = c->loop ? c->ls : 0;      /* MED (libopenmpt): an offset beyond the sample or the loop end starts at the loop start */
               c->start38 = (int)(off > c->len ? c->len : off); } break;
     default: break;
     }
@@ -614,9 +615,13 @@ static void advance(XPlayer *p){
         else if (x->eff == 0x0D) { jr = (x->par >> 4) * 10 + (x->par & 15); if (jo < 0) jo = p->order + 1 + (s->prem ? s->prem[pat] : 0); }
         else if (x->eff == 0x0E && (x->par >> 4) == 6) {
             int n = x->par & 15;
-            if (!n) { c->loop_row = p->row; c->loop_ord = p->order; }
+            int fo = p->order; if (s->prem) while (fo > 0 && s->prem[s->orders[fo - 1]] == s->prem[s->orders[fo]] + 1) fo--;      /* first chunk of the block (a MED block of more than 64 lines is several orders) */
+            if (!n) { c->loop_row = p->row; c->loop_ord = p->order; c->loop_g = (p->order - fo) * 64 + p->row; }
             else { if (c->loop_cnt == 0) c->loop_cnt = n; else c->loop_cnt--;
-                   if (c->loop_cnt > 0) { loopto = c->loop_row; if (s->prem && c->loop_ord < p->order && p->order - c->loop_ord <= s->prem[s->orders[c->loop_ord]]) loop_ord_to = c->loop_ord; } }
+                   if (c->loop_cnt > 0) {
+                       if (s->prem) { /* libopenmpt: the loop row counts in the whole block, and a channel that never set one loops to the start of the block */
+                           int to = fo + c->loop_g / 64; loopto = c->loop_g % 64; if (to < p->order) loop_ord_to = to; else if (to > p->order) loopto = c->loop_row; }
+                       else loopto = c->loop_row; } }
         }
     }
     if (loopto >= 0 && (jo < 0 || s->fmt == 2)) {      /* S3M: a pattern loop that jumps wins over a break or jump on the same row (libopenmpt: edge_-_abraham.s3m, SB3 and C16 on row 63) */
@@ -680,6 +685,7 @@ int xplay_render(XPlayer *p, int16_t *out, int n){
               if (!p->started && s->pt_tuning == 2) tmp = tmp0;                /* libopenmpt: a tempo command in the very first row only counts from the second tick on */
               p->started = 1;
               double t = p->rate * 2.5 / tmp;
+              if (tk == 1 && tmp > 0) { long long raw = (long long)(tmp * 10000.0 + 0.5); if (raw > 0) t = (double)((long long)p->rate * 50000LL / (raw * 2)); }      /* libopenmpt keeps the tempo as a fixed point number (4 decimals) and cuts the tick length: 715.909 BPM is 153 samples per tick, not 154 */
               p->acc += tk==1 ? (double)(long)t : tk==2 ? (double)(long)(t+0.5) : t; }
             advance(p);
         }
