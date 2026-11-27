@@ -461,6 +461,7 @@ struct tsf_voice
 	struct tsf_voice_envelope ampenv, modenv;
 	struct tsf_voice_lowpass lowpass;
 	struct tsf_voice_lfo modlfo, viblfo;
+	int fcOffsetCents;            /* ngPlayer: the cutoff offset of the channel (CC 74 / GS NRPN) for this voice */
 };
 
 struct tsf_channel
@@ -468,6 +469,8 @@ struct tsf_channel
 	unsigned short presetIndex, bank, pitchWheel, midiPan, midiVolume, midiExpression, midiRPN, midiData : 14, sustain : 1;
 	float panOffset, gainDB, pitchRange, tuning;
 	float reverbSend, chorusSend; /* ngPlayer: CC 91 / 93 as 0..1 (General MIDI defaults: reverb 40, chorus 0) */
+	short scFc, scQ, scAtt, scDec, scRel;  /* ngPlayer: the Roland GS sound controllers, each -64..+63 around the nominal 64: CC 74 cutoff, 71 resonance, 73 attack, 75 decay, 72 release (also the GS NRPN 01 20 / 21 / 63 / 64 / 66) */
+	unsigned short midiNRPN;
 };
 
 struct tsf_channels
@@ -1155,6 +1158,35 @@ static void tsf_voice_lowpass_setup(struct tsf_voice_lowpass* e, float Fc)
 	e->b2 = (1 - K * e->QInv + KK) * norm;
 }
 
+
+/* ngPlayer: the Roland GS sound controllers (CC 71 .. 75 and the NRPN 01 xx) change the filter and the envelopes of the voices of a channel: cutoff +-2400 cents, resonance +-12.8 dB, the times by a factor of 4 down / up (attack and release also get a few tenths of a second added above 64, as most of the patches have none) */
+static struct tsf_channel* tsf_voice_channel(tsf* f, struct tsf_voice* v)
+{
+	return (f->channels && v->playingChannel >= 0 && v->playingChannel < f->channels->channelNum) ? &f->channels->channels[v->playingChannel] : TSF_NULL;
+}
+static float tsf_sc_scale(int off) { return TSF_POWF(2.0f, (float)off / 64.0f * 2.0f); }
+static void tsf_voice_lowpass_apply(tsf* f, struct tsf_voice* voice, int reset)
+{
+	const struct tsf_channel* c = tsf_voice_channel(f, voice);
+	const struct tsf_region* region = voice->region;
+	int fcOff = c ? (int)((float)c->scFc * 37.5f) : 0, qOff = c ? c->scQ * 2 : 0, fcCents, q;
+	float fc, qdb;
+	voice->fcOffsetCents = fcOff;
+	fcCents = region->initialFilterFc + fcOff;
+	q = region->initialFilterQ + qOff; if (q < 0) q = 0;
+	fc = (fcCents <= 13500 ? tsf_cents2Hertz((float)fcCents) / f->outSampleRate : 1.0f);
+	qdb = q / 10.0f;
+	voice->lowpass.QInv = 1.0 / TSF_POW(10.0, (qdb / 20.0));
+	if (reset) voice->lowpass.z1 = voice->lowpass.z2 = 0;
+	voice->lowpass.active = (fc < 0.499f);
+	if (voice->lowpass.active) tsf_voice_lowpass_setup(&voice->lowpass, fc);
+}
+static void tsf_channel_refilter(tsf* f, int channel)
+{
+	struct tsf_voice *v = f->voices, *vEnd = v + f->voiceNum;
+	for (; v != vEnd; v++) if (v->playingPreset != -1 && v->playingChannel == channel) tsf_voice_lowpass_apply(f, v, 0);
+}
+
 static float tsf_voice_lowpass_process(struct tsf_voice_lowpass* e, double In)
 {
 	double Out = In * e->a0 + e->z1; e->z1 = In * e->a1 + e->z2 - e->b1 * Out; e->z2 = In * e->a0 - e->b2 * Out; return (float)Out;
@@ -1253,7 +1285,7 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 	TSF_BOOL dynamicGain = (region->modLfoToVolume != 0);
 	float noteGain = 0, tmpModLfoToVolume;
 
-	if (dynamicLowpass) tmpInitialFilterFc = (float)region->initialFilterFc, tmpModLfoToFilterFc = (float)region->modLfoToFilterFc, tmpModEnvToFilterFc = (float)region->modEnvToFilterFc;
+	if (dynamicLowpass) tmpInitialFilterFc = (float)(region->initialFilterFc + v->fcOffsetCents), tmpModLfoToFilterFc = (float)region->modLfoToFilterFc, tmpModEnvToFilterFc = (float)region->modEnvToFilterFc;
 	else tmpInitialFilterFc = 0, tmpModLfoToFilterFc = 0, tmpModEnvToFilterFc = 0;
 
 	if (dynamicPitchRatio) pitchRatio = 0, tmpModLfoToPitch = (float)region->modLfoToPitch, tmpVibLfoToPitch = (float)region->vibLfoToPitch, tmpModEnvToPitch = (float)region->modEnvToPitch;
@@ -1650,17 +1682,23 @@ TSFDEF int tsf_note_on(tsf* f, int preset_index, int key, float vel)
 		voice->loopStart = (doLoop ? region->loop_start : 0);
 		voice->loopEnd = (doLoop ? region->loop_end : 0);
 
-		// Setup envelopes.
-		tsf_voice_envelope_setup(&voice->ampenv, &region->ampenv, key, midiVelocity, TSF_TRUE, f->outSampleRate);
-		tsf_voice_envelope_setup(&voice->modenv, &region->modenv, key, midiVelocity, TSF_FALSE, f->outSampleRate);
+		// Setup envelopes (the GS controllers of the channel: attack, decay, release).
+		{
+			struct tsf_envelope ea = region->ampenv, em = region->modenv;
+			const struct tsf_channel* gc = tsf_voice_channel(f, voice);
+			if (gc && (gc->scAtt || gc->scDec || gc->scRel)) {
+				float as = tsf_sc_scale(gc->scAtt), ds = tsf_sc_scale(gc->scDec), rs = tsf_sc_scale(gc->scRel);
+				float aadd = gc->scAtt > 0 ? gc->scAtt * 0.012f : 0.0f, radd = gc->scRel > 0 ? gc->scRel * 0.03f : 0.0f;
+				ea.attack = ea.attack * as + aadd; em.attack = em.attack * as + aadd;
+				ea.decay *= ds; em.decay *= ds;
+				ea.release = ea.release * rs + radd; em.release = em.release * rs + radd;
+			}
+			tsf_voice_envelope_setup(&voice->ampenv, &ea, key, midiVelocity, TSF_TRUE, f->outSampleRate);
+			tsf_voice_envelope_setup(&voice->modenv, &em, key, midiVelocity, TSF_FALSE, f->outSampleRate);
+		}
 
-		// Setup lowpass filter.
-		lowpassFc = (region->initialFilterFc <= 13500 ? tsf_cents2Hertz((float)region->initialFilterFc) / f->outSampleRate : 1.0f);
-		lowpassFilterQDB = region->initialFilterQ / 10.0f;
-		voice->lowpass.QInv = 1.0 / TSF_POW(10.0, (lowpassFilterQDB / 20.0));
-		voice->lowpass.z1 = voice->lowpass.z2 = 0;
-		voice->lowpass.active = (lowpassFc < 0.499f);
-		if (voice->lowpass.active) tsf_voice_lowpass_setup(&voice->lowpass, lowpassFc);
+		// Setup lowpass filter (the cutoff and resonance controllers of the channel are in it).
+		tsf_voice_lowpass_apply(f, voice, 1);
 
 		// Setup LFO filters.
 		tsf_voice_lfo_setup(&voice->modlfo, region->delayModLFO, region->freqModLFO, f->outSampleRate);
@@ -1801,6 +1839,7 @@ static struct tsf_channel* tsf_channel_init(tsf* f, int channel)
 		c->pitchRange = 2.0f;
 		c->tuning = 0.0f;
 		c->reverbSend = 40.0f / 127.0f; c->chorusSend = 0.0f;
+		c->scFc = c->scQ = c->scAtt = c->scDec = c->scRel = 0; c->midiNRPN = 0xFFFF;
 	}
 	return &f->channels->channels[channel];
 }
@@ -2011,10 +2050,15 @@ TSFDEF int tsf_channel_midi_control(tsf* f, int channel, int controller, int con
 		case  38 /*DATA_ENTRY_LSB*/  : c->midiData       = (unsigned short)((c->midiData       & 0x3F80) |  control_value);       goto TCMC_SET_DATA;
 		case   0 /*BANK_SELECT_MSB*/ : c->bank = (unsigned short)(0x8000 | control_value); return 1; //bank select MSB alone acts like LSB
 		case  32 /*BANK_SELECT_LSB*/ : c->bank = (unsigned short)((c->bank & 0x8000 ? ((c->bank & 0x7F) << 7) : 0) | control_value); return 1;
-		case 101 /*RPN_MSB*/         : c->midiRPN = (unsigned short)(((c->midiRPN == 0xFFFF ? 0 : c->midiRPN) & 0x7F  ) | (control_value << 7)); return 1;
-		case 100 /*RPN_LSB*/         : c->midiRPN = (unsigned short)(((c->midiRPN == 0xFFFF ? 0 : c->midiRPN) & 0x3F80) |  control_value); return 1;
-		case  98 /*NRPN_LSB*/        : c->midiRPN = 0xFFFF; return 1;
-		case  99 /*NRPN_MSB*/        : c->midiRPN = 0xFFFF; return 1;
+		case 101 /*RPN_MSB*/         : c->midiNRPN = 0xFFFF; c->midiRPN = (unsigned short)(((c->midiRPN == 0xFFFF ? 0 : c->midiRPN) & 0x7F  ) | (control_value << 7)); return 1;
+		case 100 /*RPN_LSB*/         : c->midiNRPN = 0xFFFF; c->midiRPN = (unsigned short)(((c->midiRPN == 0xFFFF ? 0 : c->midiRPN) & 0x3F80) |  control_value); return 1;
+		case  98 /*NRPN_LSB*/        : c->midiRPN = 0xFFFF; c->midiNRPN = (unsigned short)(((c->midiNRPN == 0xFFFF ? 0 : c->midiNRPN) & 0x3F80) | control_value); return 1;
+		case  99 /*NRPN_MSB*/        : c->midiRPN = 0xFFFF; c->midiNRPN = (unsigned short)(((c->midiNRPN == 0xFFFF ? 0 : c->midiNRPN) & 0x7F) | (control_value << 7)); return 1;
+		case  71 /*RESONANCE*/       : c->scQ   = (short)(control_value - 64); tsf_channel_refilter(f, channel); return 1;
+		case  72 /*RELEASE_TIME*/    : c->scRel = (short)(control_value - 64); return 1;
+		case  73 /*ATTACK_TIME*/     : c->scAtt = (short)(control_value - 64); return 1;
+		case  74 /*BRIGHTNESS*/      : c->scFc  = (short)(control_value - 64); tsf_channel_refilter(f, channel); return 1;
+		case  75 /*DECAY_TIME*/      : c->scDec = (short)(control_value - 64); return 1;
 		case  91 /*REVERB_SEND*/     : c->reverbSend = control_value / 127.0f; return 1;
 		case  93 /*CHORUS_SEND*/     : c->chorusSend = control_value / 127.0f; return 1;
 		case  64 /*SUSTAIN*/         : tsf_channel_set_sustain(f, channel, (int)(control_value >= 64)); return 1;
@@ -2027,6 +2071,8 @@ TSFDEF int tsf_channel_midi_control(tsf* f, int channel, int controller, int con
 			c->midiRPN = 0xFFFF;
 			c->midiData = 0;
 			c->reverbSend = 40.0f / 127.0f; c->chorusSend = 0.0f;
+			c->scFc = c->scQ = c->scAtt = c->scDec = c->scRel = 0; c->midiNRPN = 0xFFFF;
+			tsf_channel_refilter(f, channel);
 			tsf_channel_set_volume(f, channel, 1.0f);
 			tsf_channel_set_pan(f, channel, 0.5f);
 			tsf_channel_set_pitchrange(f, channel, 2.0f);
@@ -2042,6 +2088,17 @@ TCMC_SET_PAN:
 	tsf_channel_set_pan(f, channel, c->midiPan / 16383.0f);
 	return 1;
 TCMC_SET_DATA:
+	if (c->midiNRPN != 0xFFFF && controller == 6) {          /* ngPlayer: the Roland GS NRPN of the sound controllers: 01 20 cutoff, 01 21 resonance, 01 63 attack, 01 64 decay, 01 66 release (64 = nominal) */
+		int msb = c->midiNRPN >> 7, lsb = c->midiNRPN & 0x7F; short off = (short)(control_value - 64);
+		if (msb == 0x01) switch (lsb) {
+			case 0x20: c->scFc = off; tsf_channel_refilter(f, channel); break;
+			case 0x21: c->scQ = off; tsf_channel_refilter(f, channel); break;
+			case 0x63: c->scAtt = off; break;
+			case 0x64: c->scDec = off; break;
+			case 0x66: c->scRel = off; break;
+		}
+		return 1;
+	}
 	if      (c->midiRPN == 0) tsf_channel_set_pitchrange(f, channel, (c->midiData >> 7) + 0.01f * (c->midiData & 0x7F));
 	else if (c->midiRPN == 1) tsf_channel_set_tuning(f, channel, (int)c->tuning + ((float)c->midiData - 8192.0f) / 8192.0f); //fine tune
 	else if (c->midiRPN == 2 && controller == 6) tsf_channel_set_tuning(f, channel, ((float)control_value - 64.0f) + (c->tuning - (int)c->tuning)); //coarse tune

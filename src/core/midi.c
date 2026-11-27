@@ -281,6 +281,7 @@ static void apply(Midi *m, const Ev *e, int with_notes) {
         if (e->a == 7) m->vol[c] = e->b;
         if (e->a == 1) m->cc1[c] = (uint8_t)e->b;
         if (e->a == 10) m->pan[c] = e->b;
+        if (m->sx_mt32 && ((e->a >= 71 && e->a <= 75) || e->a == 98 || e->a == 99)) break;      /* the Roland GS sound controllers and NRPN do not exist on the MT-32 (ICEMAN uses CC 75 for something else) */
         tsf_channel_midi_control(m->f, c, e->a, e->b);
         break;
     case EV_BEND: tsf_channel_set_pitchwheel(m->f, c, e->a | (e->b << 7)); break;
