@@ -1085,7 +1085,7 @@ void song_midi_chan(const Song *s, int ch, SongMidiChan *o) {
     memset(o, 0, sizeof *o);
     if (!s || !s->mi || ch < 0 || ch > 15) return;
     o->level = midi_chan_level(s->mi, ch); o->out = midi_chan_out(s->mi, ch); o->program = midi_chan_program(s->mi, ch); o->bank = midi_chan_bank(s->mi, ch);
-    o->drum = midi_chan_is_drum(ch); o->volume = midi_chan_volume(s->mi, ch); o->pan = midi_chan_pan(s->mi, ch); o->used = midi_chan_notes(s->mi, ch) > 0;
+    o->drum = midi_chan_is_drum(s->mi, ch); o->volume = midi_chan_volume(s->mi, ch); o->pan = midi_chan_pan(s->mi, ch); o->used = midi_chan_notes(s->mi, ch) > 0;
     { MidiChanFx fx; midi_chan_fx(s->mi, ch, &fx); o->expr = fx.expr; o->mod = fx.mod; o->reverb = fx.reverb; o->chorus = fx.chorus; o->sustain = fx.sustain; o->bend = fx.bend; }
 }
 int song_midi_notes(const Song *s, double t0, double t1, SongMidiNote *out, int max) {

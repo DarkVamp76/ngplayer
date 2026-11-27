@@ -236,6 +236,8 @@ TSFDEF int tsf_channel_midi_control(tsf* f, int channel, int controller, int con
 
 // ngPlayer: back to the default drum instrument parameters (the GS drum NRPN)
 TSFDEF void tsf_channel_drum_reset(tsf* f, int channel);
+// ngPlayer: the GS part key shift in semitones
+TSFDEF void tsf_channel_set_keyshift(tsf* f, int channel, float semitones);
 
 // Get current values set on the channels
 TSFDEF int tsf_channel_get_preset_index(tsf* f, int channel);
@@ -475,6 +477,7 @@ struct tsf_channel
 	float reverbSend, chorusSend; /* ngPlayer: CC 91 / 93 as 0..1 (General MIDI defaults: reverb 40, chorus 0) */
 	short scFc, scQ, scAtt, scDec, scRel;  /* ngPlayer: the Roland GS sound controllers, each -64..+63 around the nominal 64: CC 74 cutoff, 71 resonance, 73 attack, 75 decay, 72 release (also the GS NRPN 01 20 / 21 / 63 / 64 / 66) */
 	unsigned short midiNRPN;
+	float keyShift;            /* ngPlayer: the GS part key shift in semitones (SysEx 40 1x 16), on top of the RPN tuning */
 	unsigned char isDrum;      /* ngPlayer: the channel plays a drum kit (the GS drum NRPN apply to it) */
 	unsigned char dPitch[128], dLevel[128], dPan[128], dRev[128], dCho[128];  /* ngPlayer: the Roland GS drum instrument parameters per note (NRPN 18 / 1A / 1C / 1D / 1E rr): pitch (64 = unchanged, semitones), level (127 = full), pan (0 random, 64 centre, 255 = the sample's own), reverb and chorus send (127 = the channel's) */
 };
@@ -1815,7 +1818,7 @@ static void tsf_channel_setup_voice(tsf* f, struct tsf_voice* v)
 		if (c->dPan[key] != 255) newpan += (c->dPan[key] == 0 ? ((float)(((unsigned)v->playIndex * 2654435761u) >> 8 & 255) / 255.0f - 0.5f) : ((float)((int)c->dPan[key] - 64) / 127.0f));      /* 0 = a random place for every hit */
 		v->revMul = c->dRev[key] / 127.0f; v->choMul = c->dCho[key] / 127.0f;
 	}
-	tsf_voice_calcpitchratio(v, drumSemi + (c->pitchWheel == 8192 ? c->tuning : ((c->pitchWheel / 16383.0f * c->pitchRange * 2.0f) - c->pitchRange + c->tuning)), f->outSampleRate);
+	tsf_voice_calcpitchratio(v, drumSemi + (c->pitchWheel == 8192 ? c->tuning + c->keyShift : ((c->pitchWheel / 16383.0f * c->pitchRange * 2.0f) - c->pitchRange + c->tuning + c->keyShift)), f->outSampleRate);
 	if      (newpan <= -0.5f) { v->panFactorLeft = 1.0f; v->panFactorRight = 0.0f; }
 	else if (newpan >=  0.5f) { v->panFactorLeft = 0.0f; v->panFactorRight = 1.0f; }
 	else { v->panFactorLeft = TSF_SQRTF(0.5f - newpan); v->panFactorRight = TSF_SQRTF(0.5f + newpan); }
@@ -1859,7 +1862,7 @@ static struct tsf_channel* tsf_channel_init(tsf* f, int channel)
 		c->pitchRange = 2.0f;
 		c->tuning = 0.0f;
 		c->reverbSend = 40.0f / 127.0f; c->chorusSend = 0.0f;
-		c->scFc = c->scQ = c->scAtt = c->scDec = c->scRel = 0; c->midiNRPN = 0xFFFF; c->isDrum = 0; tsf_channel_drum_defaults(c);
+		c->scFc = c->scQ = c->scAtt = c->scDec = c->scRel = 0; c->midiNRPN = 0xFFFF; c->isDrum = 0; c->keyShift = 0.0f; tsf_channel_drum_defaults(c);
 	}
 	return &f->channels->channels[channel];
 }
@@ -1867,7 +1870,7 @@ static struct tsf_channel* tsf_channel_init(tsf* f, int channel)
 static void tsf_channel_applypitch(tsf* f, int channel, struct tsf_channel* c)
 {
 	struct tsf_voice *v, *vEnd;
-	float pitchShift = (c->pitchWheel == 8192 ? c->tuning : ((c->pitchWheel / 16383.0f * c->pitchRange * 2.0f) - c->pitchRange + c->tuning));
+	float pitchShift = (c->pitchWheel == 8192 ? c->tuning + c->keyShift : ((c->pitchWheel / 16383.0f * c->pitchRange * 2.0f) - c->pitchRange + c->tuning + c->keyShift));
 	for (v = f->voices, vEnd = v + f->voiceNum; v != vEnd; v++)
 		if (v->playingPreset != -1 && v->playingChannel == channel)
 			tsf_voice_calcpitchratio(v, pitchShift, f->outSampleRate);
@@ -2053,6 +2056,14 @@ TSFDEF void tsf_channel_sounds_off_all(tsf* f, int channel)
 	for (; v != vEnd; v++)
 		if (v->playingPreset != -1 && v->playingChannel == channel && (v->ampenv.segment < TSF_SEGMENT_RELEASE || v->ampenv.parameters.release))
 			tsf_voice_endquick(f, v);
+}
+
+TSFDEF void tsf_channel_set_keyshift(tsf* f, int channel, float semitones)
+{
+	struct tsf_channel* c = tsf_channel_init(f, channel);
+	if (!c || c->keyShift == semitones) return;
+	c->keyShift = semitones;
+	tsf_channel_applypitch(f, channel, c);
 }
 
 TSFDEF void tsf_channel_drum_reset(tsf* f, int channel)

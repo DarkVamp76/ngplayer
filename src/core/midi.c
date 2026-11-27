@@ -123,6 +123,8 @@ struct Midi {
     int div, measures;
     MidiNote *notes; size_t nnotes; double maxdur;
     Reverb rev; Chorus cho; float rev_level, cho_level;
+    float rev_base, cho_base, mvol;       /* the start values of the reverb / chorus level and the GS master volume (a GS reset sets them back) */
+    uint8_t drumch[NCH];                  /* the channel plays a drum kit: 10, and the parts a GS file turns into rhythm parts (SysEx 40 1x 15) */
     float dry[2 * MIDI_BLOCK], wrev[2 * MIDI_BLOCK], wcho[2 * MIDI_BLOCK], orev[2 * MIDI_BLOCK], ocho[2 * MIDI_BLOCK];
     float scblk[NCH * MIDI_BLOCK];        /* the dry signal of each channel for one block (tsf scopeBlk) */
     float *scope; int scope_len; unsigned scope_pos;
@@ -257,11 +259,37 @@ static void chan_reset(Midi *m, int ch) {
     tsf_channel_set_pitchwheel(m->f, ch, 8192);
     tsf_channel_sounds_off_all(m->f, ch);
     tsf_channel_set_bank(m->f, ch, 0);
-    tsf_channel_set_presetnumber(m->f, ch, 0, ch == 9);
+    tsf_channel_set_presetnumber(m->f, ch, 0, m->drumch[ch]);
+    tsf_channel_set_keyshift(m->f, ch, 0.0f);
     tsf_channel_midi_control(m->f, ch, 7, 100); tsf_channel_midi_control(m->f, ch, 10, 64);      /* the General MIDI defaults: volume 100, pan centre */
     m->prog[ch] = 0; m->bank[ch] = 0; m->vol[ch] = 100; m->pan[ch] = 64; m->cc1[ch] = 0;
 }
-static void all_reset(Midi *m) { for (int c = 0; c < NCH; c++) chan_reset(m, c); }
+static void all_reset(Midi *m) {
+    m->mvol = 1.0f; m->rev_level = m->rev_base; m->cho_level = m->cho_base; m->rev.feedback = 0.7f * 0.28f + 0.7f;      /* (the start values of the effects) */
+    memset(m->drumch, 0, sizeof m->drumch); m->drumch[9] = 1;
+    for (int c = 0; c < NCH; c++) chan_reset(m, c);
+}
+/* the Roland GS parameters the synth follows (SysEx 41 dev 42 12 aa aa aa data cs F7): master volume 40 00 04, reverb level 40 01 33 and time 40 01 34, chorus level 40 01 3A (the reverb and chorus macros and the other
+ * effect parameters are not used: one reverb and one chorus), and per part (blocks 40 1x: 10 is part 10, 11 .. 19 the parts 1 .. 9, 1A .. 1F the parts 11 .. 16): 15 use for rhythm part, 16 pitch key shift */
+static void gs_param(Midi *m, unsigned a, int v) {
+    if (a == 0x400004) m->mvol = (v / 127.0f) * (v / 127.0f);
+    else if (a == 0x400133) m->rev_level = m->rev_base * (v / 64.0f);
+    else if (a == 0x400134) { float room = 0.7f + (v - 64) / 64.0f * 0.28f; if (room < 0.05f) room = 0.05f; if (room > 0.99f) room = 0.99f; m->rev.feedback = room * 0.28f + 0.7f; }
+    else if (a == 0x40013A) m->cho_level = m->cho_base * (v / 64.0f);
+    else if ((a >> 16) == 0x40 && ((a >> 8) & 0xF0) == 0x10) {
+        unsigned blk = (a >> 8) & 0xFF, off = a & 0xFF; int ch = blk == 0x10 ? 9 : blk <= 0x19 ? (int)blk - 0x11 : (int)blk - 0x1A + 10;
+        if (ch < 0 || ch >= NCH) return;
+        if (off == 0x15) { int dr = v != 0; if (dr != m->drumch[ch]) { m->drumch[ch] = (uint8_t)dr; tsf_channel_set_presetnumber(m->f, ch, m->prog[ch], dr); } }
+        else if (off == 0x16 && v >= 0x28 && v <= 0x58) tsf_channel_set_keyshift(m->f, ch, (float)(v - 0x40));
+    }
+}
+static void apply_sysex(Midi *m, const Ev *e) {
+    const uint8_t *q = m->sxp + e->val; int n = (q[0] | (q[1] << 8)) - 1; const uint8_t *p = q + 3;      /* p: the bytes after the F0, ending with F7 */
+    if (n >= 9 && p[0] == 0x41 && p[2] == 0x42 && p[3] == 0x12) {
+        unsigned a = (unsigned)p[4] << 16 | (unsigned)p[5] << 8 | p[6];
+        for (int k = 0; k < n - 9; k++) gs_param(m, a + (unsigned)k, p[7 + k]);
+    }
+}
 
 static void apply(Midi *m, const Ev *e, int with_notes) {
     int c = e->ch;
@@ -275,8 +303,9 @@ static void apply(Midi *m, const Ev *e, int with_notes) {
     case EV_NOTEOFF: if (with_notes) tsf_channel_note_off(m->f, c, e->a); break;
     case EV_PROG:
         m->prog[c] = e->a;
-        tsf_channel_set_presetnumber(m->f, c, e->a, c == 9);
+        tsf_channel_set_presetnumber(m->f, c, e->a, m->drumch[c]);
         break;
+    case EV_SYSEX: apply_sysex(m, e); break;
     case EV_CC:
         if (e->a == 0 || e->a == 32) m->bank[c] = e->a == 0 ? e->b : m->bank[c];
         if (e->a == 7) m->vol[c] = e->b;
@@ -421,7 +450,7 @@ Midi *midi_open(const uint8_t *buf, size_t total, int rate, char *err, size_t er
     m->f = tsf_copy(base);
     tsf_set_output(m->f, TSF_STEREO_INTERLEAVED, rate, -9.0f);
     tsf_set_max_voices(m->f, 256);
-    { const char *e = getenv("NGPLAYER_REVERB"); m->rev_level = e ? (float)atof(e) : 0.22f; e = getenv("NGPLAYER_CHORUS"); m->cho_level = e ? (float)atof(e) : 0.6f; }
+    { const char *e = getenv("NGPLAYER_REVERB"); m->rev_level = e ? (float)atof(e) : 0.22f; e = getenv("NGPLAYER_CHORUS"); m->cho_level = e ? (float)atof(e) : 0.6f; m->rev_base = m->rev_level; m->cho_base = m->cho_level; m->mvol = 1.0f; m->drumch[9] = 1; }
     reverb_init(&m->rev, rate, 0.7f, 0.5f); chorus_init(&m->cho, rate);
     all_reset(m);
     return m;
@@ -596,7 +625,7 @@ int midi_render(Midi *m, int16_t *out, int frames) {
             chorus_process(&m->cho, m->wcho, m->ocho, k, m->rate);
             int16_t *o = out + 2 * (size_t)(done + part);
             for (int i = 0; i < 2 * k; i++) {
-                float y = (m->dry[i] + m->orev[i] * m->rev_level + m->ocho[i] * m->cho_level) * 32767.0f, a = y < 0 ? -y : y;
+                float y = (m->dry[i] + m->orev[i] * m->rev_level + m->ocho[i] * m->cho_level) * m->mvol * 32767.0f, a = y < 0 ? -y : y;
                 if (a > 24000.0f) { a = 24000.0f + 8767.0f * tanhf((a - 24000.0f) / 8767.0f); y = y < 0 ? -a : a; }          /* a soft limiter: hot files bend over instead of clipping */
                 o[i] = (int16_t)y;
             }
@@ -670,7 +699,7 @@ void midi_chan_fx(const Midi *m, int c, MidiChanFx *o) {
 }
 int  midi_chan_program(const Midi *m, int c) { return m->prog[c & 15]; }
 int  midi_chan_bank(const Midi *m, int c) { return m->bank[c & 15]; }
-int  midi_chan_is_drum(int c) { return c == 9; }
+int  midi_chan_is_drum(const Midi *m, int c) { return m->drumch[c & 15]; }
 float midi_chan_level(const Midi *m, int c) { return m->lvl[c & 15]; }
 float midi_chan_out(const Midi *m, int c) { return m->aout[c & 15]; }
 int  midi_chan_volume(const Midi *m, int c) { return m->vol[c & 15]; }
@@ -697,7 +726,7 @@ void midi_idle(Midi *m) { (void)m; }
 void midi_add_syx(Midi *m, const char *n, const uint8_t *b, size_t l) { (void)m; (void)n; (void)b; (void)l; }
 int midi_chan_program(const Midi *m, int c) { (void)m; (void)c; return 0; }
 int midi_chan_bank(const Midi *m, int c) { (void)m; (void)c; return 0; }
-int midi_chan_is_drum(int c) { return c == 9; }
+int midi_chan_is_drum(const Midi *m, int c) { (void)m; return c == 9; }
 float midi_chan_level(const Midi *m, int c) { (void)m; (void)c; return 0; }
 float midi_chan_out(const Midi *m, int c) { (void)m; (void)c; return 0; }
 void midi_chan_fx(const Midi *m, int c, MidiChanFx *o) { (void)m; (void)c; o->expr = 127; o->mod = 0; o->reverb = 40; o->chorus = 0; o->sustain = 0; o->bend = 0; }
