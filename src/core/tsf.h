@@ -234,6 +234,9 @@ TSFDEF void tsf_channel_sounds_off_all(tsf* f, int channel); //end immediately
 //    (tsf_channel_midi_control returns 0 on allocation failure of new channel, otherwise 1)
 TSFDEF int tsf_channel_midi_control(tsf* f, int channel, int controller, int control_value);
 
+// ngPlayer: back to the default drum instrument parameters (the GS drum NRPN)
+TSFDEF void tsf_channel_drum_reset(tsf* f, int channel);
+
 // Get current values set on the channels
 TSFDEF int tsf_channel_get_preset_index(tsf* f, int channel);
 TSFDEF int tsf_channel_get_preset_bank(tsf* f, int channel);
@@ -462,6 +465,7 @@ struct tsf_voice
 	struct tsf_voice_lowpass lowpass;
 	struct tsf_voice_lfo modlfo, viblfo;
 	int fcOffsetCents;            /* ngPlayer: the cutoff offset of the channel (CC 74 / GS NRPN) for this voice */
+	float revMul, choMul;         /* ngPlayer: the reverb / chorus send of a drum voice relative to its channel (GS drum NRPN) */
 };
 
 struct tsf_channel
@@ -471,6 +475,8 @@ struct tsf_channel
 	float reverbSend, chorusSend; /* ngPlayer: CC 91 / 93 as 0..1 (General MIDI defaults: reverb 40, chorus 0) */
 	short scFc, scQ, scAtt, scDec, scRel;  /* ngPlayer: the Roland GS sound controllers, each -64..+63 around the nominal 64: CC 74 cutoff, 71 resonance, 73 attack, 75 decay, 72 release (also the GS NRPN 01 20 / 21 / 63 / 64 / 66) */
 	unsigned short midiNRPN;
+	unsigned char isDrum;      /* ngPlayer: the channel plays a drum kit (the GS drum NRPN apply to it) */
+	unsigned char dPitch[128], dLevel[128], dPan[128], dRev[128], dCho[128];  /* ngPlayer: the Roland GS drum instrument parameters per note (NRPN 18 / 1A / 1C / 1D / 1E rr): pitch (64 = unchanged, semitones), level (127 = full), pan (0 random, 64 centre, 255 = the sample's own), reverb and chorus send (127 = the channel's) */
 };
 
 struct tsf_channels
@@ -1259,7 +1265,7 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 	float* outL = outputBuffer;
 	float* outR = (f->outputmode == TSF_STEREO_UNWEAVED ? outL + numSamples : TSF_NULL);
 	float *wetRev = f->wetRev, *wetCho = f->wetCho, sendRev = 0, sendCho = 0;       /* ngPlayer: the sends of this voice's channel */
-	if (f->channels && v->playingChannel >= 0 && v->playingChannel < f->channels->channelNum) { sendRev = f->channels->channels[v->playingChannel].reverbSend; sendCho = f->channels->channels[v->playingChannel].chorusSend; }
+	if (f->channels && v->playingChannel >= 0 && v->playingChannel < f->channels->channelNum) { sendRev = f->channels->channels[v->playingChannel].reverbSend * v->revMul; sendCho = f->channels->channels[v->playingChannel].chorusSend * v->choMul; }
 	if (f->outputmode != TSF_STEREO_INTERLEAVED) wetRev = wetCho = TSF_NULL;
 	if (sendRev <= 0) wetRev = TSF_NULL;
 	if (sendCho <= 0) wetCho = TSF_NULL;
@@ -1797,15 +1803,29 @@ TSFDEF void tsf_render_float(tsf* f, float* buffer, int samples, int flag_mixing
 static void tsf_channel_setup_voice(tsf* f, struct tsf_voice* v)
 {
 	struct tsf_channel* c = &f->channels->channels[f->channels->activeChannel];
-	float newpan = v->region->pan + c->panOffset;
+	float newpan = v->region->pan + c->panOffset, drumSemi = 0.0f;
+	int key = v->playingKey;
 	v->playingChannel = f->channels->activeChannel;
+	v->revMul = v->choMul = 1.0f;
 	v->noteGainDB += c->gainDB;
-	tsf_voice_calcpitchratio(v, (c->pitchWheel == 8192 ? c->tuning : ((c->pitchWheel / 16383.0f * c->pitchRange * 2.0f) - c->pitchRange + c->tuning)), f->outSampleRate);
+	if (c->isDrum && key >= 0 && key < 128)      /* the GS drum instrument parameters of this note */
+	{
+		drumSemi = (float)((int)c->dPitch[key] - 64);
+		if (c->dLevel[key] != 127) v->noteGainDB += (c->dLevel[key] ? 20.0f * TSF_LOG10(c->dLevel[key] / 127.0f) : -100.0f);
+		if (c->dPan[key] != 255) newpan += (c->dPan[key] == 0 ? ((float)(((unsigned)v->playIndex * 2654435761u) >> 8 & 255) / 255.0f - 0.5f) : ((float)((int)c->dPan[key] - 64) / 127.0f));      /* 0 = a random place for every hit */
+		v->revMul = c->dRev[key] / 127.0f; v->choMul = c->dCho[key] / 127.0f;
+	}
+	tsf_voice_calcpitchratio(v, drumSemi + (c->pitchWheel == 8192 ? c->tuning : ((c->pitchWheel / 16383.0f * c->pitchRange * 2.0f) - c->pitchRange + c->tuning)), f->outSampleRate);
 	if      (newpan <= -0.5f) { v->panFactorLeft = 1.0f; v->panFactorRight = 0.0f; }
 	else if (newpan >=  0.5f) { v->panFactorLeft = 0.0f; v->panFactorRight = 1.0f; }
 	else { v->panFactorLeft = TSF_SQRTF(0.5f - newpan); v->panFactorRight = TSF_SQRTF(0.5f + newpan); }
 }
 
+static void tsf_channel_drum_defaults(struct tsf_channel* c)
+{
+	int k;
+	for (k = 0; k < 128; k++) { c->dPitch[k] = 64; c->dLevel[k] = 127; c->dPan[k] = 255; c->dRev[k] = 127; c->dCho[k] = 127; }
+}
 static struct tsf_channel* tsf_channel_init(tsf* f, int channel)
 {
 	int i;
@@ -1839,7 +1859,7 @@ static struct tsf_channel* tsf_channel_init(tsf* f, int channel)
 		c->pitchRange = 2.0f;
 		c->tuning = 0.0f;
 		c->reverbSend = 40.0f / 127.0f; c->chorusSend = 0.0f;
-		c->scFc = c->scQ = c->scAtt = c->scDec = c->scRel = 0; c->midiNRPN = 0xFFFF;
+		c->scFc = c->scQ = c->scAtt = c->scDec = c->scRel = 0; c->midiNRPN = 0xFFFF; c->isDrum = 0; tsf_channel_drum_defaults(c);
 	}
 	return &f->channels->channels[channel];
 }
@@ -1866,6 +1886,7 @@ TSFDEF int tsf_channel_set_presetnumber(tsf* f, int channel, int preset_number, 
 	int preset_index;
 	struct tsf_channel *c = tsf_channel_init(f, channel);
 	if (!c) return 0;
+	c->isDrum = (flag_mididrums ? 1 : 0);
 	if (flag_mididrums)
 	{
 		preset_index = tsf_get_presetindex(f, 128 | (c->bank & 0x7FFF), preset_number);
@@ -2034,6 +2055,12 @@ TSFDEF void tsf_channel_sounds_off_all(tsf* f, int channel)
 			tsf_voice_endquick(f, v);
 }
 
+TSFDEF void tsf_channel_drum_reset(tsf* f, int channel)
+{
+	struct tsf_channel* c = tsf_channel_init(f, channel);
+	if (c) tsf_channel_drum_defaults(c);
+}
+
 TSFDEF int tsf_channel_midi_control(tsf* f, int channel, int controller, int control_value)
 {
 	struct tsf_channel* c = tsf_channel_init(f, channel);
@@ -2090,6 +2117,11 @@ TCMC_SET_PAN:
 TCMC_SET_DATA:
 	if (c->midiNRPN != 0xFFFF && controller == 6) {          /* ngPlayer: the Roland GS NRPN of the sound controllers: 01 20 cutoff, 01 21 resonance, 01 63 attack, 01 64 decay, 01 66 release (64 = nominal) */
 		int msb = c->midiNRPN >> 7, lsb = c->midiNRPN & 0x7F; short off = (short)(control_value - 64);
+		if (lsb < 128 && (msb == 0x18 || msb == 0x1A || msb == 0x1C || msb == 0x1D || msb == 0x1E)) {      /* the GS drum instrument parameters (lsb = the note): 18 pitch, 1A level, 1C pan, 1D reverb send, 1E chorus send */
+			unsigned char v7 = (unsigned char)control_value;
+			switch (msb) { case 0x18: c->dPitch[lsb] = v7; break; case 0x1A: c->dLevel[lsb] = v7; break; case 0x1C: c->dPan[lsb] = v7; break; case 0x1D: c->dRev[lsb] = v7; break; default: c->dCho[lsb] = v7; break; }
+			return 1;
+		}
 		if (msb == 0x01) switch (lsb) {
 			case 0x20: c->scFc = off; tsf_channel_refilter(f, channel); break;
 			case 0x21: c->scQ = off; tsf_channel_refilter(f, channel); break;
