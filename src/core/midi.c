@@ -115,6 +115,7 @@ struct Midi {
     unsigned mute;
     int prog[NCH], bank[NCH], vol[NCH], pan[NCH];
     float lvl[NCH];
+    uint8_t cc1[NCH];                     /* the modulation wheel (the synth does not keep it) */
     float aout[NCH];
     uint32_t *tm_tick; double *tm_sec, *tm_us; size_t ntm;       /* the tempo map: tick, seconds at that tick, microseconds per quarter note */
     double spt;                           /* SMPTE division: seconds per tick (else 0) */
@@ -256,7 +257,7 @@ static void chan_reset(Midi *m, int ch) {
     tsf_channel_set_bank(m->f, ch, 0);
     tsf_channel_set_presetnumber(m->f, ch, 0, ch == 9);
     tsf_channel_midi_control(m->f, ch, 7, 100); tsf_channel_midi_control(m->f, ch, 10, 64);      /* the General MIDI defaults: volume 100, pan centre */
-    m->prog[ch] = 0; m->bank[ch] = 0; m->vol[ch] = 100; m->pan[ch] = 64;
+    m->prog[ch] = 0; m->bank[ch] = 0; m->vol[ch] = 100; m->pan[ch] = 64; m->cc1[ch] = 0;
 }
 static void all_reset(Midi *m) { for (int c = 0; c < NCH; c++) chan_reset(m, c); }
 
@@ -277,6 +278,7 @@ static void apply(Midi *m, const Ev *e, int with_notes) {
     case EV_CC:
         if (e->a == 0 || e->a == 32) m->bank[c] = e->a == 0 ? e->b : m->bank[c];
         if (e->a == 7) m->vol[c] = e->b;
+        if (e->a == 1) m->cc1[c] = (uint8_t)e->b;
         if (e->a == 10) m->pan[c] = e->b;
         tsf_channel_midi_control(m->f, c, e->a, e->b);
         break;
@@ -651,6 +653,14 @@ void midi_info(const Midi *m, MidiInfo *out) {
     out->standard_known = m->sx_mt32 || m->sx_gs || m->sx_xg || m->sx_gm2 || m->sx_gm;
     snprintf(out->lcd, sizeof out->lcd, "%s", m->lcd); snprintf(out->syx, sizeof out->syx, "%s", m->syx_name); out->syx_msgs = m->syx_msgs;
 }
+void midi_chan_fx(const Midi *m, int c, MidiChanFx *o) {
+    c &= 15; o->expr = 127; o->reverb = 40; o->chorus = 0; o->sustain = 0; o->bend = 0; o->mod = m->cc1[c];
+    if (m->f && m->f->channels && c < m->f->channels->channelNum) {
+        const struct tsf_channel *ch = &m->f->channels->channels[c];
+        o->expr = ch->midiExpression >> 7; o->reverb = (int)(ch->reverbSend * 127.0f + 0.5f); o->chorus = (int)(ch->chorusSend * 127.0f + 0.5f);
+        o->sustain = ch->sustain; o->bend = ((float)ch->pitchWheel - 8192.0f) / 8192.0f;
+    }
+}
 int  midi_chan_program(const Midi *m, int c) { return m->prog[c & 15]; }
 int  midi_chan_bank(const Midi *m, int c) { return m->bank[c & 15]; }
 int  midi_chan_is_drum(int c) { return c == 9; }
@@ -683,6 +693,7 @@ int midi_chan_bank(const Midi *m, int c) { (void)m; (void)c; return 0; }
 int midi_chan_is_drum(int c) { return c == 9; }
 float midi_chan_level(const Midi *m, int c) { (void)m; (void)c; return 0; }
 float midi_chan_out(const Midi *m, int c) { (void)m; (void)c; return 0; }
+void midi_chan_fx(const Midi *m, int c, MidiChanFx *o) { (void)m; (void)c; o->expr = 127; o->mod = 0; o->reverb = 40; o->chorus = 0; o->sustain = 0; o->bend = 0; }
 int midi_chan_volume(const Midi *m, int c) { (void)m; (void)c; return 0; }
 int midi_chan_pan(const Midi *m, int c) { (void)m; (void)c; return 64; }
 int midi_chan_notes(const Midi *m, int c) { (void)m; (void)c; return 0; }
