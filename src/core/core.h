@@ -9,7 +9,7 @@ typedef struct XSyn {              /* MED synth instrument: volume table + wavef
     int hold, decay;           /* instrument hold / decay (volume script restart after hold ticks) */
 } XSyn;
 typedef struct { uint8_t note, inst, eff, par, vol1, eff2, par2; } XCell;   /* eff2/par2: second effect (DBM), 0 = none */   /* vol1: 0 = keine Volumenspalte, sonst Wert+1 */
-typedef struct {
+typedef struct XSmp {
     uint32_t len, ls, le;      /* in Samples */
     int loop;                  /* Flag 8 */
     int is16;                  /* data zeigt auf int16_t, Laengen in Samples */
@@ -20,6 +20,7 @@ typedef struct {
     int nofree;                /* data belongs to another XSmp (DBM instruments sharing one sample): do not free */
     int finetune, relnote, pan;/* XM: -128..127, -96..95, 0..255 */
     XSyn *syn;                 /* MED synth: volume table (optional) */
+    struct XSmp *oct; int noct; uint8_t octmap[8]; int8_t octtr[8]; int octbase;   /* MED multi-octave sample: noct parts (data points into this sample's data), per octave the part and the transposition; octbase = sample transpose + play transpose in semitones */
     int is_adlib; uint8_t adlib[12];   /* S3M AdLib instrument (type 2): the 12 OPL bytes (mod / car 0x20, 0x40, 0x60, 0x80, 0xE0, then 0xC0), no sample */
 } XSmp;
 /* XM-Huellkurve */
@@ -67,6 +68,7 @@ typedef struct {
     int linpan;                /* 1 = linear pan law (DSM, like libopenmpt) instead of the S3M law */
     int has_adlib; uint8_t adlib_ch[64];   /* S3M: AdLib instruments are used; adlib_ch[ch] = OPL channel + 1 (0 = a sample channel) */
     int s3m_ni;                /* Scream Tracker 3 module: an instrument number without a note resets the volume but does not retrigger the sample */
+    int med;                   /* MED / OctaMED (fmt 1, pt_tuning 0): PAL Amiga clock like libopenmpt */
     int pt_tuning;             /* fmt 1: 0 = 12 tone equal temperament (FAR, AMF, PSM, MED ...), 1 = ProTracker period table (MTM), 3 = DSM (integer ST3 period like S3M), 2 = real MOD (fmt 2, S3M: 1 = integer ST3 period table, 0 = exact; saved by Impulse Tracker): period table + PAL tuning + exact slides */
 } XSong;
 

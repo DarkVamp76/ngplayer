@@ -78,7 +78,7 @@ static void conv_fx(XCell *x, int e, int p, int hexvol, int bpm, int rpb, const 
 
 int xmed_load(XSong *s, const uint8_t *b, size_t n){
     memset(s, 0, sizeof *s);
-    s->fmt = 1; s->maxvol = 0x40; s->gvol = 255; s->speed = 6; s->tempo = 125;
+    s->fmt = 1; s->med = 1; s->maxvol = 0x40; s->gvol = 255; s->speed = 6; s->tempo = 125;
     s->mixgain = 0.677;      /* libopenmpt mixes MED 3.4 dB quieter than the MOD gain of the replayer (median of 1100 songs with the same length: 3.39 dB, 90 % between 3.24 and 3.53) */
     if (!med_probe(b, n)) return -1;
     int ver = b[3] - '0';
@@ -201,8 +201,8 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
         unsigned rep = be16(h), rlen = be16(h + 2); int vol = h[6]; int strans = (int8_t)h[7];
         int ft = (ext && i < extn) ? (int8_t)ext[i * extsz + 3] : 0;
         m->vol = vol > 64 ? 64 : vol;
-        double sp = ngp_finetune_c2spd[ft & 15] * pow(2.0, (strans + ptrans) / 12.0);
-        m->c2spd = (uint32_t)(sp + 0.5);
+        m->c2spd = ngp_finetune_c2spd_mod[ft & 15];                    /* the PAL tuning of the finetune (the note table of the replayer picks it by this value); */
+        m->octbase = strans + ptrans;                                  /* the transposition shifts the note */
         uint32_t po = smo + 4u * i;
         if (!smo || po + 4 > n) continue;
         uint32_t io = be32(b + po);
@@ -249,10 +249,13 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
               m->ls = (uint32_t)m->syn->wls[wi]; m->le = (uint32_t)m->syn->wle[wi]; m->loop = m->syn->wloop[wi]; }
             m->vol = (int)(vol > 64 ? 64 : vol);
             (void)wv;
-            if (type == -1 && ver <= 2) m->c2spd = (uint32_t)(m->c2spd * 0.25 + 0.5);   /* OctaMED up to 2: synthetic instruments sound two octaves lower than the sample scale */
+            if (type == -1 && ver <= 2) m->octbase -= 24;   /* OctaMED up to 2: synthetic instruments sound two octaves lower than the sample scale */
             continue;
         }
-        if ((type & 0x0F) || (type & 0xC0)) continue;                  /* multi-octave, delta, packed: unsupported */
+        { int mt = type & 0x0F; if ((type & 0x80) || mt > 6) continue; }   /* packed samples (and unknown kinds): unsupported */
+        int mt = type & 0x0F, delta = (type & 0x40) != 0;
+        static const uint8_t nparts[7] = { 1, 5, 3, 2, 4, 6, 7 };       /* sample, IFF 5 / 3 / 2 / 4 / 6 / 7 octaves */
+        int np = nparts[mt];
         int is16 = (type & 0x10) != 0, stereo = (type & 0x20) != 0;
         size_t avail = (size_t)io + 6 < n ? n - io - 6 : 0;
         if (len > avail) len = (uint32_t)avail;
@@ -265,10 +268,32 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
         const uint8_t *d = b + io + 6;
         if (is16) { int16_t *w = (int16_t *)m->data; for (uint32_t k = 0; k < cnt; k++) w[k] = (int16_t)be16(d + 2 * k); }
         else memcpy(m->data, d, cnt);
-        if (rlen > 1) {
-            uint32_t ls = is16 ? rep : rep * 2, ll = is16 ? rlen : rlen * 2;
-            m->ls = ls; m->le = ls + ll; if (m->le > m->len) m->le = m->len;
-            m->loop = m->ls < m->le;
+        uint32_t ls = 0, ll = 0;
+        if (rlen > 1) { ls = is16 ? rep : rep * 2; ll = is16 ? rlen : rlen * 2; }
+        if (np == 1) {
+            if (delta) { if (is16) { int16_t *w = (int16_t *)m->data; for (uint32_t k = 1; k < cnt; k++) w[k] = (int16_t)(w[k] + w[k - 1]); } else for (uint32_t k = 1; k < cnt; k++) m->data[k] = (int8_t)(m->data[k] + m->data[k - 1]); }
+            if (rlen > 1) { m->ls = ls; m->le = ls + ll; if (m->le > m->len) m->le = m->len; m->loop = m->ls < m->le; }
+        } else {                                                        /* the parts are one octave apart: the shortest first, each twice as long as the one before */
+            static const uint8_t omap[6][8] = { {1,1,0,0,0,0,0,0}, {2,2,1,1,0,0,0,0}, {3,3,2,2,1,0,0,0}, {4,3,2,1,1,0,0,0}, {5,4,3,2,1,0,0,0}, {6,5,4,3,2,1,0,0} };
+            static const int8_t otr[6][8] = { {0,0,-12,-12,-24,-36,-48,-60}, {0,0,-12,-12,-24,-36,-48,-60}, {0,0,-12,-12,-24,-36,-48,-60}, {12,0,-12,-24,-24,-36,-48,-60}, {12,0,-12,-24,-36,-48,-48,-60}, {12,0,-12,-24,-36,-48,-60,-72} };
+            uint32_t base = cnt / ((1u << np) - 1);
+            if (!base) { free(m->data); m->data = NULL; m->len = 0; continue; }
+            m->oct = calloc((size_t)np, sizeof(XSmp));
+            if (!m->oct) return -5;
+            m->noct = np; memcpy(m->octmap, omap[np - 2], 8); memcpy(m->octtr, otr[np - 2], 8);
+            uint32_t off = 0, pl = base, pls = ls, pll = ll;
+            for (int k = 0; k < np; k++) {
+                XSmp *q = &m->oct[k];
+                if (off + pl > cnt) pl = cnt - off;
+                q->len = pl; q->is16 = is16; q->data = (int8_t *)((uint8_t *)m->data + (size_t)off * (is16 ? 2 : 1)); q->vol = m->vol; q->c2spd = 0;
+                if (delta) { if (is16) { int16_t *w = (int16_t *)q->data; for (uint32_t j = 1; j < pl; j++) w[j] = (int16_t)(w[j] + w[j - 1]); } else for (uint32_t j = 1; j < pl; j++) q->data[j] = (int8_t)(q->data[j] + q->data[j - 1]); }
+                if (rlen > 1) { q->ls = pls; q->le = pls + pll; if (q->le > q->len) q->le = q->len; q->loop = q->ls < q->le; }
+                off += pl; pl *= 2; pls *= 2; pll *= 2;
+            }
+            m->len = m->oct[0].len; m->data = m->data;                 /* (the whole block stays owned by this sample) */
+            m->octbase = strans + ptrans;
+            
+            for (int k = 0; k < np; k++) m->oct[k].c2spd = m->c2spd;
         }
     }
     return 0;
