@@ -146,8 +146,9 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
     if (npat > MAXPAT - 1) return -4;
     s->npat = npat + 1;                                   /* last one stays empty (target for invalid sequence entries) */
     s->pat = calloc((size_t)s->npat * 64 * nch + 1, sizeof(XCell));
-    s->plen = calloc((size_t)s->npat + 1, 1);
-    if (!s->plen) return -5;
+    s->plen = calloc((size_t)s->npat + 1, 1); s->prem = calloc((size_t)s->npat + 1, 1);
+    if (!s->plen || !s->prem) return -5;
+    for (unsigned i = 0; i < nblk; i++) for (int k = 0; k < map[i].cnt; k++) s->prem[map[i].first + k] = (uint8_t)(map[i].cnt - 1 - k);
     if (!s->pat) return -5;
 
     int norder = 0; int seqmap[4096];
@@ -155,7 +156,7 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
         seqmap[i] = norder;
         unsigned bk = seq[i];
         if (bk >= nblk) continue;
-        for (int k = 0; k < map[bk].cnt && norder < 256; k++) s->orders[norder++] = (uint8_t)(map[bk].first + k);
+        for (int k = 0; k < map[bk].cnt && norder < 1024; k++) s->orders[norder++] = (uint8_t)(map[bk].first + k);
     }
     s->nord = norder;
     if (s->nord < 1) return -6;

@@ -38,7 +38,7 @@ typedef struct {
 typedef struct {
     char title[21];
     int nch, nord, npat, nsmp, xchn;
-    uint8_t orders[256];
+    uint8_t orders[1024];
     int fmt;                   /* Format-ID wie im Original ([0x4e008]): 1 MOD, 2 S3M ... */
     int fast;                  /* Original [0x4e010] */
     int gvol;                  /* globale Lautstaerke 1..255 */
@@ -60,6 +60,7 @@ typedef struct {
     int xm_ft2;                /* XM: written by FastTracker 2 itself (arpeggio order as in FT2); other trackers use the order of libopenmpt */
     int restart;
     int *prows;                /* XM: Zeilen je Pattern (sonst 64) */
+    uint8_t *prem;             /* fmt 1 (MED): how many more chunks of the same block follow this pattern (a block of more than 64 lines is split; a break goes past all of them) */
     uint8_t *plen;             /* fmt 1 (MED): Zeilen je Pattern, wenn kuerzer als 64 (0 oder NULL: 64) */
     int amiga;                 /* MOD: echtes Amiga-Format (M.K., M!K!, FLT4, 15 Samples) -> Paula-Tiefpass */
     int linpan;                /* 1 = linear pan law (DSM, like libopenmpt) instead of the S3M law */
