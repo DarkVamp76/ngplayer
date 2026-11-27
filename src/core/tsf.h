@@ -468,6 +468,7 @@ struct tsf_voice
 	struct tsf_voice_lfo modlfo, viblfo;
 	int fcOffsetCents;            /* ngPlayer: the cutoff offset of the channel (CC 74 / GS NRPN) for this voice */
 	float revMul, choMul;         /* ngPlayer: the reverb / chorus send of a drum voice relative to its channel (GS drum NRPN) */
+	float vibDepthAdd, vibDelayAdd; int vibRateOff;   /* ngPlayer: the GS vibrato controllers of the channel (CC 76 rate, 77 depth, 78 delay): cents added to the depth, seconds to the delay, cents to the LFO rate */
 };
 
 struct tsf_channel
@@ -475,6 +476,7 @@ struct tsf_channel
 	unsigned short presetIndex, bank, pitchWheel, midiPan, midiVolume, midiExpression, midiRPN, midiData : 14, sustain : 1;
 	float panOffset, gainDB, pitchRange, tuning;
 	float reverbSend, chorusSend; /* ngPlayer: CC 91 / 93 as 0..1 (General MIDI defaults: reverb 40, chorus 0) */
+	short scVibRate, scVibDepth, scVibDelay;
 	short scFc, scQ, scAtt, scDec, scRel;  /* ngPlayer: the Roland GS sound controllers, each -64..+63 around the nominal 64: CC 74 cutoff, 71 resonance, 73 attack, 75 decay, 72 release (also the GS NRPN 01 20 / 21 / 63 / 64 / 66) */
 	unsigned short midiNRPN;
 	float keyShift;            /* ngPlayer: the GS part key shift in semitones (SysEx 40 1x 16), on top of the RPN tuning */
@@ -1190,6 +1192,21 @@ static void tsf_voice_lowpass_apply(tsf* f, struct tsf_voice* voice, int reset)
 	voice->lowpass.active = (fc < 0.499f);
 	if (voice->lowpass.active) tsf_voice_lowpass_setup(&voice->lowpass, fc);
 }
+static void tsf_voice_vibrato_apply(tsf* f, struct tsf_voice* voice)
+{
+	const struct tsf_channel* c = tsf_voice_channel(f, voice);
+	voice->vibDepthAdd = c ? c->scVibDepth * 1.6f : 0.0f;
+	voice->vibRateOff = c ? (int)(c->scVibRate * 18.75f) : 0;
+	voice->vibDelayAdd = c ? c->scVibDelay * 0.03f : 0.0f;
+}
+static void tsf_channel_revibrato(tsf* f, int channel)      /* the depth and the rate follow the controller at once, for the notes that are playing */
+{
+	struct tsf_voice *v = f->voices, *vEnd = v + f->voiceNum;
+	for (; v != vEnd; v++) if (v->playingPreset != -1 && v->playingChannel == channel) {
+		tsf_voice_vibrato_apply(f, v);
+		v->viblfo.delta = (4.0f * tsf_cents2Hertz((float)(v->region->freqVibLFO + v->vibRateOff)) / f->outSampleRate);
+	}
+}
 static void tsf_channel_refilter(tsf* f, int channel)
 {
 	struct tsf_voice *v = f->voices, *vEnd = v + f->voiceNum;
@@ -1277,7 +1294,8 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 	// Cache some values, to give them at least some chance of ending up in registers.
 	TSF_BOOL updateModEnv = (region->modEnvToPitch || region->modEnvToFilterFc);
 	TSF_BOOL updateModLFO = (v->modlfo.delta && (region->modLfoToPitch || region->modLfoToFilterFc || region->modLfoToVolume));
-	TSF_BOOL updateVibLFO = (v->viblfo.delta && (region->vibLfoToPitch));
+	float vibDepth = (float)region->vibLfoToPitch + v->vibDepthAdd; if (vibDepth < 0.0f) vibDepth = 0.0f;      /* ngPlayer: with the GS vibrato depth of the channel */
+	TSF_BOOL updateVibLFO = (v->viblfo.delta && (vibDepth != 0.0f));
 	TSF_BOOL isLooping    = (v->loopStart < v->loopEnd);
 	unsigned int tmpLoopStart = v->loopStart, tmpLoopEnd = v->loopEnd;
 	double tmpSampleEndDbl = (double)region->end, tmpLoopEndDbl = (double)tmpLoopEnd + 1.0;
@@ -1287,7 +1305,7 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 	TSF_BOOL dynamicLowpass = (region->modLfoToFilterFc || region->modEnvToFilterFc);
 	float tmpSampleRate = f->outSampleRate, tmpInitialFilterFc, tmpModLfoToFilterFc, tmpModEnvToFilterFc;
 
-	TSF_BOOL dynamicPitchRatio = (region->modLfoToPitch || region->modEnvToPitch || region->vibLfoToPitch);
+	TSF_BOOL dynamicPitchRatio = (region->modLfoToPitch || region->modEnvToPitch || vibDepth != 0.0f);
 	double pitchRatio;
 	float tmpModLfoToPitch, tmpVibLfoToPitch, tmpModEnvToPitch;
 
@@ -1297,7 +1315,7 @@ static void tsf_voice_render(tsf* f, struct tsf_voice* v, float* outputBuffer, i
 	if (dynamicLowpass) tmpInitialFilterFc = (float)(region->initialFilterFc + v->fcOffsetCents), tmpModLfoToFilterFc = (float)region->modLfoToFilterFc, tmpModEnvToFilterFc = (float)region->modEnvToFilterFc;
 	else tmpInitialFilterFc = 0, tmpModLfoToFilterFc = 0, tmpModEnvToFilterFc = 0;
 
-	if (dynamicPitchRatio) pitchRatio = 0, tmpModLfoToPitch = (float)region->modLfoToPitch, tmpVibLfoToPitch = (float)region->vibLfoToPitch, tmpModEnvToPitch = (float)region->modEnvToPitch;
+	if (dynamicPitchRatio) pitchRatio = 0, tmpModLfoToPitch = (float)region->modLfoToPitch, tmpVibLfoToPitch = vibDepth, tmpModEnvToPitch = (float)region->modEnvToPitch;
 	else pitchRatio = tsf_timecents2Secsd(v->pitchInputTimecents) * v->pitchOutputFactor, tmpModLfoToPitch = 0, tmpVibLfoToPitch = 0, tmpModEnvToPitch = 0;
 
 	if (dynamicGain) tmpModLfoToVolume = (float)region->modLfoToVolume * 0.1f;
@@ -1711,7 +1729,8 @@ TSFDEF int tsf_note_on(tsf* f, int preset_index, int key, float vel)
 
 		// Setup LFO filters.
 		tsf_voice_lfo_setup(&voice->modlfo, region->delayModLFO, region->freqModLFO, f->outSampleRate);
-		tsf_voice_lfo_setup(&voice->viblfo, region->delayVibLFO, region->freqVibLFO, f->outSampleRate);
+		tsf_voice_vibrato_apply(f, voice);
+		tsf_voice_lfo_setup(&voice->viblfo, (region->delayVibLFO + voice->vibDelayAdd > 0.0f ? region->delayVibLFO + voice->vibDelayAdd : 0.0f), region->freqVibLFO + voice->vibRateOff, f->outSampleRate);
 	}
 	return 1;
 }
@@ -1862,7 +1881,7 @@ static struct tsf_channel* tsf_channel_init(tsf* f, int channel)
 		c->pitchRange = 2.0f;
 		c->tuning = 0.0f;
 		c->reverbSend = 40.0f / 127.0f; c->chorusSend = 0.0f;
-		c->scFc = c->scQ = c->scAtt = c->scDec = c->scRel = 0; c->midiNRPN = 0xFFFF; c->isDrum = 0; c->keyShift = 0.0f; tsf_channel_drum_defaults(c);
+		c->scFc = c->scQ = c->scAtt = c->scDec = c->scRel = 0; c->scVibRate = c->scVibDepth = c->scVibDelay = 0; c->midiNRPN = 0xFFFF; c->isDrum = 0; c->keyShift = 0.0f; tsf_channel_drum_defaults(c);
 	}
 	return &f->channels->channels[channel];
 }
@@ -2094,6 +2113,9 @@ TSFDEF int tsf_channel_midi_control(tsf* f, int channel, int controller, int con
 		case  99 /*NRPN_MSB*/        : c->midiRPN = 0xFFFF; c->midiNRPN = (unsigned short)(((c->midiNRPN == 0xFFFF ? 0 : c->midiNRPN) & 0x7F) | (control_value << 7)); return 1;
 		case  71 /*RESONANCE*/       : c->scQ   = (short)(control_value - 64); tsf_channel_refilter(f, channel); return 1;
 		case  72 /*RELEASE_TIME*/    : c->scRel = (short)(control_value - 64); return 1;
+		case  76 /*VIBRATO_RATE*/    : c->scVibRate  = (short)(control_value - 64); tsf_channel_revibrato(f, channel); return 1;
+		case  77 /*VIBRATO_DEPTH*/   : c->scVibDepth = (short)(control_value - 64); tsf_channel_revibrato(f, channel); return 1;
+		case  78 /*VIBRATO_DELAY*/   : c->scVibDelay = (short)(control_value - 64); return 1;
 		case  73 /*ATTACK_TIME*/     : c->scAtt = (short)(control_value - 64); return 1;
 		case  74 /*BRIGHTNESS*/      : c->scFc  = (short)(control_value - 64); tsf_channel_refilter(f, channel); return 1;
 		case  75 /*DECAY_TIME*/      : c->scDec = (short)(control_value - 64); return 1;
@@ -2109,8 +2131,8 @@ TSFDEF int tsf_channel_midi_control(tsf* f, int channel, int controller, int con
 			c->midiRPN = 0xFFFF;
 			c->midiData = 0;
 			c->reverbSend = 40.0f / 127.0f; c->chorusSend = 0.0f;
-			c->scFc = c->scQ = c->scAtt = c->scDec = c->scRel = 0; c->midiNRPN = 0xFFFF;
-			tsf_channel_refilter(f, channel);
+			c->scFc = c->scQ = c->scAtt = c->scDec = c->scRel = 0; c->scVibRate = c->scVibDepth = c->scVibDelay = 0; c->midiNRPN = 0xFFFF;
+			tsf_channel_refilter(f, channel); tsf_channel_revibrato(f, channel);
 			tsf_channel_set_volume(f, channel, 1.0f);
 			tsf_channel_set_pan(f, channel, 0.5f);
 			tsf_channel_set_pitchrange(f, channel, 2.0f);
@@ -2134,6 +2156,9 @@ TCMC_SET_DATA:
 			return 1;
 		}
 		if (msb == 0x01) switch (lsb) {
+			case 0x08: c->scVibRate = off; tsf_channel_revibrato(f, channel); break;
+			case 0x09: c->scVibDepth = off; tsf_channel_revibrato(f, channel); break;
+			case 0x0A: c->scVibDelay = off; break;
 			case 0x20: c->scFc = off; tsf_channel_refilter(f, channel); break;
 			case 0x21: c->scQ = off; tsf_channel_refilter(f, channel); break;
 			case 0x63: c->scAtt = off; break;
