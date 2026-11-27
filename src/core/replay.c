@@ -283,6 +283,10 @@ static void trigger_note(XPlayer *p, int chn, Ch *c, const XCell *x){
         c->len = mq->len; c->ls = mq->ls; c->le = mq->le; c->loop = mq->loop; c->data = mq->data; c->is16 = mq->is16;
         c->cnt164 = 0; c->m168 = 0;
     }
+    if (s->med && x->note) {     /* libopenmpt wraps the high notes of an instrument down by octaves (note map of the instrument) */
+        int real = note + 13 + m->octbase, offs = 61 + (s->med == 2 ? 36 : 24);
+        if (real >= offs) octsh -= (real - offs + 12) / 12 * 12;
+    }
     c->d0 = octsh;                                /* (a multi-octave sample shifts the note) */
     c->lastnote = note;
     c->vE8 = c->v44;

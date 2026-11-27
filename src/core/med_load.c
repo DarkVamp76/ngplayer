@@ -93,7 +93,7 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
 
     for (int i = 0; i < 32; i++) { s->chen[i] = 1; s->chpan[i] = -1; }
     s->speed = tempo2 ? (int)tempo2 : 6;
-    g_8ch = (flags & 0x40) != 0; g_soft = (flags2 & 0x80) != 0;
+    g_8ch = (flags & 0x40) != 0; g_soft = (flags2 & 0x80) != 0; s->med = (ver >= 2 && g_soft) ? 2 : 1;   /* (2: mixed in software: the instrument note wrap starts 12 notes higher) */
     { double t = mmd_bpm((int)deftempo, bpm, rpb); s->tempo_exact = t; s->tempo = (int)(t + 0.5); if (s->tempo < 0x20) s->tempo = 0x20; if (s->tempo > 0xFF) s->tempo = 0xFF; if (t < 32.0) s->tempo_exact = 0; }      /* (a start tempo above 255, e.g. 290 in BPM mode, stays as it is) */
     if (s->speed < 1) s->speed = 1; if (s->speed > 32) s->speed = 32;
 
@@ -178,7 +178,10 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
                 int note, inst, fx, par;
                 if (ver == 0) { note = e[0] & 0x3F; inst = ((e[0] & 0x80) >> 3) | ((e[0] & 0x40) >> 1) | (e[1] >> 4); fx = e[1] & 15; par = e[2]; }
                 else { note = e[0] & 0x7F; inst = e[1] & 0x3F; fx = e[2]; par = e[3]; }
-                if (note) { int en = note - 1 + NOTE_BASE; x->note = (uint8_t)(en > 107 ? 107 : en); }
+                if (note) {       /* libopenmpt: notes above 128 (counted with the play transposition) fold down by octaves; the later wrap of the instrument is done by the replayer */
+                    int ln = note + 48 + ptrans;
+                    if (ln > 132) ln -= 108; else if (ln > 128) ln -= (ln - 117) / 12 * 12;
+                    int en = ln - ptrans - 13; x->note = (uint8_t)(en < 0 ? 0 : en > 250 ? 250 : en); }
                 x->inst = (uint8_t)inst;
                 conv_fx(x, fx, par, hexvol, bpm, rpb, jm, (int)(nseq < 256 ? nseq : 256));
                 { int has = (x->eff || x->par || fx == 0x0E || (fx == 0x0F && par == 0xFD)) && !(fx == 0x0F && par == 0xFF);       /* (0F FF is a note cut, no command) */
