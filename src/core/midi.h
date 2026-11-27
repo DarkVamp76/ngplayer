@@ -37,6 +37,7 @@ void  midi_add_syx(Midi *m, const char *name, const uint8_t *data, size_t len); 
 int   midi_chan_program(const Midi *m, int ch);                      /* 0..127 (channel 9: the drum kit number) */
 int   midi_chan_bank(const Midi *m, int ch);
 int   midi_chan_is_drum(int ch);
+float midi_chan_out(const Midi *m, int ch);
 float midi_chan_level(const Midi *m, int ch);                        /* 0..1, rises with the velocity of a note, falls off */
 int   midi_chan_volume(const Midi *m, int ch);                       /* CC 7 */
 int   midi_chan_pan(const Midi *m, int ch);                          /* CC 10: 0..127 */

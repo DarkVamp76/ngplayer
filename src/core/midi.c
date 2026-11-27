@@ -115,6 +115,7 @@ struct Midi {
     unsigned mute;
     int prog[NCH], bank[NCH], vol[NCH], pan[NCH];
     float lvl[NCH];
+    float aout[NCH];
     uint32_t *tm_tick; double *tm_sec, *tm_us; size_t ntm;       /* the tempo map: tick, seconds at that tick, microseconds per quarter note */
     double spt;                           /* SMPTE division: seconds per tick (else 0) */
     int div, measures;
@@ -575,12 +576,13 @@ int midi_render(Midi *m, int16_t *out, int frames) {
             int k = chunk - part < MIDI_BLOCK ? chunk - part : MIDI_BLOCK;
             memset(m->wrev, 0, (size_t)k * 8); memset(m->wcho, 0, (size_t)k * 8);
             m->f->wetRev = m->wrev; m->f->wetCho = m->wcho;
-            if (m->scope) { memset(m->scblk, 0, sizeof m->scblk); m->f->scopeBlk = m->scblk; m->f->scopeStride = MIDI_BLOCK; } else m->f->scopeBlk = 0;
+            memset(m->scblk, 0, sizeof m->scblk); m->f->scopeBlk = m->scblk; m->f->scopeStride = MIDI_BLOCK;
             tsf_render_float(m->f, m->dry, k, 0);
             if (m->scope) {                                                         /* the scope rings: one trace per channel (the view normalises the level) */
                 for (int c = 0; c < NCH; c++) for (int i = 0; i < k; i++) m->scope[(size_t)c * (size_t)m->scope_len + ((m->scope_pos + (unsigned)i) & (unsigned)(m->scope_len - 1))] = m->scblk[c * MIDI_BLOCK + i] * 4.0f;
                 m->scope_pos += (unsigned)k;
             }
+            for (int c = 0; c < NCH; c++) { float pk = 0; const float *sb = m->scblk + c * MIDI_BLOCK; for (int i = 0; i < k; i++) { float a = sb[i] < 0 ? -sb[i] : sb[i]; if (a > pk) pk = a; } if (pk > m->aout[c]) m->aout[c] = pk; }
             reverb_process(&m->rev, m->wrev, m->orev, k);
             chorus_process(&m->cho, m->wcho, m->ocho, k, m->rate);
             int16_t *o = out + 2 * (size_t)(done + part);
@@ -593,7 +595,7 @@ int midi_render(Midi *m, int16_t *out, int frames) {
         m->pos += (uint64_t)chunk; done += chunk;
         if (m->next >= m->nev) m->tail += (uint64_t)chunk;
     }
-    if (done) { float k = (float)pow(0.85, (double)done / m->rate * 20.0); for (int c = 0; c < NCH; c++) m->lvl[c] *= k; }
+    if (done) { float k = (float)pow(0.85, (double)done / m->rate * 20.0); for (int c = 0; c < NCH; c++) { m->lvl[c] *= k; m->aout[c] *= k; } }
     if (done < frames) memset(out + 2 * (size_t)done, 0, (size_t)(frames - done) * 4);
     return done;                                                                      /* on hardware the SoundFont synth only runs for the pictures (scopes, spectrum): the caller mutes it, see midi_hardware_on() */
 }
@@ -653,6 +655,7 @@ int  midi_chan_program(const Midi *m, int c) { return m->prog[c & 15]; }
 int  midi_chan_bank(const Midi *m, int c) { return m->bank[c & 15]; }
 int  midi_chan_is_drum(int c) { return c == 9; }
 float midi_chan_level(const Midi *m, int c) { return m->lvl[c & 15]; }
+float midi_chan_out(const Midi *m, int c) { return m->aout[c & 15]; }
 int  midi_chan_volume(const Midi *m, int c) { return m->vol[c & 15]; }
 int  midi_chan_pan(const Midi *m, int c) { return m->pan[c & 15]; }
 int  midi_chan_notes(const Midi *m, int c) { return m->notes_ch[c & 15]; }
@@ -679,6 +682,7 @@ int midi_chan_program(const Midi *m, int c) { (void)m; (void)c; return 0; }
 int midi_chan_bank(const Midi *m, int c) { (void)m; (void)c; return 0; }
 int midi_chan_is_drum(int c) { return c == 9; }
 float midi_chan_level(const Midi *m, int c) { (void)m; (void)c; return 0; }
+float midi_chan_out(const Midi *m, int c) { (void)m; (void)c; return 0; }
 int midi_chan_volume(const Midi *m, int c) { (void)m; (void)c; return 0; }
 int midi_chan_pan(const Midi *m, int c) { (void)m; (void)c; return 64; }
 int midi_chan_notes(const Midi *m, int c) { (void)m; (void)c; return 0; }
