@@ -236,6 +236,10 @@ TSFDEF int tsf_channel_midi_control(tsf* f, int channel, int controller, int con
 
 // ngPlayer: back to the default drum instrument parameters (the GS drum NRPN)
 TSFDEF void tsf_channel_drum_reset(tsf* f, int channel);
+// ngPlayer: load the drum instrument parameters of a drum setup (the GS drum setup block 41: pitch, level, pan, reverb, chorus per note)
+TSFDEF void tsf_channel_drum_load(tsf* f, int channel, const unsigned char* pitch, const unsigned char* level, const unsigned char* pan, const unsigned char* rev, const unsigned char* cho);
+// ngPlayer: set one drum instrument parameter (kind 1 pitch, 2 level, 4 pan, 5 reverb, 6 chorus; the numbers of the drum setup block 41)
+TSFDEF void tsf_channel_drum_set(tsf* f, int channel, int kind, int note, int value);
 // ngPlayer: the GS part key shift in semitones
 TSFDEF void tsf_channel_set_keyshift(tsf* f, int channel, float semitones);
 
@@ -2083,6 +2087,20 @@ TSFDEF void tsf_channel_set_keyshift(tsf* f, int channel, float semitones)
 	if (!c || c->keyShift == semitones) return;
 	c->keyShift = semitones;
 	tsf_channel_applypitch(f, channel, c);
+}
+
+TSFDEF void tsf_channel_drum_load(tsf* f, int channel, const unsigned char* pitch, const unsigned char* level, const unsigned char* pan, const unsigned char* rev, const unsigned char* cho)
+{
+	struct tsf_channel* c = tsf_channel_init(f, channel);
+	if (!c) return;
+	TSF_MEMCPY(c->dPitch, pitch, 128); TSF_MEMCPY(c->dLevel, level, 128); TSF_MEMCPY(c->dPan, pan, 128); TSF_MEMCPY(c->dRev, rev, 128); TSF_MEMCPY(c->dCho, cho, 128);
+}
+
+TSFDEF void tsf_channel_drum_set(tsf* f, int channel, int kind, int note, int value)
+{
+	struct tsf_channel* c = tsf_channel_init(f, channel);
+	if (!c || note < 0 || note > 127) return;
+	switch (kind) { case 1: c->dPitch[note] = (unsigned char)value; break; case 2: c->dLevel[note] = (unsigned char)value; break; case 4: c->dPan[note] = (unsigned char)value; break; case 5: c->dRev[note] = (unsigned char)value; break; case 6: c->dCho[note] = (unsigned char)value; break; }
 }
 
 TSFDEF void tsf_channel_drum_reset(tsf* f, int channel)

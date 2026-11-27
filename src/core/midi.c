@@ -125,6 +125,8 @@ struct Midi {
     Reverb rev; Chorus cho; float rev_level, cho_level;
     float rev_base, cho_base, mvol;       /* the start values of the reverb / chorus level and the GS master volume (a GS reset sets them back) */
     float mtune; int mkey; int8_t kshift[NCH]; uint8_t tune_nib[4];     /* GS master tune (cents / 100 as semitones), master key shift, the key shift of each part, the nibbles of a tune message on their way */
+    struct { uint8_t pitch[128], level[128], pan[128], rev[128], cho[128]; } dset[2];      /* the GS drum setup of the two drum maps (SysEx 41 mp rr) */
+    uint8_t drummap[NCH];                 /* the drum map (0 / 1) of a rhythm part */
     uint8_t drumch[NCH];                  /* the channel plays a drum kit: 10, and the parts a GS file turns into rhythm parts (SysEx 40 1x 15) */
     float dry[2 * MIDI_BLOCK], wrev[2 * MIDI_BLOCK], wcho[2 * MIDI_BLOCK], orev[2 * MIDI_BLOCK], ocho[2 * MIDI_BLOCK];
     float scblk[NCH * MIDI_BLOCK];        /* the dry signal of each channel for one block (tsf scopeBlk) */
@@ -254,6 +256,7 @@ static int evcmp(const void *x, const void *y) {
 }
 
 /* ---------------------------------------------------------------- the channels */
+static void drum_load(Midi *m, int ch);
 static void apply_shift(Midi *m, int ch) {
     tsf_channel_set_keyshift(m->f, ch, (float)m->kshift[ch] + m->mtune + (m->drumch[ch] ? 0.0f : (float)m->mkey));
 }
@@ -264,11 +267,16 @@ static void chan_reset(Midi *m, int ch) {
     tsf_channel_sounds_off_all(m->f, ch);
     tsf_channel_set_bank(m->f, ch, 0);
     tsf_channel_set_presetnumber(m->f, ch, 0, m->drumch[ch]);
-    m->kshift[ch] = 0; apply_shift(m, ch);
+    m->kshift[ch] = 0; apply_shift(m, ch); if (m->drumch[ch]) drum_load(m, ch);
     tsf_channel_midi_control(m->f, ch, 7, 100); tsf_channel_midi_control(m->f, ch, 10, 64);      /* the General MIDI defaults: volume 100, pan centre */
     m->prog[ch] = 0; m->bank[ch] = 0; m->vol[ch] = 100; m->pan[ch] = 64; m->cc1[ch] = 0;
 }
+static void dset_defaults(Midi *m) {
+    for (int k = 0; k < 2; k++) for (int n = 0; n < 128; n++) { m->dset[k].pitch[n] = 64; m->dset[k].level[n] = 127; m->dset[k].pan[n] = 255; m->dset[k].rev[n] = 127; m->dset[k].cho[n] = 127; }
+}
+static void drum_load(Midi *m, int ch) { int k = m->drummap[ch] ? 1 : 0; tsf_channel_drum_load(m->f, ch, m->dset[k].pitch, m->dset[k].level, m->dset[k].pan, m->dset[k].rev, m->dset[k].cho); }
 static void all_reset(Midi *m) {
+    dset_defaults(m); memset(m->drummap, 0, sizeof m->drummap);
     m->mvol = 1.0f; m->rev_level = m->rev_base; m->cho_level = m->cho_base; m->rev.feedback = 0.7f * 0.28f + 0.7f;      /* (the start values of the effects) */
     memset(m->drumch, 0, sizeof m->drumch); m->drumch[9] = 1; m->mtune = 0.0f; m->mkey = 0;
     for (int c = 0; c < NCH; c++) chan_reset(m, c);
@@ -285,10 +293,20 @@ static void gs_param(Midi *m, unsigned a, int v) {
     else if (a == 0x400133) m->rev_level = m->rev_base * (v / 64.0f);
     else if (a == 0x400134) { float room = 0.7f + (v - 64) / 64.0f * 0.28f; if (room < 0.05f) room = 0.05f; if (room > 0.99f) room = 0.99f; m->rev.feedback = room * 0.28f + 0.7f; }
     else if (a == 0x40013A) m->cho_level = m->cho_base * (v / 64.0f);
+    else if ((a >> 16) == 0x41) {                                                                      /* the drum setup: 41 mp rr, m the map (0 / 1), p 1 pitch (play note) 2 level 4 pan 5 reverb send 6 chorus send, rr the note */
+        unsigned b = (a >> 8) & 0xFF, mp = (b >> 4) & 15, par = b & 15, rr = a & 0xFF; if (mp > 1 || rr > 127) return;
+        uint8_t *dst = par == 1 ? m->dset[mp].pitch : par == 2 ? m->dset[mp].level : par == 4 ? m->dset[mp].pan : par == 5 ? m->dset[mp].rev : par == 6 ? m->dset[mp].cho : NULL; if (!dst) return;
+        dst[rr] = (uint8_t)v;
+        for (int c = 0; c < NCH; c++) if (m->drumch[c] && m->drummap[c] == mp) tsf_channel_drum_set(m->f, c, (int)par, (int)rr, v);
+    }
     else if ((a >> 16) == 0x40 && ((a >> 8) & 0xF0) == 0x10) {
         unsigned blk = (a >> 8) & 0xFF, off = a & 0xFF; int ch = blk == 0x10 ? 9 : blk <= 0x19 ? (int)blk - 0x11 : (int)blk - 0x1A + 10;
         if (ch < 0 || ch >= NCH) return;
-        if (off == 0x15) { int dr = v != 0; if (dr != m->drumch[ch]) { m->drumch[ch] = (uint8_t)dr; tsf_channel_set_presetnumber(m->f, ch, m->prog[ch], dr); apply_shift(m, ch); } }
+        if (off == 0x15) { int dr = v != 0, mp = v == 2 ? 1 : 0; if (dr != m->drumch[ch] || (dr && mp != m->drummap[ch])) { m->drumch[ch] = (uint8_t)dr; m->drummap[ch] = (uint8_t)mp; tsf_channel_set_presetnumber(m->f, ch, m->prog[ch], dr); apply_shift(m, ch); if (dr) drum_load(m, ch); } }
+        else if (off == 0x19) { m->vol[ch] = (uint8_t)v; tsf_channel_midi_control(m->f, ch, 7, v); }                 /* part level = CC 7 */
+        else if (off == 0x1C && v >= 1) { m->pan[ch] = (uint8_t)v; tsf_channel_midi_control(m->f, ch, 10, v); }    /* part panpot = CC 10 (0 = random: left as it is) */
+        else if (off == 0x21) tsf_channel_midi_control(m->f, ch, 93, v);                                          /* chorus send level = CC 93 */
+        else if (off == 0x22) tsf_channel_midi_control(m->f, ch, 91, v);                                          /* reverb send level = CC 91 */
         else if (off == 0x16 && v >= 0x28 && v <= 0x58) { m->kshift[ch] = (int8_t)(v - 0x40); apply_shift(m, ch); }
     }
 }
@@ -459,7 +477,7 @@ Midi *midi_open(const uint8_t *buf, size_t total, int rate, char *err, size_t er
     m->f = tsf_copy(base);
     tsf_set_output(m->f, TSF_STEREO_INTERLEAVED, rate, -9.0f);
     tsf_set_max_voices(m->f, 256);
-    { const char *e = getenv("NGPLAYER_REVERB"); m->rev_level = e ? (float)atof(e) : 0.22f; e = getenv("NGPLAYER_CHORUS"); m->cho_level = e ? (float)atof(e) : 0.6f; m->rev_base = m->rev_level; m->cho_base = m->cho_level; m->mvol = 1.0f; m->drumch[9] = 1; }
+    { const char *e = getenv("NGPLAYER_REVERB"); m->rev_level = e ? (float)atof(e) : 0.22f; e = getenv("NGPLAYER_CHORUS"); m->cho_level = e ? (float)atof(e) : 0.6f; m->rev_base = m->rev_level; m->cho_base = m->cho_level; m->mvol = 1.0f; m->drumch[9] = 1; dset_defaults(m); }
     reverb_init(&m->rev, rate, 0.7f, 0.5f); chorus_init(&m->cho, rate);
     all_reset(m);
     return m;
