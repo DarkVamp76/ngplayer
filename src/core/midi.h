@@ -38,7 +38,7 @@ typedef struct { int expr, mod, reverb, chorus, sustain; float bend; } MidiChanF
 void  midi_chan_fx(const Midi *m, int ch, MidiChanFx *o);
 int   midi_chan_program(const Midi *m, int ch);                      /* 0..127 (channel 9: the drum kit number) */
 int   midi_chan_bank(const Midi *m, int ch);
-int   midi_chan_is_drum(int ch);
+int   midi_chan_is_drum(const Midi *m, int ch);                       /* channel 10, and the parts a GS file turns into rhythm parts */
 float midi_chan_out(const Midi *m, int ch);
 float midi_chan_level(const Midi *m, int ch);                        /* 0..1, rises with the velocity of a note, falls off */
 int   midi_chan_volume(const Midi *m, int ch);                       /* CC 7 */
