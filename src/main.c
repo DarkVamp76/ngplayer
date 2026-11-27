@@ -1703,7 +1703,9 @@ static void module_bars_update(void) {
     if (!g_song || !song_is_midi(g_song) || chip_kind() != 6) return;
     const int mi = 5; c3_setup(mi);
     C3Gl *g = &c3gl[mi]; const C3Model *m = &C3M[mi];
-    int seg[16]; for (int c = 0; c < 16; c++) { SongMidiChan mc; song_midi_chan(g_song, c, &mc); float l = mc.level > 1 ? 1 : mc.level; seg[c] = (int)(powf(l, 0.55f) * 7.0f + 0.5f); }      /* half the swing of the first version: the real SC-155 display reaches about half the height (measured by eye) */
+    /* the bar of a part follows the level of the sound it makes (the peak of its dry signal, dB), like the display of the real module: rows = 13.0 + 0.52 * dB of 15 rows above the lit bottom row,
+     * fitted on two videos of an SC-155 (Doom 2 songs: Barrels 'o' Fun and ENTRYWAY, 12 parts, residual 1.5 rows); this display has 14 segments */
+    int seg[16]; for (int c = 0; c < 16; c++) { SongMidiChan mc; song_midi_chan(g_song, c, &mc); float rows = mc.out > 1e-4f ? 13.02f + 0.519f * 20.0f * log10f(mc.out) : 0.0f; rows = rows < 0 ? 0 : rows > 15 ? 15 : rows; seg[c] = (int)(rows * 14.0f / 15.0f + 0.5f); }
     static int shown[16]; static int have;
     if (g->lcd && have && !memcmp(shown, seg, sizeof seg)) return;
     if (!g->lcd) g->lcd = gfx_tex_create(m->tw, m->th, GFX_RGBA8, NULL, GFX_MIPS | GFX_TARGET);

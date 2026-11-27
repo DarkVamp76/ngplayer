@@ -1084,7 +1084,7 @@ int song_fm_in_sample_format(const Song *s) { return s && s->kind == K_S3M && s-
 void song_midi_chan(const Song *s, int ch, SongMidiChan *o) {
     memset(o, 0, sizeof *o);
     if (!s || !s->mi || ch < 0 || ch > 15) return;
-    o->level = midi_chan_level(s->mi, ch); o->program = midi_chan_program(s->mi, ch); o->bank = midi_chan_bank(s->mi, ch);
+    o->level = midi_chan_level(s->mi, ch); o->out = midi_chan_out(s->mi, ch); o->program = midi_chan_program(s->mi, ch); o->bank = midi_chan_bank(s->mi, ch);
     o->drum = midi_chan_is_drum(ch); o->volume = midi_chan_volume(s->mi, ch); o->pan = midi_chan_pan(s->mi, ch); o->used = midi_chan_notes(s->mi, ch) > 0;
 }
 int song_midi_notes(const Song *s, double t0, double t1, SongMidiNote *out, int max) {
