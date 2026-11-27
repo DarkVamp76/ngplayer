@@ -397,7 +397,7 @@ Midi *midi_open(const uint8_t *buf, size_t total, int rate, char *err, size_t er
                 if (q >= end) break;
                 uint8_t mt = b[q++]; uint32_t ml; if (!vlq(b, end, &q, &ml) || q + ml > end) break;
                 if (mt == 0x51 && ml == 3) { uint32_t us = (uint32_t)b[q] << 16 | b[q + 1] << 8 | b[q + 2]; if (us) { evpush(m, &cap, tick, EV_TEMPO, 0, 0, 0, us, &seq); if (!got_tempo) { got_tempo = 1; m->info.tempo_bpm = (int)(60000000.0 / us + 0.5); } } }
-                else if (mt == 0x03 && !got_title && tick == 0) { textcpy(m->info.title, sizeof m->info.title, b + q, ml); if (m->info.title[0]) got_title = 1; }
+                else if (mt == 0x03 && !got_title && tick == 0 && (fmt != 1 || t == 0)) {      /* format 1: the song title is the name of the first track, the names of the others are the instruments */ textcpy(m->info.title, sizeof m->info.title, b + q, ml); if (m->info.title[0]) got_title = 1; }
                 else if (mt == 0x02 && !m->info.copyright[0]) textcpy(m->info.copyright, sizeof m->info.copyright, b + q, ml);
                 else if (mt == 0x2F) { q += ml; break; }
                 q += ml;
