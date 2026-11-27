@@ -194,11 +194,14 @@ static void view_persist(void);       /* remembers the view (web: localStorage, 
 #else
 #define NG_TV 0
 #endif
-#define NVIEW 5                       /* Pattern, Scopes, Orb, Voxel, Info */
-static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes, 4 = Info (key V / buttons); the tab order is VIEW_ORDER */
+#define NVIEW 6                       /* Pattern, Scopes, Orb, Voxel, Mixer (MIDI only), Info */
+static int g_vmode;                   /* 0 = Pattern, 1 = Orb, 2 = Voxel, 3 = Scopes, 4 = Info, 5 = Mixer (MIDI files only) (key V / buttons); the tab order is VIEW_ORDER */
 static float g_sa_r;                                        /* iPhone Duo closed: the width (view units) of the system status column on the right (clock, Wi-Fi, camera); the top cards stay left of it, the rest runs over the full width */
 static int g_duo;                                           /* iPhone Duo opened: two pages, the left one is the phone layout, the right one shows the pattern */
-static const int VIEW_ORDER[5] = { 0, 3, 1, 2, 4 };   /* PATTERN, SCOPES, ORB, VOXEL */
+static const int VIEW_ORDER[6] = { 0, 3, 1, 2, 5, 4 };   /* PATTERN, SCOPES, ORB, VOXEL, MIXER, INFO */
+static int view_ok(int i);
+static int nview(void);
+static void view_step(int d);
 static int g_portrait, g_plopen;      /* Hochformat (Handy): gestapeltes Layout, Playlist als Overlay */
 static int list_follow;
 static int g_pltab;                      /* playlist tab: 0 = FILES (local), 1 = MOD ARCHIVE (online) */
@@ -674,15 +677,25 @@ static void draw_voxel(float x, float y, float w, float h);
 static void draw_info_tv(float x, float y, float w, float h);
 static const char *best_played_on(int kind);
 /* Umschalter Pattern | Orb oben in der Karte (auch per Touch/Klick) */
-static float view_cw(void) { return g_portrait && !NG_TV ? 56 : 62; }      /* width of one tab (5 of them: on a phone they must leave room for the ORD / ROW text on the left) */
+static float view_cw(void) { return g_portrait && !NG_TV ? (nview() > 5 ? 48 : 56) : 62; }      /* width of one tab (5 of them: on a phone they must leave room for the ORD / ROW text on the left) */
+static int view_ok(int i) { return i != 5 || (g_song && song_is_midi(g_song)); }            /* the mixer is for MIDI files */
+static int nview(void) { int n = 0; for (int k = 0; k < NVIEW; k++) if (view_ok(VIEW_ORDER[k])) n++; return n; }
+static void view_step(int d) {                                  /* the next (d = 1) or previous (d = -1) tab that exists for this song */
+    int t = 0; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k;
+    for (int n = 0; n < NVIEW; n++) { t = (t + d + NVIEW) % NVIEW; if (view_ok(VIEW_ORDER[t])) break; }
+    g_vmode = VIEW_ORDER[t]; view_persist();
+}
 static void view_switch(float x, float y, float w) {
     if (g_duo && g_ox > 0) return;                              /* Duo opened: the tabs sit on the left page only */
-    float cw = view_cw(), bx = NG_TV ? x + w / 2 - NVIEW * cw / 2.0f : g_portrait ? x + w - 14 - NVIEW * cw + 4 : x + w / 2 - NVIEW * cw / 2.0f, by = y + 8;
-    static const char *const NAME[5] = { "PATTERN", "ORB", "VOXEL", "SCOPES", "INFO" };
+    float cw = view_cw(), bx = NG_TV ? x + w / 2 - nview() * cw / 2.0f : g_portrait ? x + w - 14 - nview() * cw + 4 : x + w / 2 - nview() * cw / 2.0f, by = y + 8;
+    static const char *const NAME[6] = { "PATTERN", "ORB", "VOXEL", "SCOPES", "INFO", "MIXER" };
+    int slot = 0;
     for (int t = 0; t < NVIEW; t++) {
         int i = VIEW_ORDER[t];
+        if (!view_ok(i)) continue;
+        int sl = slot++;
         if (g_duo && i == 0) continue;                         /* Duo opened: the pattern has its own page (the slot stays empty, the others keep their place) */
-        float xx = bx + t * cw;
+        float xx = bx + sl * cw;
         int on = (i == g_vmode), hv = hit(xx, by, cw - 4, 20);
         rrect(xx, by, cw - 4, 20, 6, on ? alpha(VC[2], 0.25f) : alpha(FAINT, hv ? 0.30f : 0.16f));
         const char *tn = (i == 0 && g_song && song_is_midi(g_song)) ? "ROLL" : NAME[i];                     /* MIDI: the piano roll */
@@ -892,6 +905,101 @@ static void midi_keyname(char *o, int k) {
     int oct = k / 12 - 1; if (oct < 0) oct = 0;
     snprintf(o, 4, "%s%d", KN[k % 12], oct % 10);
 }
+/* The MIXER view (MIDI): one strip per channel, what a mixing desk shows: the program, the knobs of pan, reverb and chorus send, the level meter (with a peak line), the fader
+ * (CC 7) and next to it the expression (CC 11), the sustain pedal, the modulation wheel and the pitch wheel. A click on the top of a strip mutes the channel (Ctrl: all the others). */
+static float mx_vu[16], mx_pk[16];
+static void mx_knob(float cx, float cy, float r, float v, col c) {
+    rrect(cx - r, cy - r, 2 * r, 2 * r, r, alpha(FAINT, 0.34f));
+    rrect(cx - r + 1.5f, cy - r + 1.5f, 2 * r - 3, 2 * r - 3, r - 1.5f, C(0.05f, 0.07f, 0.13f, 0.95f));
+    float a = (v - 0.5f) * 4.71238898f;                                        /* 270 degrees around the top */
+    float xy[4] = { cx + sinf(a) * r * 0.22f, cy - cosf(a) * r * 0.22f, cx + sinf(a) * r * 0.86f, cy - cosf(a) * r * 0.86f };
+    polyline(xy, 2, 1.1f, 1.5f, c);
+}
+static void mx_fit(char *o, size_t cap, const char *s, float maxw, float size) {         /* the text, cut with a dot where it does not fit */
+    snprintf(o, cap, "%s", s); size_t n = strlen(o);
+    while (n > 2 && text_width(o, size) > maxw) { o[--n] = 0; if (n > 2) o[n - 1] = '.'; }
+}
+static void draw_mixer(float x, float y, float w, float h) {
+    card(x, y, w, h, 0);
+    if (!g_portrait) text(x + 18, y + 12, 12, DIM, "MIXER");
+    view_switch(x, y, w);
+    if (!g_song || !song_is_midi(g_song)) return;
+    float ax = x + 12, ay = y + 40, aw = w - 24, ah = h - 40 - (g_portrait ? 42 : 10), gap = 4;      /* (a phone: the RPT / RND buttons sit in the bottom corner of the card) */
+    int cols = (aw - gap * 15) / 16 >= 46 ? 16 : 8, rows = 16 / cols;
+    float sw = (aw - gap * (cols - 1)) / cols, sh = (ah - gap * (rows - 1)) / rows;
+    if (sw < 28 || sh < 120) return;
+    unsigned long long mm = song_get_mute(), all = 0xFFFFULL;
+    float dt = (float)g_dt; if (dt > 0.1f) dt = 0.1f;
+    float kr = sw * 0.14f; if (kr > 12) kr = 12; if (kr < 6) kr = 6;
+    const float fs = sw >= 60 ? 10.0f : 9.0f; const int slim = sw < 60;                  /* narrow strips (a phone): short labels */
+    for (int c = 0; c < 16; c++) {
+        SongMidiChan mc; song_midi_chan(g_song, c, &mc);
+        float sx = ax + (c % cols) * (sw + gap), sy = ay + (c / cols) * (sh + gap);
+        int used = mc.used, muted = (int)((mm >> c) & 1);
+        col hue = midi_hue((float)c / 16.0f);
+        float dim = used ? 1.0f : 0.45f;
+        rrect(sx, sy, sw, sh, 8, alpha(FAINT, used ? 0.20f : 0.09f));
+        /* header: the channel number in its colour, D for the drum channel, the program */
+        char nb[8]; snprintf(nb, sizeof nb, "%02d", c + 1);
+        text(sx + 6, sy + 5, fs + 1, alpha(hue, dim), nb);
+        if (mc.drum) { const char *dl = slim ? "D" : "DRUMS"; text(sx + sw - 6 - text_width(dl, fs - 1), sy + 6, fs - 1, alpha(VC[2], 0.9f), dl); }
+        char pn[48]; mx_fit(pn, sizeof pn, used ? song_midi_program_name(mc.program, mc.drum) : "-", sw - 10, fs);
+        text(sx + 6, sy + 5 + fs + 4, fs, used ? TXT : alpha(DIM, 0.6f), pn);
+        if (clicked(sx, sy, sw, 5 + 2 * fs + 10)) {
+            if (click_ctrl) mm = (mm == (all & ~(1ULL << c))) ? 0 : (all & ~(1ULL << c)); else mm ^= 1ULL << c;
+            song_set_mute(mm);
+        }
+        /* the indicators: sustain pedal, modulation wheel, pitch wheel */
+        float iy = sy + 5 + 2 * fs + 12, ih = 11;
+        float pw = (sw - 12 - 8) / 3.0f;
+        col onc = alpha(VC[0], 0.95f), offc = alpha(FAINT, 0.18f);
+        rrect(sx + 6, iy, pw, ih, 4, mc.sustain ? alpha(VC[0], 0.30f) : offc);
+        { const char *l = slim ? "S" : "SUS"; text(sx + 6 + (pw - text_width(l, fs - 2)) / 2, iy + 1, fs - 2, mc.sustain ? onc : alpha(DIM, 0.5f), l); }
+        rrect(sx + 10 + pw, iy, pw, ih, 4, mc.mod > 3 ? alpha(VC[1], 0.18f + 0.5f * mc.mod / 127.0f) : offc);
+        { const char *l = slim ? "M" : "MOD"; text(sx + 10 + pw + (pw - text_width(l, fs - 2)) / 2, iy + 1, fs - 2, mc.mod > 3 ? alpha(VC[1], 0.95f) : alpha(DIM, 0.5f), l); }
+        float bx0 = sx + 14 + 2 * pw; rrect(bx0, iy, pw, ih, 4, offc);                              /* the pitch wheel: a marker left / right of the middle */
+        { float bm = bx0 + pw / 2 + mc.bend * (pw / 2 - 3); rect(bx0 + pw / 2 - 0.5f, iy + 2, 1, ih - 4, alpha(DIM, 0.4f)); rect(bm - 1.5f, iy + 1, 3, ih - 2, fabsf(mc.bend) > 0.02f ? alpha(VC[2], 0.95f) : alpha(DIM, 0.45f)); }
+        /* the knobs: pan, reverb, chorus */
+        float ky = iy + ih + 8 + kr, kx0 = sx + sw / 2 - (2 * 2.35f * kr);
+        float pan01 = mc.pan / 127.0f, rv = mc.reverb / 127.0f, ch = mc.chorus / 127.0f;
+        float kxs[3] = { sx + sw * 0.22f, sx + sw * 0.5f, sx + sw * 0.78f }; (void)kx0;
+        mx_knob(kxs[0], ky, kr, pan01, alpha(hue, dim)); mx_knob(kxs[1], ky, kr, rv, alpha(VC[0], dim)); mx_knob(kxs[2], ky, kr, ch, alpha(VC[2], dim));
+        const char *kl[3] = { slim ? "P" : "PAN", slim ? "R" : "REV", slim ? "C" : "CHO" };
+        for (int k = 0; k < 3; k++) text(kxs[k] - text_width(kl[k], fs - 2) / 2, ky + kr + 3, fs - 2, alpha(DIM, 0.8f), kl[k]);
+        /* the meter, the fader and the expression */
+        float my0 = ky + kr + 3 + fs + 6, my1 = sy + sh - fs - 12, mh = my1 - my0;
+        if (mh < 30) continue;
+        float db = mc.out > 1e-4f ? 15.0f + 0.52f * 20.0f * log10f(mc.out) : 0.0f; float fr = db < 0 ? 0 : db > 15 ? 1.0f : db / 15.0f;
+        if (muted) fr = 0;
+        if (fr > mx_vu[c]) mx_vu[c] = fr; else { mx_vu[c] -= dt * 1.6f; if (mx_vu[c] < fr) mx_vu[c] = fr; }
+        if (mx_vu[c] >= mx_pk[c]) mx_pk[c] = mx_vu[c]; else mx_pk[c] -= dt * 0.5f;
+        if (mx_pk[c] < mx_vu[c]) mx_pk[c] = mx_vu[c];
+        float inner = sw - 12, mw = inner * 0.36f, fw = inner * 0.36f, ew = 4;
+        float mx0 = sx + 6, fx0 = mx0 + mw + (inner - mw - fw - ew - 3) , ex0 = sx + sw - 6 - ew;
+        int nseg = 18; float segh = mh / nseg;
+        for (int k = 0; k < nseg; k++) {
+            float yy = my1 - (k + 1) * segh; int lit = mx_vu[c] * nseg > k + 0.3f;
+            col sc = k < 11 ? C(0.25f, 0.9f, 0.55f, 1) : k < 15 ? C(1.0f, 0.82f, 0.30f, 1) : C(1.0f, 0.38f, 0.32f, 1);
+            rect(mx0, yy + 1, mw, segh - 1.5f, alpha(sc, lit ? 0.95f * (muted ? 0.4f : 1.0f) : 0.10f));
+        }
+        if (mx_pk[c] > 0.03f) { int pk = (int)(mx_pk[c] * nseg); if (pk > nseg - 1) pk = nseg - 1; rect(mx0, my1 - (pk + 1) * segh + 1, mw, 2, alpha(TXT, 0.85f)); }
+        /* the fader: the slot, the marks, the cap at the level of CC 7 */
+        float fcx = fx0 + fw / 2, ftop = my0 + 6, fbot = my1 - 6;
+        rect(fcx - 1.5f, my0, 3, mh, C(0.03f, 0.04f, 0.09f, 0.9f));
+        for (int mk = 0; mk < 3; mk++) { float v = mk == 0 ? 0.0f : mk == 1 ? 100.0f / 127.0f : 1.0f; float yy = fbot - v * (fbot - ftop); rect(fcx + 5, yy, 4, 1, alpha(DIM, 0.35f)); }
+        float capy = fbot - (mc.volume / 127.0f) * (fbot - ftop);
+        rrect(fcx - fw * 0.42f, capy - 5, fw * 0.84f, 10, 3, alpha(muted ? DIM : TXT, 0.95f));
+        rect(fcx - fw * 0.32f, capy - 0.5f, fw * 0.64f, 1, C(0.1f, 0.12f, 0.2f, 1));
+        /* the expression: a thin bar of its own (full = CC 11 at 127) */
+        rect(ex0, my0, ew, mh, alpha(FAINT, 0.18f));
+        rect(ex0, my1 - mh * (mc.expr / 127.0f), ew, mh * (mc.expr / 127.0f), alpha(VC[1], mc.expr < 127 ? 0.8f : 0.35f));
+        /* the value of the fader */
+        char vb[8]; snprintf(vb, sizeof vb, "%d", mc.volume);
+        text(sx + (sw - text_width(vb, fs)) / 2, sy + sh - fs - 7, fs, alpha(TXT, dim), vb);
+        if (muted) { rrect(sx, sy, sw, sh, 8, C(0.02f, 0.03f, 0.055f, 0.55f)); text(sx + (sw - text_width("MUTE", fs)) / 2, sy + sh / 2 - fs / 2, fs, WARN, "MUTE"); }
+    }
+}
+
 static void draw_midi_roll(float x, float y, float w, float h) {
     static SongMidiNote nb[8192];
     static float klo = 48, khi = 84;
@@ -988,7 +1096,7 @@ static void draw_pattern(float x, float y, float w, float h) {
     char hb[64];
     snprintf(hb, sizeof hb, "ORD %02d  PAT %02d  ROW %02d/%02d", sp.order + 1, sp.pattern, sp.row, sp.nrows);
     if (g_portrait) {   /* room: info on the left, the switch on the right: the text gets shorter until it fits left of the tabs (they start 258 from the right edge) */
-        float room = w - (NVIEW * view_cw() - 4 + 14) - 18 - 8;           /* the tabs start (NVIEW * width - 4 + 14) from the right edge */
+        float room = w - (nview() * view_cw() - 4 + 14) - 18 - 8;           /* the tabs start (NVIEW * width - 4 + 14) from the right edge */
         if (text_width(hb, 12) > room) snprintf(hb, sizeof hb, "ORD %02d  ROW %02d/%02d", sp.order + 1, sp.row, sp.nrows);
         if (text_width(hb, 12) > room) snprintf(hb, sizeof hb, "ROW %02d/%02d", sp.row, sp.nrows);
         if (text_width(hb, 12) > room) snprintf(hb, sizeof hb, "%02d/%02d", sp.row, sp.nrows);       /* a narrow phone with 5 tabs: only the row */
@@ -3113,6 +3221,7 @@ static void draw_ui(double t) {
         nosp = 1; sh = 0; sy = by; avail = sy - M - cy0;
     }
     if (avail - oh - M < 190) oh = avail - M - 190;
+    if (!view_ok(g_vmode)) g_vmode = 0;                      /* the mixer tab of a MIDI file: another file has none */
     view_update();
     overview_update((float)g_dt);
     draw_overview(ax, cy0, aw, oh);
@@ -3120,6 +3229,7 @@ static void draw_ui(double t) {
     else if (g_vmode == 3) draw_scopes(ax, cy0 + oh + M, aw, avail - oh - M);
     else if (g_vmode == 2) draw_voxel(ax, cy0 + oh + M, aw, avail - oh - M);
     else if (g_vmode == 4) draw_info_tv(ax, cy0 + oh + M, aw, avail - oh - M);
+    else if (g_vmode == 5) draw_mixer(ax, cy0 + oh + M, aw, avail - oh - M);
     else draw_pattern(ax, cy0 + oh + M, aw, avail - oh - M);
     if (g_song) g_decimal = (!strcmp(song_format(g_song), "S3M") || !strcmp(song_format(g_song), "STM") || !strcmp(song_format(g_song), "PTM") || !strcmp(song_format(g_song), "ULT") || !strcmp(song_format(g_song), "669") || !strcmp(song_format(g_song), "MED") || !strcmp(song_format(g_song), "PSM") || !strcmp(song_format(g_song), "IT") || !strcmp(song_format(g_song), "AMD") || !strcmp(song_format(g_song), "RAD"));
     float vuw = 300, spw = aw - vuw - M;
@@ -3423,11 +3533,13 @@ static void draw_ui_portrait(float W, float H) {
 #endif
         aw = awf;                                                         /* everything below runs over the full width */
         if (!novis) {
+            if (!view_ok(g_vmode)) g_vmode = 0;
             if (g_duo && g_vmode == 0) g_vmode = 3;                       /* the pattern is on the right page */
             if (g_vmode == 1) draw_orb(M, cy0 + oh + M, aw, avail - oh - M);
             else if (g_vmode == 3) draw_scopes(M, cy0 + oh + M, aw, avail - oh - M);
             else if (g_vmode == 2) draw_voxel(M, cy0 + oh + M, aw, avail - oh - M);
             else if (g_vmode == 4) draw_info_tv(M, cy0 + oh + M, aw, avail - oh - M);
+            else if (g_vmode == 5) draw_mixer(M, cy0 + oh + M, aw, avail - oh - M);
             else draw_pattern(M, cy0 + oh + M, aw, avail - oh - M);
         }
         float chy = novis ? cy0 + oh - 34 : cy0 + oh + M + (avail - oh - M) - 34;   /* without the visualisation the chips sit in the lower right corner of the channels card */
@@ -4274,7 +4386,7 @@ static void draw_info_tv(float x, float y, float w, float h) {
     if (!NG_TV && cur >= 0 && cur < npl && pl[cur].ma_id) {                       /* a Mod Archive entry: the link to its page there (the Apple TV has no pointer) */
         /* top left, where the other views have their label (the bottom right belongs to the RPT / RND buttons); under the label line when the tabs leave no room */
         float lw = text_width("Mod Archive page", 12), lx = x + 18, ly = y + 12;
-        float tabs_left = g_portrait ? x + w - 14 - NVIEW * 62.0f + 4 : x + w / 2 - NVIEW * 31.0f;
+        float tabs_left = g_portrait ? x + w - 14 - nview() * 62.0f + 4 : x + w / 2 - nview() * 31.0f;
         if (lx + lw + 12 > tabs_left) ly = y + 38;
         int lh = hit(lx - 6, ly - 4, lw + 12, 22);
         text(lx, ly, 12, lh ? TXT : VC[0], "Mod Archive page");
@@ -4654,7 +4766,7 @@ static void iter(void) {
                 {   /* Siri Remote: Left/Right = the views (the Info page is one of them), Select = a new random module, Down / Up = the loaded modules */
                     int done = 1;
                     switch (e.key.keysym.sym) {
-                    case SDLK_LEFT: case SDLK_RIGHT: { int t = 0, d = e.key.keysym.sym == SDLK_RIGHT ? 1 : NVIEW - 1; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + d) % NVIEW]; view_persist(); } break;
+                    case SDLK_LEFT: case SDLK_RIGHT: view_step(e.key.keysym.sym == SDLK_RIGHT ? 1 : -1); break;
                     case SDLK_RETURN: case SDLK_KP_ENTER: if (!e.key.repeat) { tv_dn_t = SDL_GetTicks(); tv_dn_armed = 1; tv_dn_warn = 0; } break;   /* Select acts on release: short = a new random module, long (1 s) = remove the marked one */
                     case SDLK_DOWN: if (tv_fav_mode) { if (tv_fav_sel + 1 < g_nfav) tv_fav_sel++; } else next_prev(1); break;     /* Down / Up: through the modules that are already loaded (after the last the first), in the favorites list through the favorites */
                     case SDLK_UP: if (tv_fav_mode) { if (tv_fav_sel > 0) tv_fav_sel--; } else next_prev(-1); break;
@@ -4667,7 +4779,7 @@ static void iter(void) {
                 case SDLK_o: ma_show(1); break;
                 case SDLK_s: fav_toggle_entry(cur); break;     /* the song that plays: favorite on / off */
                 case SDLK_h: midi_toggle_output(); break;                              /* MIDI files: the SoundFont or the MIDI hardware */
-                case SDLK_v: { int t = 0; for (int k = 0; k < NVIEW; k++) if (VIEW_ORDER[k] == g_vmode) t = k; g_vmode = VIEW_ORDER[(t + 1) % NVIEW]; view_persist(); } break;
+                case SDLK_v: view_step(1); break;
 #if !(defined(__APPLE__) && TARGET_OS_TV)
                 case SDLK_ESCAPE: running = 0; break;                                  /* (the Apple TV: the Menu button goes to the system, see NG_TV_MENU_TO_SYSTEM) */
 #endif
@@ -5029,6 +5141,7 @@ int main(int argc, char **argv) {
     if (getenv("NGPLAYER_TEST_SCOPES")) g_vmode = 3;               /* test hook: scopes view */
     if (getenv("NGPLAYER_TEST_VOXEL")) g_vmode = 2;               /* test hook: voxel flight view */
     if (getenv("NGPLAYER_TEST_INFO")) g_vmode = 4;        /* test hook: the Info page */
+    if (getenv("NGPLAYER_TEST_MIXER")) g_vmode = 5;       /* test hook: the MIDI mixer */
     if (getenv("NGPLAYER_TEST_DICE")) { dice_start(); if (getenv("NGPLAYER_TEST_DICE")[0] == '2') dice_stop_req = 1; }        /* test hook: the big dancing dice, as while a random module is fetched */
     SDL_AudioSpec want, have;
     SDL_zero(want);

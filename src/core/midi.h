@@ -34,6 +34,8 @@ void  midi_hint_mt32(Midi *m);
 void  midi_add_syx(Midi *m, const char *name, const uint8_t *data, size_t len);       /* the .syx file next to the MIDI file (read first; the standard and the display text come from it) */                                       /* the file name says MT-32 (.m32) */
 
 /* live state for the display: the 16 channels */
+typedef struct { int expr, mod, reverb, chorus, sustain; float bend; } MidiChanFx;       /* CC 11, CC 1, CC 91, CC 93 (0..127), the sustain pedal, the pitch wheel (-1..1) */
+void  midi_chan_fx(const Midi *m, int ch, MidiChanFx *o);
 int   midi_chan_program(const Midi *m, int ch);                      /* 0..127 (channel 9: the drum kit number) */
 int   midi_chan_bank(const Midi *m, int ch);
 int   midi_chan_is_drum(int ch);
