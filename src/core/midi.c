@@ -253,6 +253,7 @@ static int evcmp(const void *x, const void *y) {
 /* ---------------------------------------------------------------- the channels */
 static void chan_reset(Midi *m, int ch) {
     tsf_channel_midi_control(m->f, ch, 121, 0);
+    tsf_channel_drum_reset(m->f, ch);
     tsf_channel_set_pitchwheel(m->f, ch, 8192);
     tsf_channel_sounds_off_all(m->f, ch);
     tsf_channel_set_bank(m->f, ch, 0);
