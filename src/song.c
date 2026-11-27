@@ -228,6 +228,10 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
         }
         midi_info(s->mi, &mi);
         s->kind = K_MIDI; s->fmt = "MIDI"; snprintf(s->title, sizeof s->title, "%s", mi.title);
+        if (!s->title[0]) {                                           /* the file names no song: the file name without its extension */
+            const char *bn = strrchr(path, '/'); const char *bs = strrchr(path, '\\'); if (bs > bn) bn = bs; bn = bn ? bn + 1 : path;
+            snprintf(s->title, sizeof s->title, "%s", bn); char *dot = strrchr(s->title, '.'); if (dot && dot > s->title) *dot = 0;
+        }
         s->nch = 16; s->nord = midi_measures(s->mi);                 /* no patterns: the orders are 4/4 measures of 16 rows */
     } else if (rad_probe(b, (size_t)n)) {
         int e = 0;
