@@ -360,7 +360,33 @@ static void sysex_note(Midi *m, const uint8_t *d, uint32_t sl) {
     else if (d[0] == 0x43 && d[2] == 0x4C) m->sx_xg++;
 }
 /* a .syx file that belongs to the MIDI file (the same name next to it): its messages come first (the MT-32 and GS setups live there) */
+/* a "syx" file that is a Standard MIDI file (Westwood and Sierra games ship their MT-32 set-up as a sequence of SysEx events): the messages are taken out of the tracks and put one after the other as plain F0 .. F7 bytes */
+static uint8_t *syx_from_smf(const uint8_t *b, size_t n, size_t *outn) {
+    uint8_t *o = (uint8_t *)malloc(n ? n : 1); size_t on = 0;
+    if (!o) return NULL;
+    size_t p = 8 + ((size_t)b[4] << 24 | (size_t)b[5] << 16 | (size_t)b[6] << 8 | b[7]);
+    while (p + 8 <= n) {
+        size_t len = (size_t)b[p + 4] << 24 | (size_t)b[p + 5] << 16 | (size_t)b[p + 6] << 8 | b[p + 7];
+        size_t q = p + 8, end = q + len; if (end > n) end = n;
+        if (memcmp(b + p, "MTrk", 4)) { p = end; continue; }
+        p = end; uint8_t run = 0;
+        while (q < end) {
+            uint32_t dt; if (!vlq(b, end, &q, &dt) || q >= end) break;
+            uint8_t st = b[q];
+            if (st < 0x80) { if (!run) break; st = run; } else { q++; if (st < 0xF0) run = st; }
+            if (st == 0xFF) { if (q >= end) break; q++; uint32_t ml; if (!vlq(b, end, &q, &ml) || q + ml > end) break; q += ml; }
+            else if (st == 0xF0 || st == 0xF7) {
+                uint32_t sl; if (!vlq(b, end, &q, &sl) || q + sl > end) break;
+                if (st == 0xF0 && sl >= 1 && b[q + sl - 1] == 0xF7 && on + 1 + sl <= n) { o[on++] = 0xF0; memcpy(o + on, b + q, sl); on += sl; }
+                q += sl;
+            } else q += ((st & 0xF0) == 0xC0 || (st & 0xF0) == 0xD0) ? 1 : 2;
+        }
+    }
+    *outn = on; return o;
+}
 void midi_add_syx(Midi *m, const char *name, const uint8_t *b, size_t n) {
+    uint8_t *conv = NULL;
+    if (n >= 14 && !memcmp(b, "MThd", 4)) { size_t cn = 0; conv = syx_from_smf(b, n, &cn); if (conv) { b = conv; n = cn; } }
     free(m->syx); m->syx = (uint8_t *)malloc(n ? n : 1); memcpy(m->syx, b, n); m->syx_len = n; m->lcd[0] = 0;       /* its display text wins */
     snprintf(m->syx_name, sizeof m->syx_name, "%s", name); m->syx_msgs = 0;
     for (size_t i = 0; i < n; i++) {
@@ -368,6 +394,7 @@ void midi_add_syx(Midi *m, const char *name, const uint8_t *b, size_t n) {
         size_t j = i + 1; while (j < n && b[j] != 0xF7) j++;
         if (j < n) { sysex_note(m, b + i + 1, (uint32_t)(j - i)); m->syx_msgs++; i = j; }
     }
+    free(conv);
 }
 
 /* ---------------------------------------------------------------- open */
