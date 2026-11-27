@@ -381,6 +381,7 @@ static void do_effect(XPlayer *p, int chn, Ch *c, int tick){
     case 0x10: if (!tick && !p->in_delay && (par & 0x7f)) p->speed = par & 0x7f; break;
     case 0x11: case 0x17: case 0x18: dslide(p, c, par, tick); c->vE8 = c->vD8; break;
     case 0x16: if (!tick && !p->in_delay && par >= 0x20) { p->tempo = par; p->tempof = 0; } break;
+    case 0x1B: if (!tick && !p->in_delay && par >= 0x10) { p->tempo = par * 2; p->tempof = 0; } break;      /* MED: a tempo above 255 (BPM mode: up to 510), the value is half of the BPM */
     case 0x1A: if (!tick) p->gvol = par > 255 ? 255 : par; break;
     case 0x24: break;   /* gemessen: Zxx hat im Original keine Wirkung */
     default: break;

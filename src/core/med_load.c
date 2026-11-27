@@ -33,24 +33,27 @@ static double mmd_bpm(int v, int bpm, int rpb){
     if (g_soft && v < 8) return 157.86;
     return v / 0.264;
 }
-static int conv_tempo(int v, int bpm, int rpb){
+static int conv_tempo(int v, int bpm, int rpb){       /* the BPM (up to 510: above 255 the effect 0x1B takes half of it) */
     int t = v < 3 ? 0x70 : (int)(mmd_bpm(v, bpm, rpb) + 0.5);       /* F01 and F02: a bug of OctaMED that libopenmpt keeps (112 BPM) */
-    return t < 0x20 ? 0x20 : t > 0xFF ? 0xFF : t;
+    return t < 0x20 ? 0x20 : t > 0x1FE ? 0x1FE : t;
 }
 
 static void conv_fx(XCell *x, int e, int p, int hexvol, int bpm, int rpb, const BlkMap *map, int nmap){
     x->eff = 0; x->par = 0;
     switch (e) {
     case 0x00: if (p) { x->eff = 0; x->par = (uint8_t)p; } break;
-    case 0x01: case 0x02: case 0x03: case 0x04: case 0x05: case 0x06: case 0x07: case 0x0A:
-        x->eff = (uint8_t)e; x->par = (uint8_t)p; break;
+    case 0x01: case 0x02: if (p) { x->eff = (uint8_t)e; x->par = (uint8_t)p; } break;                    /* (no effect memory: a zero does nothing) */
+    case 0x03: case 0x07: case 0x0A: x->eff = (uint8_t)e; x->par = (uint8_t)p; break;
+    case 0x04: x->eff = 0x04; x->par = (uint8_t)((p & 0xF0) | ((p & 15) * 2 > 15 ? 15 : (p & 15) * 2)); break;     /* the vibrato of MED is twice as deep as in ProTracker */
+    case 0x05: if (p) { x->eff = 0x05; x->par = (uint8_t)p; } else { x->eff = 0x03; x->par = 0; } break;        /* (a zero: the tone portamento goes on) */
+    case 0x06: if (p) { x->eff = 0x06; x->par = (uint8_t)p; } else { x->eff = 0x04; x->par = 0; } break;
     case 0x09: if (p >= 1 && p <= 0x20) { x->eff = 0x0F; x->par = (uint8_t)p; } break;
     case 0x0D: x->eff = 0x0A; x->par = (uint8_t)p; break;                              /* MED volume slide (same as 0A) */
     case 0x0B: x->eff = 0x0B; x->par = (uint8_t)(p < nmap ? map[p].first : p); break;
-    case 0x0C: { int v = hexvol ? p : (p >> 4) * 10 + (p & 15); if (v > 64) v = 64; x->eff = 0x0C; x->par = (uint8_t)v; } break;
+    case 0x0C: if (!hexvol && p >= 0x99) break; { int v = hexvol ? (p & 0x7F) : (p >> 4) * 10 + (p & 15); if (v > 64) v = 64; x->eff = 0x0C; x->par = (uint8_t)v; } break;       /* (decimal volumes above 99, and the bit 7 of hex volumes: no volume) */
     case 0x0F:
         if (p == 0) { x->eff = 0x0D; x->par = 0; }
-        else if (p <= 0xF0) { int t = conv_tempo(p, bpm, rpb); if (t > 0x20) { x->eff = 0x0F; x->par = (uint8_t)t; } else { x->eff = 0x16; x->par = (uint8_t)t; } }   /* (0x0F with 0x20 or less would be a speed) */
+        else if (p <= 0xF0) { int t = conv_tempo(p, bpm, rpb); if (t > 0xFF) { x->eff = 0x1B; x->par = (uint8_t)((t + 1) / 2); } else if (t > 0x20) { x->eff = 0x0F; x->par = (uint8_t)t; } else { x->eff = 0x16; x->par = (uint8_t)t; } }   /* (0x0F with 0x20 or less would be a speed) */
         else if (p == 0xFF) { x->eff = 0x0C; x->par = 0; }
         else if (p == 0xF1) { x->eff = 0x0E; x->par = 0x93; }          /* play note twice (approx.: retrigger every 3 ticks) */
         else if (p == 0xF2) { x->eff = 0x0E; x->par = 0xD3; }
@@ -66,6 +69,8 @@ static void conv_fx(XCell *x, int e, int p, int hexvol, int bpm, int rpb, const 
     case 0x1A: x->eff = 0x0E; x->par = (uint8_t)(0xA0 | (p > 15 ? 15 : p)); break;
     case 0x1B: x->eff = 0x0E; x->par = (uint8_t)(0xB0 | (p > 15 ? 15 : p)); break;
     case 0x1D: x->eff = 0x0D; x->par = (uint8_t)(((p % 64) / 10 << 4) | ((p % 64) % 10)); break;
+    case 0x1E: x->eff = 0x0E; x->par = (uint8_t)(0xE0 | (p > 15 ? 15 : p)); break;                     /* repeat row = the pattern delay */
+    case 0x2E: if (p <= 0x10 || p >= 0xF0) { int v = (((p ^ 0x80) & 0xFF) - 0x70) * 8; if (v < 0) v = 0; if (v > 255) v = 255; x->eff = 0x0E; x->par = (uint8_t)(0x80 | (v >> 4)); } break;     /* set panning */
     case 0x1F: if (p >> 4) { x->eff = 0x0E; x->par = (uint8_t)(0xD0 | (p >> 4)); } else if (p & 15) { x->eff = 0x0E; x->par = (uint8_t)(0x90 | (p & 15)); } break;
     default: break;
     }
