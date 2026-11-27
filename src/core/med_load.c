@@ -35,7 +35,7 @@ static double mmd_bpm(int v, int bpm, int rpb){
 }
 static int conv_tempo(int v, int bpm, int rpb){       /* the BPM (up to 510: above 255 the effect 0x1B takes half of it) */
     int t = v < 3 ? 0x70 : (int)(mmd_bpm(v, bpm, rpb) + 0.5);       /* F01 and F02: a bug of OctaMED that libopenmpt keeps (112 BPM) */
-    return t < 0x20 ? 0x20 : t > 0x1FE ? 0x1FE : t;
+    return t < 0x20 ? 0x20 : t > 0x3FF ? 0x3FF : t;
 }
 
 static void conv_fx(XCell *x, int e, int p, int hexvol, int bpm, int rpb, const BlkMap *map, int nmap){
@@ -53,7 +53,7 @@ static void conv_fx(XCell *x, int e, int p, int hexvol, int bpm, int rpb, const 
     case 0x0C: if (!hexvol && p >= 0x99) break; { int v = hexvol ? (p & 0x7F) : (p >> 4) * 10 + (p & 15); if (v > 64) v = 64; x->eff = 0x0C; x->par = (uint8_t)v; } break;       /* (decimal volumes above 99, and the bit 7 of hex volumes: no volume) */
     case 0x0F:
         if (p == 0) { x->eff = 0x0D; x->par = 0; }
-        else if (p <= 0xF0) { int t = conv_tempo(p, bpm, rpb); if (t > 0xFF) { x->eff = 0x1B; x->par = (uint8_t)((t + 1) / 2); } else if (t > 0x20) { x->eff = 0x0F; x->par = (uint8_t)t; } else { x->eff = 0x16; x->par = (uint8_t)t; } }   /* (0x0F with 0x20 or less would be a speed) */
+        else if (p <= 0xF0) { int t = conv_tempo(p, bpm, rpb); if (t > 0x2FF) { x->eff = 0x1E; x->par = (uint8_t)(t - 768); } else if (t > 0x1FF) { x->eff = 0x1D; x->par = (uint8_t)(t - 512); } else if (t > 0xFF) { x->eff = 0x1C; x->par = (uint8_t)(t - 256); } else if (t > 0x20) { x->eff = 0x0F; x->par = (uint8_t)t; } else { x->eff = 0x16; x->par = (uint8_t)t; } }   /* (0x0F with 0x20 or less would be a speed) */
         else if (p == 0xFF) { x->eff = 0x0C; x->par = 0; }
         else if (p == 0xF1) { x->eff = 0x0E; x->par = 0x93; }          /* play note twice (approx.: retrigger every 3 ticks) */
         else if (p == 0xF2) { x->eff = 0x0E; x->par = 0xD3; }
@@ -167,6 +167,8 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
         if (!bt[bi] || !used[bi]) continue;
         const uint8_t *q = b + bo[bi] + (ver == 0 ? 2 : 8);
         unsigned tracks = bt[bi], lines = bl[bi];
+        uint8_t *fxf = (uint8_t *)calloc((size_t)lines * tracks + 1, 1);       /* the cell has an effect command (also one that is not played: synth jump / MIDI panning, 0x0E) */
+        if (!fxf) return -2;
         for (unsigned r = 0; r < lines; r++) {
             XCell *row = &s->pat[((size_t)(map[bi].first + r / 64) * 64 + (r % 64)) * nch];
             for (unsigned c = 0; c < tracks; c++) {
@@ -179,8 +181,22 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
                 if (note) { int en = note - 1 + NOTE_BASE; x->note = (uint8_t)(en > 107 ? 107 : en); }
                 x->inst = (uint8_t)inst;
                 conv_fx(x, fx, par, hexvol, bpm, rpb, jm, (int)(nseq < 256 ? nseq : 256));
+                { int has = (x->eff || x->par || fx == 0x0E || (fx == 0x0F && par == 0xFD)) && !(fx == 0x0F && par == 0xFF);       /* (0F FF is a note cut, no command) */
+                  int vc = (x->eff >= 1 && x->eff <= 4 && x->eff != 0 ) || x->eff == 0x0C || (x->eff == 0x0E && (x->par & 0xF0) == 0x80)
+                           || (x->eff == 0x0A && ((x->par & 15) == 0 || (x->par & 0xF0) == 0 || (x->par & 15) == 15 || (x->par & 0xF0) == 0xF0));      /* fits the volume column (libopenmpt keeps the X-parameter then) */
+                  fxf[(size_t)r * tracks + c] = !has ? 0 : (vc && fx != 0x0E) ? 1 : 2; }
             }
         }
+        /* libopenmpt stores a tempo above 255 as the high byte plus an X-parameter in the next row of the same track; when that row has an effect of its own (or there is none) the tempo stays 255 */
+        for (unsigned r = 0; r < lines; r++)
+            for (unsigned c = 0; c < tracks && (int)c < nch; c++) {
+                XCell *x = &s->pat[((size_t)(map[bi].first + r / 64) * 64 + (r % 64)) * nch + c];
+                if (x->eff < 0x1C || x->eff > 0x1E) continue;
+                int stay = 1;
+                if (r + 1 < lines) stay = fxf[(size_t)(r + 1) * tracks + c] != 2;
+                if (!stay) { x->eff = 0x0F; x->par = 0xFF; }
+            }
+        free(fxf);
         if (lines % 64) s->plen[map[bi].first + (lines - 1) / 64] = (uint8_t)(lines % 64);      /* a short (last) pattern ends after its last row (a break in a free effect column did not work when all columns were in use) */
     }
 
