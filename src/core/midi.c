@@ -115,6 +115,7 @@ struct Midi {
     unsigned mute;
     int prog[NCH], bank[NCH], vol[NCH], pan[NCH];
     float lvl[NCH];
+    int8_t mtrev[3];                      /* the MT-32 reverb of the file: mode (0 room, 1 hall, 2 plate, 3 tap delay), time 0..7, level 0..7 (-1: not set) */
     uint8_t cc1[NCH];                     /* the modulation wheel (the synth does not keep it) */
     float aout[NCH];
     uint32_t *tm_tick; double *tm_sec, *tm_us; size_t ntm;       /* the tempo map: tick, seconds at that tick, microseconds per quarter note */
@@ -292,6 +293,9 @@ static void sysex_note(Midi *m, const uint8_t *d, uint32_t sl) {
     if (d[0] == 0x41 && sl >= 6) {
         if (d[2] == 0x16) m->sx_mt32++;                                 /* the MT-32 has its own model id */
         else if (d[2] == 0x42 || d[2] == 0x45) m->sx_gs++;              /* Sound Canvas (GS) and its display */
+        if (d[2] == 0x16 && d[3] == 0x12 && sl >= 10 && d[4] == 0x10 && d[5] == 0x00) {      /* the MT-32 system area (10 00 xx): 00 master tune, 01 reverb mode, 02 reverb time, 03 reverb level; the last message of the file counts */
+            for (uint32_t k = 0; k < sl - 9; k++) { unsigned ad = (unsigned)d[6] + k; if (ad >= 1 && ad <= 3) m->mtrev[ad - 1] = (int8_t)d[7 + k]; }
+        }
         if (d[2] == 0x16 && d[3] == 0x12 && sl >= 10 && d[4] == 0x20 && d[5] == 0 && d[6] == 0 && !m->lcd[0]) textcpy(m->lcd, sizeof m->lcd, d + 7, sl - 9 > 20 ? 20 : sl - 9);        /* the MT-32 display message */
         else if (d[2] == 0x45 && d[3] == 0x12 && sl >= 10 && d[4] == 0x10 && d[5] == 0 && d[6] == 0 && !m->lcd[0]) textcpy(m->lcd, sizeof m->lcd, d + 7, sl - 9 > 23 ? 23 : sl - 9);   /* the Sound Canvas display message */
     } else if (d[0] == 0x7E && d[2] == 0x09) { if (d[3] == 0x01) m->sx_gm++; else if (d[3] == 0x03) m->sx_gm2++; }
@@ -317,6 +321,7 @@ Midi *midi_open(const uint8_t *buf, size_t total, int rate, char *err, size_t er
     tsf *base = soundfont(err, errcap);
     if (!base) return NULL;
     Midi *m = (Midi *)calloc(1, sizeof *m);
+    memset(m->mtrev, -1, sizeof m->mtrev);
     m->rate = rate; m->info.format = fmt; m->info.ntracks = ntrk; m->info.division = div; m->info.tempo_bpm = 120;
     size_t cap = 0, p = 8 + (b[4] << 24 | b[5] << 16 | b[6] << 8 | b[7]); uint32_t seq = 0;
     int got_title = 0, got_tempo = 0;
@@ -647,7 +652,7 @@ int midi_notes_in(const Midi *m, double t0, double t1, MidiNote *out, int max) {
 double midi_position(const Midi *m) { return (double)m->pos / m->rate; }
 void midi_hint_mt32(Midi *m) { m->sx_mt32++; }
 void midi_info(const Midi *m, MidiInfo *out) {
-    *out = m->info;
+    *out = m->info; for (int k = 0; k < 3; k++) out->mt_reverb[k] = m->mtrev[k];
     const char *s = m->sx_mt32 ? "MT-32" : m->sx_gs ? "GS" : m->sx_xg ? "XG" : m->sx_gm2 ? "GM2" : "GM";
     snprintf(out->standard, sizeof out->standard, "%s", s);
     out->standard_known = m->sx_mt32 || m->sx_gs || m->sx_xg || m->sx_gm2 || m->sx_gm;

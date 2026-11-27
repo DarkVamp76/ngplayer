@@ -63,6 +63,7 @@ int  song_is_fm_s3m(const Song *s);
 int  song_fm_voices(const Song *s, int *digital_ch);      /* FM channel count (+ digital channels) */
 int  song_fm_in_sample_format(const Song *s);             /* FM in a format that can also hold samples */
 void song_midi_idle(Song *s);                                        /* the player is not rendering (pause, end): the MIDI hardware gets its panic */
+int song_midi_mt32_reverb(const Song *s, int out[3]);                  /* the MT-32 reverb the file sets (mode 0 room / 1 hall / 2 plate / 3 tap delay, time 0..7, level 0..7); 0: the file sets none */
 const char *song_midi_standard(const Song *s, int *known);          /* "MT-32", "GS", "XG", "GM2", "GM": what the SysEx messages of the file say it was written for (known = 0: none named) */
 const char *song_midi_lcd(const Song *s);                              /* the MT-32 display text the file sends ("Willy Beamish"), "" if there is none */
 typedef struct { float level, out; int program, bank, drum, volume, pan, used; int expr, mod, reverb, chorus, sustain; float bend; } SongMidiChan;      /* level 0..1, CC 7, CC 10 (0..127), used = the file has notes on it */
