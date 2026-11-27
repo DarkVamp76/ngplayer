@@ -27,7 +27,7 @@ static int period_fine(const XSong *s, int note, uint32_t c2spd){
         uint64_t pp = d >= 0 ? num / ((uint64_t)c2spd << d) : (num << -d) / c2spd; if (pp < 1) pp = 1;
         return (int)(14318184.0 * PK * (double)pp / (8363.0 * 1712.0));
     }
-    if (s->fmt == 1 && s->pt_tuning == 2 && getenv("XMODHZ") == NULL && getenv("XMODNTSC") == NULL && c2spd && note >= 0x18 && note < 0x18 + 84) {
+    if (s->fmt == 1 && (s->pt_tuning == 2 || s->med) && getenv("XMODHZ") == NULL && getenv("XMODNTSC") == NULL && c2spd && note >= 0x18 && note < 0x18 + 84) {
         /* real MOD: the tuned ProTracker period of the note, as libopenmpt plays it (finetune table, quarter period steps) */
         int ft = 0; for (int i = 0; i < 16; i++) if (c2spd == ngp_finetune_c2spd_mod[i]) { ft = i; break; }
         int k = note - 0x18 - 12, oct = k >= 0 ? k / 12 : -1 - (-k - 1) / 12, n = k - oct * 12;      /* k = 0: C-1 (856) */
@@ -269,13 +269,21 @@ static void trigger_note(XPlayer *p, int chn, Ch *c, const XCell *x){
     const XSmp *m = &s->smp[c->inst];
     c->smp = c->inst;
     if (m->syn) { if (!(x->eff == 3 || x->eff == 5) || !c->sy) synth_init(c, m->syn); } else c->sy = NULL;
+    int octsh = s->med ? m->octbase : 0; const XSmp *mq = m;                    /* MED multi-octave sample: the part and the transposition follow the note */
+    if (m->noct) {
+        int rel = (x->note ? x->note : c->lastnote) - 36 + m->octbase, oc;
+        if (rel < 0) rel = -rel % 12;
+        oc = rel / 12; if (oc > 7) oc = 7;
+        mq = &m->oct[m->octmap[oc]]; octsh = m->octbase + m->octtr[oc];
+    }
+    if (m->noct && !inst_ok) { c->len = mq->len; c->ls = mq->ls; c->le = mq->le; c->loop = mq->loop; c->data = mq->data; c->is16 = mq->is16; }
     if (inst_ok) {
         { const XSmp *mv = keepold ? &s->smp[x->inst] : m; if (mv->vol <= s->maxvol) c->vD8 = c->v44 = mv->vol; }
         c->c2spd = m->c2spd;
-        c->len = m->len; c->ls = m->ls; c->le = m->le; c->loop = m->loop; c->data = m->data; c->is16 = m->is16;
+        c->len = mq->len; c->ls = mq->ls; c->le = mq->le; c->loop = mq->loop; c->data = mq->data; c->is16 = mq->is16;
         c->cnt164 = 0; c->m168 = 0;
     }
-    c->d0 = 0;                                    /* Periodenmaßstab des Originals: 4x Amiga */
+    c->d0 = octsh;                                /* (a multi-octave sample shifts the note) */
     c->lastnote = note;
     c->vE8 = c->v44;
     int per = period_fine(p->s, note + c->d0, keepold && s->pt_tuning == 2 ? s->smp[x->inst].c2spd : c->c2spd);   /* the target period follows the finetune of the latched sample */
@@ -323,7 +331,7 @@ static void e_sub(XPlayer *p, int chn, Ch *c, int par, int tick){
     case 2: if (!tick) c->pD4 += (x << 2) * PK; break;
     case 4: c->mb0 = (c->mb0 & 0xf0) | x; break;
     case 5: if (p->s->fmt == 1 && p->s->pt_tuning == 3) break;   /* DSM: no finetune command in libopenmpt */
-        c->c2spd = (p->s->fmt == 1 && p->s->pt_tuning == 2) ? ngp_finetune_c2spd_mod[x] : ngp_finetune_c2spd[x];
+        c->c2spd = (p->s->fmt == 1 && (p->s->pt_tuning == 2 || p->s->med)) ? ngp_finetune_c2spd_mod[x] : ngp_finetune_c2spd[x];
             c->pD4 = period_fine(p->s, c->lastnote + c->d0, c->c2spd); break;
     case 7: c->mb0 = (c->mb0 & 0x0f) | (x << 4); break;
     case 8: c->pan5c = ngp_pan_tab[x]; break;   /* gemessen: S8x setzt echten Pan */
@@ -516,7 +524,8 @@ XPlayer *xplay_new(const XSong *s, int rate){
     XPlayer *p = calloc(1, sizeof *p);
     { const char*e=getenv("XQC"); g_qc = e ? atoi(e) : (s->fmt == 1 ? 2 : 0); }
     g_exact = (s->fmt == 1 && s->pt_tuning == 3);
-    g_clk = (s->fmt == 1 && s->pt_tuning == 2 && !getenv("XMODNTSC") && !getenv("XMODHZ")) ? 14187579.6 : 14318184.0;     /* MOD: PAL clock (4 x 3546894.9) */
+    g_clk = (s->fmt == 1 && s->pt_tuning == 2 && !getenv("XMODNTSC") && !getenv("XMODHZ")) ? 14187579.6 : 14318184.0;
+    if (s->med && !getenv("XMEDNTSC")) g_clk = 14187579.6;     /* OctaMED: PAL Amiga clock (4 x 3546894.9), as libopenmpt plays MED */     /* MOD: PAL clock (4 x 3546894.9) */
     p->s = s; p->rate = rate; p->speed = s->speed; p->tempo = s->tempo; p->tempof = s->tempo_exact; p->gvol = s->gvol ? s->gvol : 255;
     for (int i = 0; i < NCH; i++) p->ch[i].pan5c = (s->fmt == 1 && s->chpan[i] < 0) ? ((i % 4 == 0 || i % 4 == 3) ? 60 : 195) : (s->chpan[i] >= 0 ? s->chpan[i] : 128);
     if (s->has_adlib) { p->has_opl = 1; OPL3_Reset(&p->chip, (uint32_t)rate); opl_w(p, 1, 0x20); opl_w(p, 0xBD, 0); }

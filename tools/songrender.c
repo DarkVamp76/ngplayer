@@ -5,7 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+extern int xplay_solo;
 int main(int argc, char **argv) {
+    if (getenv("XSOLO")) xplay_solo = atoi(getenv("XSOLO"));          /* test hook: render only this channel (also for ITSOLO-less formats such as MED, MTM) */
     if (argc < 3) { fprintf(stderr, "usage: %s in out.wav [max_seconds]\n", argv[0]); return 2; }
     const int rate = 44100; int maxsec = argc > 3 ? atoi(argv[3]) : 900;
     char err[200] = "";
