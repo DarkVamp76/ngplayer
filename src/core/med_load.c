@@ -208,7 +208,7 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
         uint32_t io = be32(b + po);
         if (!io || io + 6 > n) continue;
         uint32_t len = be32(b + io); int type = (int16_t)be16(b + io + 4);
-        if (type < 0) {                                                /* synth (-2) / hybrid (-1): bake first waveform */
+        if (type < 0) {                                                /* hybrid (-2) / synthetic (-1): the first waveform of the table is the starting sample */
             const uint8_t *sy = b + io + 6;
             if (io + 6 + 276 > n) continue;
             unsigned nwf = be16(sy + 14), vtl = be16(sy + 8), wtl = be16(sy + 10);
@@ -217,32 +217,39 @@ int xmed_load(XSong *s, const uint8_t *b, size_t n){
             for (unsigned k = 0; k < wtl && k < 128; k++) { int c = sy[144 + k]; if (c < 0x80) { wi = (unsigned)c; break; } if (c == 0xFF) break; if (c >= 0xF0) k++; }   /* skip command parameters */
             if (wi >= nwf) wi = 0;
             for (unsigned k = 0; k < vtl && k < 128; k++) { int c = sy[16 + k]; if (c <= 0x40) { wv = (unsigned)c; break; } if (c == 0xFF) break; }
-            uint32_t wo = io + be32(sy + 272 + 4 * wi);
-            if (wo + 2 > n) continue;
-            uint32_t wl = be16(b + wo) * 2u;
-            if (!wl || wo + 2 + wl > n) continue;
-            m->len = wl; m->is16 = 0;
-            m->data = calloc((size_t)wl + 4, 1);
-            if (!m->data) return -5;
-            memcpy(m->data, b + wo + 2, wl);
-            m->ls = 0; m->le = wl; m->loop = 1;
-            m->vol = (int)(vol > 64 ? 64 : vol);
+            int hybrid = type == -2;                                         /* -2 hybrid (sample + waveforms), -1 synthetic */
             m->syn = calloc(1, sizeof(XSyn));
             if (!m->syn) return -5;
             m->syn->vn = (int)(vtl > 128 ? 128 : vtl); m->syn->vspd = sy[12];
             memcpy(m->syn->vtab, sy + 16, 128);
             m->syn->wn = (int)(wtl > 128 ? 128 : wtl); m->syn->wspd = sy[13]; memcpy(m->syn->wtab, sy + 144, 128);
+            if (ext && i < extn) { m->syn->hold = ext[i * extsz] & 127; m->syn->decay = ext[i * extsz + 1] & 127; }
             for (unsigned k = 0; k < nwf; k++) {
                 uint32_t o2 = io + be32(sy + 272 + 4 * k);
+                uint32_t l2, dofs; uint32_t lps = 0, lpe = 0; int lp = 1;
                 if (o2 + 2 > n) break;
-                uint32_t l2 = be16(b + o2) * 2u;
-                if (!l2 || o2 + 2 + l2 > n) break;
+                if (hybrid && k == 0) {                                     /* a hybrid's first waveform is a plain sample with the loop of the sample header */
+                    if (o2 + 6 > n) break;
+                    l2 = be32(b + o2); dofs = o2 + 6;
+                    if ((int16_t)be16(b + o2 + 4) != 0) l2 = 0;
+                    lp = rlen > 1; lps = rep * 2; lpe = lps + rlen * 2;
+                } else { l2 = be16(b + o2) * 2u; dofs = o2 + 2; lps = 0; lpe = l2; }
+                if (!l2 || dofs + l2 > n) { if (hybrid && k == 0) { m->syn->wf[k] = calloc(2, 1); m->syn->wl[k] = 0; m->syn->nwf = (int)k + 1; continue; } break; }
+                if (lpe > l2) lpe = l2;
                 m->syn->wf[k] = malloc(l2);
                 if (!m->syn->wf[k]) return -5;
-                memcpy(m->syn->wf[k], b + o2 + 2, l2); m->syn->wl[k] = (int)l2; m->syn->nwf = (int)k + 1;
+                memcpy(m->syn->wf[k], b + dofs, l2); m->syn->wl[k] = (int)l2; m->syn->wls[k] = (int)lps; m->syn->wle[k] = (int)lpe; m->syn->wloop[k] = lp; m->syn->nwf = (int)k + 1;
             }
+            if (wi >= (unsigned)m->syn->nwf || !m->syn->wl[wi]) wi = 0;
+            if (!m->syn->nwf || !m->syn->wl[wi]) { free(m->syn); m->syn = NULL; continue; }
+            { uint32_t wl = (uint32_t)m->syn->wl[wi];
+              m->len = wl; m->is16 = 0; m->data = calloc((size_t)wl + 4, 1);
+              if (!m->data) return -5;
+              memcpy(m->data, m->syn->wf[wi], wl);
+              m->ls = (uint32_t)m->syn->wls[wi]; m->le = (uint32_t)m->syn->wle[wi]; m->loop = m->syn->wloop[wi]; }
+            m->vol = (int)(vol > 64 ? 64 : vol);
             (void)wv;
-            m->c2spd = (uint32_t)(m->c2spd * 0.25 + 0.5);                 /* synth notes sound two octaves lower than the sample scale */
+            if (type == -1 && ver <= 2) m->c2spd = (uint32_t)(m->c2spd * 0.25 + 0.5);   /* OctaMED up to 2: synthetic instruments sound two octaves lower than the sample scale */
             continue;
         }
         if ((type & 0x0F) || (type & 0xC0)) continue;                  /* multi-octave, delta, packed: unsupported */

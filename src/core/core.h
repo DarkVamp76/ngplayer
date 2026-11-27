@@ -5,7 +5,8 @@
 
 typedef struct XSyn {              /* MED synth instrument: volume table + waveforms (used as envelopes) */
     uint8_t vtab[128], wtab[128]; int vn, vspd, wn, wspd;
-    int nwf; int8_t *wf[64]; int wl[64];
+    int nwf; int8_t *wf[64]; int wl[64]; int wls[64], wle[64], wloop[64];   /* waveforms (a hybrid's first one is its sample, with the sample's loop) */
+    int hold, decay;           /* instrument hold / decay (volume script restart after hold ticks) */
 } XSyn;
 typedef struct { uint8_t note, inst, eff, par, vol1, eff2, par2; } XCell;   /* eff2/par2: second effect (DBM), 0 = none */   /* vol1: 0 = keine Volumenspalte, sonst Wert+1 */
 typedef struct {

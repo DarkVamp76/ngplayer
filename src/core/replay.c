@@ -63,6 +63,7 @@ static int period_fine(const XSong *s, int note, uint32_t c2spd){
 
 #define NCH 32
 
+typedef struct { int n, cur, nextpos, ticks, spd, steps, started, init, first, hold, hold_arm, decay, vfac, vstep, pstep, padd, lin, venv, venvpos, vibenv, vibspd, vibdep, vibpos, vibval, arp_off, arp_n, arp_i; } SynS;   /* one MED synth script (see synth_init) */
 typedef struct {
     int inst, smp, lastnote, d0, c2spd;
     int p74, p80, pD4, v44, vD8, vE8, pan5c;
@@ -77,8 +78,7 @@ typedef struct {
     int loop_row, loop_cnt, loop_ord;     /* loop_ord: the order (chunk) of the loop start: a MED block of more than 64 lines is several orders */
     int is16, m168, mA4, mA8;
     int sd_on, sd_tick; XCell sd_cell;   /* S3M SDx: verzoegerte Zeile */
-    const XSyn *sy; int sv_pos, sv_cnt, sv_spd, sv_wait, sv_slide, sv_env, sv_envpos, sv_envloop, sv_halt, sv_vol;  /* MED synth volume table */
-    int sw_pos, sw_cnt, sw_spd, sw_wait, sw_halt, sw_wave, vib_d, vib_s, vib_ph;  /* MED synth waveform table + vibrato */
+    const XSyn *sy; int sw_wave; SynS sx[2];  /* MED synth: volume script [0] and waveform script [1] (OctaMED instrument scripts) */
 } Ch;
 
 typedef struct { int on; int is16; double pos, step; const int8_t *data; uint32_t len, ls, le; int loop; int vol, pan; double volf; int hold; const XSmp *pend; } Voice;   /* pend: MOD sample number without a note - latched, taken over when the current loop / sample ends */
@@ -105,70 +105,97 @@ struct XPlayer {
 
 static int clampi(int v, int lo, int hi){ return v < lo ? lo : v > hi ? hi : v; }
 
-/* MED synth volume table: one command per step, a step every sv_spd ticks. 00-40 set, F0 speed, F1 wait, F2/F3 slide down/up,
- * F4/F5 envelope (waveform xx as volume curve, once / looped), F6 stop envelope, FE jump, FF halt. */
+static const int8_t synth_sin[64] = {0,12,25,37,49,60,71,81,90,98,106,112,117,122,125,126,127,126,125,122,117,112,106,98,90,81,71,60,49,37,25,12,0,-12,-25,-37,-49,-60,-71,-81,-90,-98,-106,-112,-117,-122,-125,-126,-127,-126,-125,-122,-117,-112,-106,-98,-90,-81,-71,-60,-49,-37,-25,-12};
+/* MED synth / hybrid instrument: two scripts (volume table [0], waveform table [1]) run by one interpreter, a step every `spd` ticks.
+ * Commands as OctaMED documents them (OpenMPT's Load_med / InstrumentSynth is the written-down reference): 00-40 set volume (volume script) / waveform number (waveform script),
+ * F0 SPD step speed, F1 WAI wait, F2/F3 CHD/CHU volume (volume script) or pitch (waveform script) change speed, F4/F5 EN1/EN2 one-shot / looping volume envelope (a waveform as the curve)
+ * or VBD/VBS vibrato depth / speed, F6 reset pitch (waveform script), F7 VWF vibrato waveform (waveform script), FA JWV/JWS jump the other script, FB HLT, FC ARP ... FD ARE arpeggio,
+ * FE JMP, FF END; hold / decay of the instrument start a volume-script jump. */
 static void synth_init(Ch *c, const XSyn *sy){
-    c->sy = sy; c->sv_pos = 0; c->sv_cnt = 0; c->sv_spd = sy->vspd > 0 ? sy->vspd : 1; c->sv_wait = 0; c->sv_slide = 0;
-    c->sv_env = -1; c->sv_envpos = 0; c->sv_envloop = 0; c->sv_halt = 0; c->sv_vol = 64;
-    c->sw_pos = 0; c->sw_cnt = 0; c->sw_spd = sy->wspd > 0 ? sy->wspd : 1; c->sw_wait = 0; c->sw_halt = 0; c->sw_wave = -1; c->vib_d = 0; c->vib_s = 0; c->vib_ph = 0;
+    c->sy = sy; c->sw_wave = -1;
+    for (int i = 0; i < 2; i++) {
+        SynS *t = &c->sx[i]; memset(t, 0, sizeof *t);
+        t->spd = 1; t->vfac = 16384; t->arp_off = -1; t->venv = -1; t->vibenv = -1; t->hold = 255; t->first = i == 0 ? sy->vspd : sy->wspd;
+        t->n = i == 0 ? sy->vn : sy->wn;
+        if (t->n > 128) t->n = 128;
+    }
+    if (sy->hold) { c->sx[0].hold_arm = sy->hold; }
 }
-/* waveform table: 00-7F select waveform, F0 speed, F1 wait, F4 vibrato depth, F5 vibrato speed, FE jump, FF halt (F2,F3,F6,F7 skipped) */
-static void synth_wave_step(Ch *c){
-    const XSyn *sy = c->sy;
-    if (c->sw_cnt > 0) { c->sw_cnt--; return; }
-    c->sw_cnt = c->sw_spd - 1;
-    if (c->sw_wait > 0) { c->sw_wait--; return; }
-    for (int guard = 0; guard < 16 && !c->sw_halt && c->sw_pos < sy->wn && c->sw_pos < 128; guard++) {
-        int cmd = sy->wtab[c->sw_pos++], arg = c->sw_pos < 128 ? sy->wtab[c->sw_pos] : 0;
-        if (cmd < 0x80) {
-            if (cmd < sy->nwf && sy->wf[cmd] && cmd != c->sw_wave) {
-                c->sw_wave = cmd; c->data = sy->wf[cmd]; c->len = c->le = (uint32_t)sy->wl[cmd]; c->ls = 0; c->loop = 1; c->is16 = 0; c->swap = 1;
+static int synth_env(const XSyn *sy, int env, int pos){
+    if (env < 0 || env >= sy->nwf || !sy->wf[env] || pos < 0 || pos >= sy->wl[env]) return 0;
+    return sy->wf[env][pos];
+}
+static int synth_event(Ch *c, int i){      /* one script command; returns 1 when it ends the step */
+    const XSyn *sy = c->sy; SynS *t = &c->sx[i]; const uint8_t *tab = i == 0 ? sy->vtab : sy->wtab;
+    int p = t->cur, b = tab[p], isv = i == 0;
+    #define ARG() (p + 1 < t->n ? tab[++p] : (p++, 0))
+    switch (b) {
+    case 0xFF: case 0xFB: t->nextpos = 0xFFFF; return 1;
+    case 0xFE: t->nextpos = ARG(); return 0;
+    case 0xFD: break;
+    case 0xFC: { int n = 0, first = p + 1; while (p + 1 < t->n) { int v = tab[++p]; if (v >= 0x80) break; n++; }
+                 if (!n) break; t->arp_off = first; t->arp_n = n; t->arp_i = 0; t->nextpos = p + 1; return 1; }
+    case 0xFA: { int tgt = ARG(); SynS *o = &c->sx[isv ? 1 : 0]; o->nextpos = tgt; o->ticks = 0; o->steps = 0; break; }
+    case 0xF7: if (!isv) { t->vibenv = ARG(); t->venvpos = 0; } break;
+    case 0xF6: if (!isv) { t->lin = 0; t->padd = 0; t->nextpos = p + 1; return 1; } break;
+    case 0xF5: if (isv) { t->venv = (ARG() & 0x3F) | 0x80; t->venvpos = 0; } else t->vibspd = ARG(); break;
+    case 0xF4: if (isv) { t->venv = ARG() & 0x3F; t->venvpos = 0; } else t->vibdep = ARG(); break;
+    case 0xF3: if (isv) t->vstep = (int16_t)(ARG() * 256); else t->pstep = (int16_t)(ARG() * 4); break;
+    case 0xF2: if (isv) t->vstep = (int16_t)(-(int)ARG() * 256); else t->pstep = (int16_t)(-(int)ARG() * 4); break;
+    case 0xF1: { int a = ARG(); t->ticks = (a > 1 ? a : 1) - 1; t->nextpos = p + 1; return 1; }
+    case 0xF0: t->spd = ARG(); break;
+    default:
+        if (isv) { if (b <= 64) { t->vfac = b * 256; t->nextpos = p + 1; return 1; } }
+        else if (b < 0xF0) {
+            if (b < sy->nwf && sy->wf[b] && b != c->sw_wave) {
+                c->sw_wave = b; c->data = sy->wf[b]; c->len = (uint32_t)sy->wl[b]; c->ls = (uint32_t)sy->wls[b]; c->le = (uint32_t)sy->wle[b]; c->loop = sy->wloop[b]; c->is16 = 0; c->swap = 1;
             }
-            return;
+            t->nextpos = p + 1; return 1;
         }
-        switch (cmd) {
-        case 0xF0: c->sw_spd = arg > 0 ? arg : 1; c->sw_cnt = c->sw_spd - 1; c->sw_pos++; break;
-        case 0xF1: c->sw_wait = arg; c->sw_pos++; return;
-        case 0xF4: c->vib_d = arg; c->sw_pos++; break;
-        case 0xF5: c->vib_s = arg; c->sw_pos++; break;
-        case 0xFE: c->sw_pos = arg; break;
-        case 0xFF: c->sw_halt = 1; c->sw_pos--; return;
-        default: c->sw_pos++; break;
+        break;
+    }
+    #undef ARG
+    t->nextpos = p + 1; return 0;
+}
+static void synth_script(Ch *c, int i){
+    const XSyn *sy = c->sy; SynS *t = &c->sx[i];
+    if (!t->started) { t->started = 1; t->spd = 1; t->steps = 0; t->init = 1; }
+    if (t->hold != 255) { if (!t->hold--) t->nextpos = t->decay; }
+    if (t->spd && !t->steps--) {
+        t->steps = t->spd - 1;
+        if (t->init) { t->init = 0; t->spd = t->first; t->steps = t->first ? t->first - 1 : 0; if (i == 0 && sy->hold) { t->hold = sy->hold; t->decay = sy->decay; } }   /* the first command of every script: SPD, then HLD */
+        if (t->vstep) t->vfac = clampi(t->vfac + t->vstep, 0, 16384);
+        if (t->pstep) t->padd -= t->pstep;
+        if (t->venv >= 0) {
+            t->vfac = clampi((synth_env(sy, t->venv & 0x7F, t->venvpos) + 128) * 64, 0, 16384);
+            if (t->venvpos < 127) t->venvpos++; else if (t->venv & 0x80) t->venvpos = 0;
+        }
+        if (t->ticks) t->ticks--;
+        else for (int guard = 0; guard < 12; guard++) {
+            if (t->nextpos >= t->n) break;
+            t->cur = t->nextpos;
+            if (synth_event(c, i)) break;
         }
     }
+    if (t->arp_off >= 0 && t->arp_n) { t->lin = 16 * (i == 0 ? sy->vtab : sy->wtab)[t->arp_off + t->arp_i]; t->arp_i = (t->arp_i + 1) % t->arp_n; }
+    if (t->vibdep) {
+        int off = t->vibpos / 16;
+        t->vibval = t->vibenv < 0 ? synth_sin[(off * 2) % 64] : synth_env(sy, t->vibenv, off);
+        t->vibpos = (t->vibpos + t->vibspd) % (32 * 16);
+    }
 }
-
+/* the period of a synth note: the pitch change of the waveform script, the vibrato and the arpeggio (periods are 4 x Amiga, PK fixed point) */
+static int synth_period(const Ch *c, int per){
+    double pd = 0; int lin = 0;
+    for (int i = 0; i < 2; i++) { const SynS *t = &c->sx[i]; pd += t->padd; lin += t->lin; if (t->vibdep) pd += t->vibval * t->vibdep / 64; }
+    double r = per + pd * PK;
+    if (lin) r *= pow(2.0, -lin / 192.0);
+    return r < 1 ? 1 : (int)(r + 0.5);
+}
 static void synth_step(Ch *c){
-    const XSyn *sy = c->sy; if (!sy) return;
-    synth_wave_step(c);
-    c->vib_ph = (c->vib_ph + c->vib_s) & 0xFF;
-    if (c->sv_cnt > 0) { c->sv_cnt--; return; }
-    c->sv_cnt = c->sv_spd - 1;
-    c->sv_vol += c->sv_slide;
-    if (c->sv_wait > 0) c->sv_wait--;
-    else if (!c->sv_halt && c->sv_pos < sy->vn && c->sv_pos < 128) {
-        int cmd = sy->vtab[c->sv_pos++], arg = c->sv_pos < 128 ? sy->vtab[c->sv_pos] : 0;
-        if (cmd <= 0x40) { c->sv_vol = cmd; c->sv_slide = 0; c->sv_env = -1; }
-        else switch (cmd) {
-        case 0xF0: c->sv_spd = arg > 0 ? arg : 1; c->sv_pos++; break;
-        case 0xF1: c->sv_wait = arg; c->sv_pos++; break;
-        case 0xF2: c->sv_slide = -arg; c->sv_pos++; break;
-        case 0xF3: c->sv_slide = arg; c->sv_pos++; break;
-        case 0xF4: case 0xF5: c->sv_env = arg < sy->nwf ? arg : -1; c->sv_envpos = 0; c->sv_envloop = cmd == 0xF5; c->sv_slide = 0; c->sv_pos++; break;
-        case 0xF6: c->sv_env = -1; c->sv_pos++; break;
-        case 0xFE: c->sv_pos = arg; break;
-        case 0xFF: c->sv_halt = 1; c->sv_pos--; break;
-        default: c->sv_pos++; break;
-        }
-    }
-    if (c->sv_env >= 0) {
-        int len = sy->wl[c->sv_env];
-        if (c->sv_envpos >= len) { if (c->sv_envloop) c->sv_envpos = 0; else c->sv_envpos = len - 1; }
-        if (len > 0) { int b = sy->wf[c->sv_env][c->sv_envpos++]; c->sv_vol = b < 0 ? 0 : b >> 1; }
-    }
-    c->sv_vol = clampi(c->sv_vol, 0, 64);
+    if (!c->sy) return;
+    synth_script(c, 0); synth_script(c, 1);
 }
-
 
 /* ---- S3M AdLib (OPL2) channels: a note of an AdLib instrument is played by the OPL chip (Nuked-OPL3); the replayer's period / volume of the channel drive the chip each tick ---- */
 static const uint8_t opl_mod_off[9] = { 0, 1, 2, 8, 9, 10, 16, 17, 18 };
@@ -472,7 +499,7 @@ static void voice_update(XPlayer *p, int chn){
         if (v->hold && v->pos < v->len) { v->on = 1; v->hold = 0; }
     }
     { static int fv=-1; if(fv<0){const char*e=getenv("XFV"); fv=e?atoi(e):2;}
-      double ex = (double)c->v44 * p->gvol / p->s->maxvol; if (c->sy) ex = ex * c->sv_vol / 64.0; if (ex > 255) ex = 255; if (ex < 0) ex = 0;
+      double ex = (double)c->v44 * p->gvol / p->s->maxvol; if (c->sy) ex = ex * c->sx[0].vfac / 16384.0 * c->sx[1].vfac / 16384.0; if (ex > 255) ex = 255; if (ex < 0) ex = 0;
       int old = clampi(final_vol(c->v44, p->s->maxvol, p->gvol), 0, 255);
       if (fv == 1) { v->vol = (int)(ex + 0.5); v->volf = v->vol; }
       else if (fv == 2) { v->volf = ex; v->vol = (int)(ex + 0.5); }
@@ -480,8 +507,8 @@ static void voice_update(XPlayer *p, int chn){
       else { v->vol = old; v->volf = old; } }
     v->pan = clampi(c->pan5c, 0, 255);
     if (p->has_opl) opl_update(p, chn, c);
-    v->step = c->p74 > 0 ? ((p->s->fmt == 2 && p->s->pt_tuning) || (p->s->fmt == 1 && p->s->pt_tuning == 3) ? g_clk * PK / c->p74 : hzq(g_clk * PK / c->p74)) / p->rate : 0.0;   /* S3M (ST3 table): exact rate like libopenmpt */
-    if (c->sy && c->vib_d && c->vib_s) v->step *= pow(2.0, sin(c->vib_ph * 6.283185307179586 / 256.0) * c->vib_d / 384.0);   /* MED synth vibrato (depth scale estimated) */
+    int pe = c->p74; if (c->sy) pe = synth_period(c, pe);
+    v->step = pe > 0 ? ((p->s->fmt == 2 && p->s->pt_tuning) || (p->s->fmt == 1 && p->s->pt_tuning == 3) ? g_clk * PK / pe : hzq(g_clk * PK / pe)) / p->rate : 0.0;   /* S3M (ST3 table): exact rate like libopenmpt */
 }
 
 XPlayer *xplay_new(const XSong *s, int rate){
