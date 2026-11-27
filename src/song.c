@@ -197,6 +197,11 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
     fclose(f);
 
     { size_t um = umx_extract(b, (size_t)n); if (um) n = (long)um; }          /* Unreal package: play the module inside */
+    if (gdm_probe(b, (size_t)n)) {                                    /* GDM: rewritten as an S3M image */
+        size_t gn = 0; uint8_t *g = gdm_convert(b, (size_t)n, &gn);
+        if (!g) { free(b); snprintf(err, errcap, "GDM: damaged file"); return NULL; }
+        free(b); b = g; n = (long)gn;
+    }
     Song *s = (Song *)calloc(1, sizeof *s);
     int r = 0;
     const char *dot = strrchr(path, '.');
