@@ -10,6 +10,7 @@
 #include "herad.h"
 #include "rad.h"
 #include "ml_replay.h"
+#include "tp.h"
 #include "lds.h"
 #include "a2m_load.h"
 #include <stdio.h>
@@ -204,6 +205,20 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
 
     { size_t um = umx_extract(b, (size_t)n); if (um) n = (long)um; }          /* Unreal package: play the module inside */
     char gdm_trk[64] = "";
+    {   /* The Player (2.2A .. 6.1A): packed ProTracker modules without a safe signature, so only files named like one (NAME.p61a or P61A.NAME) are tried */
+        const char *bn = strrchr(path, '/'); bn = bn ? bn + 1 : path;
+        static const char *const tpx[] = { "p61a", "p60a", "p50a", "p41a", "p40a", "p40b", "p30a", "p22a", "p61", "p60", "p50", "p41", "p40", "p6x", "p5x", "p4x", NULL };
+        int named = 0; const char *ext = strrchr(bn, '.');
+        for (int i = 0; tpx[i] && !named; i++) {
+            size_t k = strlen(tpx[i]);
+            if (ext && !strcasecmp(ext + 1, tpx[i])) named = 1;
+            else if (!strncasecmp(bn, tpx[i], k) && bn[k] == '.') named = 1;
+        }
+        if (named) {
+            size_t tn = 0; const char *ver = NULL; uint8_t *t = tp_convert(b, (size_t)n, &tn, &ver);
+            if (t) { free(b); b = t; n = (long)tn; snprintf(gdm_trk, sizeof gdm_trk, "The Player %s", ver ? ver : ""); }
+        }
+    }
     if (gdm_probe(b, (size_t)n)) {                                    /* GDM: rewritten as an S3M image */
         static const char *const org[] = { "?", "MOD", "MTM", "S3M", "669", "FAR", "ULT", "STM", "MED", "PSM" };
         unsigned of = b[116] | (b[117] << 8);
