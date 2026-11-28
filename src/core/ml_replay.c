@@ -68,7 +68,7 @@ int ml_render(MlRender *r, int16_t *out, int n) {
         if (r->tick_left <= 0) {
             tick(r);
             if (r->ended) { memset(out + 2 * f, 0, sizeof(int16_t) * 2 * (size_t)(n - f)); return f; }
-            double hz = (p->tempo ? p->tempo : 125) * 709378.9 / 1789773.0;      /* the CIA timer value is 1789773 / tempo (not the 1773447 of ProTracker): 0.9 % slower than tempo * 0.4 Hz */
+            double hz = (p->tempo ? p->tempo : 125) * 709378.9 / 1789773.0;      /* the CIA timer value is 1789773 / tempo (not the 1773447 of ProTracker): 0.9 % slower than tempo * 0.4 Hz */      /* the CIA timer value is 1789773 / tempo (not the 1773447 of ProTracker): 0.9 % slower than tempo * 0.4 Hz */
             r->tick_left += r->rate / hz;
         }
         r->tick_left -= 1.0;

@@ -94,9 +94,9 @@ static int load_inst(R *r, MlSong *m) {
     s->envelope_attack_speed = u16(r); s->envelope_decay_speed = u16(r); s->envelope_sustain_speed = u16(r); s->envelope_release_speed = u16(r);
     s->envelope_attack_volume = u16(r); s->envelope_decay_volume = u16(r); s->envelope_sustain_volume = u16(r); s->envelope_release_volume = u16(r);
     if (r->eof) return 0;
-    s->vibrato_direction = u8(r) != 0; s->vibrato_wave_type = u8(r); s->vibrato_speed = u16(r); s->vibrato_delay = u16(r); s->vibrato_attack_speed = u16(r); s->vibrato_attack = u16(r); s->vibrato_depth = u16(r);
+    s->vibrato_direction = u8(r) != 0 ? 0 : 1;            /* nonzero = Upward (0), zero = Downward (1) */ s->vibrato_wave_type = u8(r); s->vibrato_speed = u16(r); s->vibrato_delay = u16(r); s->vibrato_attack_speed = u16(r); s->vibrato_attack = u16(r); s->vibrato_depth = u16(r);
     if (r->eof) return 0;
-    s->tremolo_direction = u8(r) != 0; s->tremolo_wave_type = u8(r); s->tremolo_speed = u16(r); s->tremolo_delay = u16(r); s->tremolo_attack_speed = u16(r); s->tremolo_attack = u16(r); s->tremolo_depth = u16(r);
+    s->tremolo_direction = u8(r) != 0 ? 0 : 1; s->tremolo_wave_type = u8(r); s->tremolo_speed = u16(r); s->tremolo_delay = u16(r); s->tremolo_attack_speed = u16(r); s->tremolo_attack = u16(r); s->tremolo_depth = u16(r);
     if (r->eof) return 0;
     s->arpeggio_table = u16(r); s->arpeggio_speed = u8(r); s->arpeggio_groove = u8(r);
     if (r->eof) return 0;
