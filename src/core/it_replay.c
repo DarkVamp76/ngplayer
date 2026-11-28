@@ -37,7 +37,7 @@ typedef struct {
     int vibpos, vibdepth, vibspeed, vibtype, tremdepth, tremspeed, trempos, tremtype, tremdelta;
     int pbdepth, pbspeed, pbpos, pbtype, pbdelta;
     int avdepth, avpos;
-    int m_pitch, m_porta, m_vol, m_vc, m_off, m_arp, m_ret, m_trem, m_spec, m_tempo, m_pan, m_cvol, m_gvol;
+    int m_pitch, m_porta, m_vol, m_vc, m_off, m_arp, m_ret, m_trem, m_spec, m_tempo, m_pan, m_cvol, m_gvol, m_ns;
     int cd_ret, cd_trem, cd_cut, cd_delay, cd_loop, loop_row, nna_ov;      /* nna_ov: NNA set by S73..S76 plus one (0: the one of the instrument) */
     int ncmd;
     double gl, gr, pgl, pgr; double step;
@@ -254,7 +254,7 @@ static void fx_volslide(V *c, int ft, int param){
 }
 
 static void fx_reg_porta(ITPlayer *p, V *c, int ft, int param, int up){
-    if (!ft) c->freq = freq_slide(p, c->freq, up ? param * 4 : -param * 4, 0);
+    if (!ft || p->s->okt) c->freq = freq_slide(p, c->freq, up ? param * 4 : -param * 4, 0);
 }
 static void fx_porta(ITPlayer *p, V *c, int ft, int param, int up){
     if (!param) param = c->m_pitch;
@@ -445,6 +445,14 @@ static void handle_effect(ITPlayer *p, V *c, int cmd, int param, int ft){
     case 2: /* B */
         p->process_order = param - 1; p->process_row = NEXT_ORDER; p->jumped = 1; break;
     case 3: break;
+    case 27: case 28:                                   /* Oktalyzer note slides (libopenmpt NoteSlide, MOD_TYPE_OKT): 0x1n every tick, 0x5n once per row; n semitones */
+        if (ft) { if (param & 0xF0) c->m_ns = (param & 0xF0) | (c->m_ns & 0x0F); if (param & 0x0F) c->m_ns = (c->m_ns & 0xF0) | (param & 0x0F); }
+        if (((c->m_ns & 0xF0) == 0x10 || ft) && c->freq > 0 && c->c5) {
+            int st = c->m_ns & 15, nt = note_from_freq(c->freq, c->c5) + (cmd == 28 ? st : -st);
+            nt = clampi(nt, 1, 120);
+            c->freq = freq_from_note_ft(nt, c->c5, c->smp ? c->smp->ptft : 0);
+        }
+        break;
     }
 }
 
@@ -889,6 +897,8 @@ ITPlayer *itp_new(const ITSong *s, int rate){
     if (s->cwt == 0x888 && s->cmwt == 0x888 && s->mpt_mixlevels < 0) p->K *= 1.62;
     else if (s->cmwt == 0x888 && s->mpt_mixlevels == 3) p->K *= 1.0;
     else if (s->mpt_mixlevels == 0 || (s->cmwt == 0x888 && s->mpt_mixlevels == 2)) p->K *= it_legacy_k(s->nch > 0 ? s->nch : 1);
+    /* Oktalyzer: libopenmpt (MOD_TYPE_OKT, sample pre-amp 48) is louder, more so with split channels: measured on 447 files, 4 channels +3.65 dB, about +0.6 dB per split channel */
+    if (s->okt) p->K *= pow(10.0, (3.65 + 0.6 * (s->nch > 4 ? s->nch - 4 : 0)) / 20.0);
     { const char *e = getenv("ITGAIN"); if (e) p->K *= atof(e); }
     for (int i = 0; i < 64; i++) {
         V *c = &p->ch[i];
