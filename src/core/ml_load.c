@@ -90,17 +90,17 @@ static int load_inst(R *r, MlSong *m) {
     s->sample_start = u16(r); s->sample_end = u16(r); s->sample_repeat_start = u16(r); s->sample_repeat_len = u16(r);
     s->volume = u16(r); s->transposable = u8(r) != 0; s->slide_speed = u8(r); s->effect1 = u8(r); s->effect2 = u8(r);
     if (r->eof) return 0;
-    s->env_attack_len = u16(r); s->env_decay_len = u16(r); s->env_sustain_len = u16(r); s->env_release_len = u16(r);
-    s->env_attack_speed = u16(r); s->env_decay_speed = u16(r); s->env_sustain_speed = u16(r); s->env_release_speed = u16(r);
-    s->env_attack_vol = u16(r); s->env_decay_vol = u16(r); s->env_sustain_vol = u16(r); s->env_release_vol = u16(r);
+    s->envelope_attack_length = u16(r); s->envelope_decay_length = u16(r); s->envelope_sustain_length = u16(r); s->envelope_release_length = u16(r);
+    s->envelope_attack_speed = u16(r); s->envelope_decay_speed = u16(r); s->envelope_sustain_speed = u16(r); s->envelope_release_speed = u16(r);
+    s->envelope_attack_volume = u16(r); s->envelope_decay_volume = u16(r); s->envelope_sustain_volume = u16(r); s->envelope_release_volume = u16(r);
     if (r->eof) return 0;
-    s->vib_dir = u8(r) != 0; s->vib_wave = u8(r); s->vib_speed = u16(r); s->vib_delay = u16(r); s->vib_attack_speed = u16(r); s->vib_attack = u16(r); s->vib_depth = u16(r);
+    s->vibrato_direction = u8(r) != 0; s->vibrato_wave_type = u8(r); s->vibrato_speed = u16(r); s->vibrato_delay = u16(r); s->vibrato_attack_speed = u16(r); s->vibrato_attack = u16(r); s->vibrato_depth = u16(r);
     if (r->eof) return 0;
-    s->trem_dir = u8(r) != 0; s->trem_wave = u8(r); s->trem_speed = u16(r); s->trem_delay = u16(r); s->trem_attack_speed = u16(r); s->trem_attack = u16(r); s->trem_depth = u16(r);
+    s->tremolo_direction = u8(r) != 0; s->tremolo_wave_type = u8(r); s->tremolo_speed = u16(r); s->tremolo_delay = u16(r); s->tremolo_attack_speed = u16(r); s->tremolo_attack = u16(r); s->tremolo_depth = u16(r);
     if (r->eof) return 0;
-    s->arp_table = u16(r); s->arp_speed = u8(r); s->arp_groove = u8(r);
+    s->arpeggio_table = u16(r); s->arpeggio_speed = u8(r); s->arpeggio_groove = u8(r);
     if (r->eof) return 0;
-    s->env_tra_pha_fil_bits = u8(r); for (int i = 0; i < 5; i++) s->transform_wave[i] = u8(r);
+    s->env_tra_pha_fil_bits = u8(r); for (int i = 0; i < 5; i++) s->transform_wave_numbers[i] = u8(r);
     s->transform_start = u16(r); s->transform_repeat = u16(r); s->transform_repeat_end = u16(r); s->transform_speed = u16(r); s->transform_turns = u16(r); s->transform_delay = u16(r);
     if (r->eof) return 0;
     s->phase_start = u16(r); s->phase_repeat = u16(r); s->phase_repeat_end = u16(r); s->phase_speed = u16(r); s->phase_turns = u16(r); s->phase_delay = u16(r); s->phase_type = u16(r);
@@ -108,13 +108,13 @@ static int load_inst(R *r, MlSong *m) {
     s->mix_res_loo_bits = u8(r); s->mix_wave_number = u8(r);
     s->mix_start = u16(r); s->mix_repeat = u16(r); s->mix_repeat_end = u16(r); s->mix_speed = u16(r); s->mix_turns = u16(r); s->mix_delay = u16(r);
     if (r->eof) return 0;
-    s->res_start = u16(r); s->res_repeat = u16(r); s->res_repeat_end = u16(r); s->res_speed = u16(r); s->res_turns = u16(r); s->res_delay = u16(r);
-    s->mix_res_fil_boost = u8(r); s->resonance_amp = u8(r);
+    s->resonance_start = u16(r); s->resonance_repeat = u16(r); s->resonance_repeat_end = u16(r); s->resonance_speed = u16(r); s->resonance_turns = u16(r); s->resonance_delay = u16(r);
+    s->mix_res_fil_boost = u8(r); s->responance_amp = u8(r);
     if (r->eof) return 0;
     s->filter_start = u16(r); s->filter_repeat = u16(r); s->filter_repeat_end = u16(r); s->filter_speed = u16(r); s->filter_turns = u16(r); s->filter_delay = u16(r);
     skip(r, 1); s->filter_type = u8(r);
     if (r->eof) return 0;
-    s->loop_start = u16(r); s->loop_repeat = u16(r); s->loop_repeat_end = u16(r); s->loop_length = u16(r); s->loop_step = u16(r); s->loop_wait = u16(r); s->loop_delay = u16(r); s->loop_turns = u16(r);
+    s->loop_start = u16(r); s->loop_repeat = u16(r); s->loop_repeat_end = u16(r); s->loop_length = u16(r); s->loop_loop_step = u16(r); s->loop_wait = u16(r); s->loop_delay = u16(r); s->loop_turns = u16(r);
     if (r->eof) return 0;
     s->valid = 1; m->ninst++;
     return 1;
@@ -148,7 +148,7 @@ static int load_smpl(R *r, MlSong *m, uint32_t len) {
     uint32_t orig = u32(r); uint8_t dcmd = u8(r); skip(r, 1);
     str(r, s->title, 32); if (r->eof) return 0;
     skip(r, 1); s->sample_type = u8(r);
-    uint32_t ptr = u32(r); s->length = u16(r); uint32_t rptr = u32(r); s->repeat_length = u16(r);
+    uint32_t ptr = u32(r); s->sample_length = u16(r); uint32_t rptr = u32(r); s->sample_repeat_length = u16(r);
     s->fine_tune = (int16_t)u16(r); s->semi_tone = (int16_t)u16(r);
     if (r->eof) return 0;
     size_t extra = orig == 256 ? 240 : 0; uint32_t slen = len - 50;
@@ -164,11 +164,14 @@ static int load_smpl(R *r, MlSong *m, uint32_t len) {
         for (int i = 0, j = 0; i < 240; i++, j += 2) s->data[256 + i] = s->data[j];
     }
     /* the instruments that use this sample (they come before the SMPL chunks) */
-    for (int i = 1; i <= m->ninst; i++) if (m->inst[i].sample_number == m->nsmp) { m->inst[i].sample_index = m->nsmp; m->inst[i].sample_off = (size_t)m->inst[i].sample_start * 2; m->inst[i].rep_off = (size_t)m->inst[i].sample_repeat_start * 2; }
+    for (int i = 1; i <= m->ninst; i++) if (m->inst[i].sample_number == m->nsmp) { m->inst[i].sample_index = m->nsmp; m->inst[i].sample_off = (size_t)m->inst[i].sample_start * 2; m->inst[i].rep_off = (size_t)m->inst[i].sample_repeat_start * 2;
+        MlPtr a = { s->data, (uint32_t)s->data_len, (uint32_t)(m->inst[i].sample_start * 2u), 1 }, b = { s->data, (uint32_t)s->data_len, (uint32_t)(m->inst[i].sample_repeat_start * 2u), 1 };
+        m->inst[i].sample_pointer = a; m->inst[i].sample_repeat_pointer = b; }
     long ro = (long)rptr - (long)ptr; if (ro < 0) ro = 0;
-    if ((size_t)s->length * 2 > s->data_len) s->length = (uint16_t)(s->data_len / 2);
-    if ((size_t)ro + (size_t)s->repeat_length * 2 > s->data_len) s->repeat_length = (uint16_t)(((long)s->data_len - ro) / 2);
+    if ((size_t)s->sample_length * 2 > s->data_len) s->sample_length = (uint16_t)(s->data_len / 2);
+    if ((size_t)ro + (size_t)s->sample_repeat_length * 2 > s->data_len) s->sample_repeat_length = (uint16_t)(((long)s->data_len - ro) / 2);
     s->rep_off = (size_t)ro;
+    { MlPtr a = { s->data, (uint32_t)s->data_len, 0, 1 }, b = { s->data, (uint32_t)s->data_len, (uint32_t)ro, 1 }; s->sample_pointer = a; s->sample_repeat_pointer = b; }
     return 1;
 }
 
