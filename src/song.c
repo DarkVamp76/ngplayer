@@ -250,7 +250,7 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
         if (!s->mr) { snprintf(err, errcap, "Musicline Editor: this tune has no channels"); free(b); song_close(s); return NULL; }
         s->kind = K_ML; s->fmt = "ML";
         snprintf(s->title, sizeof s->title, "%s", s->msong->name[0] ? s->msong->name : s->msong->tune[s->cursub].title);
-        s->nch = s->mr->pl.number_of_channels; s->nord = 256;
+        s->nch = s->mr->pl.number_of_channels; s->nord = ml_seq_length(&s->msong->tune[s->cursub], 0);
     } else if (rad_probe(b, (size_t)n)) {
         int e = 0;
         s->rd = rad_load(b, (size_t)n, &e);
@@ -518,6 +518,7 @@ int song_channels(const Song *s) { return s->nch; }
 int song_norders(const Song *s) { return s->nord; }
 int song_subsongs(const Song *s) { return (s->kind == K_TFMX || s->kind == K_ML) && s->nsub > 0 ? s->nsub : 1; }
 int song_subsong(const Song *s) { return s->kind == K_TFMX || s->kind == K_ML ? s->cursub : 0; }
+void song_set_fast(Song *s, int on) { if (s && s->mr) s->mr->fast = on ? 1 : 0; }
 Song *song_open(const char *path, int rate, char *err, size_t errcap) { return song_open_sub(path, rate, 0, err, errcap); }
 int song_order(const Song *s) {
     if (s->mi) { double t = midi_tick(s->mi); return (int)(t / (midi_division(s->mi) * 4)); }

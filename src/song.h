@@ -14,6 +14,7 @@ int song_subsong(const Song *s);    /* aktueller Subsong, 0-basiert */
 void song_close(Song *s);
 /* rendert n Stereo-Frames; liefert 0 am Songende */
 int song_render(Song *s, int16_t *out, int n);
+void song_set_fast(Song *s, int on);   /* seeking: formats that can skip the mixing do so (output silence) until it is switched off again */
 
 const char *song_title(const Song *s);
 const char *song_format(const Song *s);      /* "MOD", "S3M", "XM", "IT" */
