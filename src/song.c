@@ -12,6 +12,7 @@
 #include "ml_replay.h"
 #include "tp.h"
 #include "aon.h"
+#include "sa.h"
 #include "lds.h"
 #include "a2m_load.h"
 #include <stdio.h>
@@ -34,7 +35,7 @@ int xxm_chan_pan(const void *p, int ch);
 int itp_chan_pan(const ITPlayer *p, int ch);
 void itp_pos(const ITPlayer *p, int *ord, int *pat, int *row);
 
-enum { K_MOD, K_S3M, K_XM, K_IT, K_DMF, K_TFMX, K_AHX, K_OPL, K_MIDI, K_ML, K_AON };
+enum { K_MOD, K_S3M, K_XM, K_IT, K_DMF, K_TFMX, K_AHX, K_OPL, K_MIDI, K_ML, K_AON, K_SA };
 
 struct Song {
     int kind;
@@ -56,6 +57,7 @@ struct Song {
     Midi *mi;                     /* MIDI file played through the SoundFont (desktop and web) */
     MlSong *msong; MlRender *mr;  /* Musicline Editor */
     AonSong *asg; AonPlayer *apl; /* Art Of Noise */
+    SaSong *ssg; SaPlayer *spl;   /* Sonic Arranger */
     int tstart;             /* TFMX: erste Trackstep-Zeile des Subsongs */
     int nsub, cursub;       /* TFMX: Anzahl echter Subsongs, aktueller (0-basiert) */
     char title[40];
@@ -73,6 +75,7 @@ static void trim_copy(char *dst, size_t cap, const uint8_t *src, size_t n) {
 }
 static void detect_tracker(Song *s, const uint8_t *b, long n) {
     char *t = s->tracker; const char *f = s->fmt; t[0] = 0;
+    if (!strcmp(f, "SA")) { snprintf(t, 64, "Sonic Arranger"); return; }
     if (!strcmp(f, "AON")) { snprintf(t, 64, "Art Of Noise%s", s->nch == 8 ? " (8 voices)" : ""); return; }
     if (!strcmp(f, "ML")) {                                   /* Musicline Editor: the VERS chunk holds the version word (0x0115 = 1.15) */
         for (long i = 8; i + 10 <= n && i < 64; i++) if (!memcmp(b + i, "VERS", 4)) { unsigned v = (b[i + 8] << 8) | b[i + 9]; snprintf(t, 64, "Musicline Editor %u.%u%u", v >> 8, (v >> 4) & 15, v & 15); return; }
@@ -194,6 +197,12 @@ static int find_syx(const char *path, char *out, size_t cap, char *name, size_t 
 #endif
 }
 
+/* Sonic Arranger files are named NAME.sa or the Amiga way SA.NAME */
+static int name_is_sa(const char *path) {
+    const char *bn = strrchr(path, '/'); bn = bn ? bn + 1 : path;
+    const char *ext = strrchr(bn, '.');
+    return (ext && !strcasecmp(ext, ".sa")) || !strncasecmp(bn, "sa.", 3);
+}
 Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errcap) {
     static int inited;
     if (!inited) { ngp_it_tables_init(); inited = 1; }
@@ -267,6 +276,17 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
             snprintf(s->title, sizeof s->title, "%s", bn); char *dot = strrchr(s->title, '.'); if (dot && dot > s->title) *dot = 0;
         }
         s->nch = 16; s->nord = midi_measures(s->mi);                 /* no patterns: the orders are 4/4 measures of 16 rows */
+    } else if (sa_probe(b, (size_t)n) && (!memcmp(b, "SOARV1.0", 8) || !memcmp(b, "@OARV1.0", 8) || name_is_sa(path))) {   /* the final format starts with 68k code: only files named like Sonic Arranger */
+        int e = 0;
+        s->ssg = sa_load(b, (size_t)n, &e);
+        if (!s->ssg) { snprintf(err, errcap, "Sonic Arranger: damaged or unsupported file (%d)", e); free(b); song_close(s); return NULL; }
+        s->nsub = sa_subsongs(s->ssg); if (s->nsub < 1) s->nsub = 1;
+        s->cursub = sub >= 0 && sub < s->nsub ? sub : 0;
+        s->spl = sa_new(s->ssg, s->cursub, rate);
+        if (!s->spl) { snprintf(err, errcap, "Sonic Arranger: this song cannot be played"); free(b); song_close(s); return NULL; }
+        s->kind = K_SA; s->fmt = "SA";
+        snprintf(s->title, sizeof s->title, "%s", sa_title(s->ssg));
+        s->nch = sa_channels(s->ssg); s->nord = sa_positions(s->ssg, s->cursub);
     } else if (aon_probe(b, (size_t)n)) {
         int e = 0;
         s->asg = aon_load(b, (size_t)n, &e);
@@ -508,7 +528,7 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
     if (!r) detect_tracker(s, b, n);
     if (!r && gdm_trk[0]) snprintf(s->tracker, sizeof s->tracker, "%s", gdm_trk);
     free(b);
-    if (r || (!s->xp && !s->xxp && !s->ip && !s->dp && !s->tp && !s->ap && !s->op && !s->mi && !s->mr && !s->apl)) {
+    if (r || (!s->xp && !s->xxp && !s->ip && !s->dp && !s->tp && !s->ap && !s->op && !s->mi && !s->mr && !s->apl && !s->spl)) {
         snprintf(err, errcap, "unsupported or damaged module (%d)", r);
         song_close(s);
         return NULL;
@@ -537,6 +557,8 @@ void song_close(Song *s) {
     if (s->rd) rad_free(s->rd);
     if (s->ld) lds_free(s->ld);
     if (s->mi) midi_close(s->mi);
+    if (s->spl) sa_player_free(s->spl);
+    if (s->ssg) sa_free(s->ssg);
     if (s->apl) aon_player_free(s->apl);
     if (s->asg) aon_free(s->asg);
     if (s->mr) ml_render_free(s->mr);
@@ -544,7 +566,7 @@ void song_close(Song *s) {
     if (s->tp) tfp_free(s->tp);
     if (s->tf) tfmx_free(s->tf);
     if (s->it) it_free(s->it);
-    if (s->kind != K_IT && s->kind != K_DMF && s->kind != K_TFMX && s->kind != K_AHX && s->kind != K_OPL && s->kind != K_MIDI && s->kind != K_ML && s->kind != K_AON) xsong_free(&s->xs);
+    if (s->kind != K_IT && s->kind != K_DMF && s->kind != K_TFMX && s->kind != K_AHX && s->kind != K_OPL && s->kind != K_MIDI && s->kind != K_ML && s->kind != K_AON && s->kind != K_SA) xsong_free(&s->xs);
     free(s);
 }
 
@@ -554,6 +576,7 @@ int song_render(Song *s, int16_t *out, int n) {
     if (s->ap) { ahx_set_mute(s->ap, (unsigned)song_get_mute()); return ahx_render(s->ap, out, n); }
     if (s->ip) return itp_render(s->ip, out, n);
     if (s->dp) return dmp_render(s->dp, out, n);
+    if (s->spl) { sa_set_mute(s->spl, (unsigned)song_get_mute()); return sa_render(s->spl, out, n); }
     if (s->apl) { aon_set_mute(s->apl, (unsigned)song_get_mute()); return aon_render(s->apl, out, n); }
     if (s->mr) { s->mr->mute = song_get_mute(); return ml_render(s->mr, out, n); }
     if (s->tp) return tfp_render(s->tp, out, n);
@@ -565,8 +588,8 @@ const char *song_title(const Song *s) { return s->title; }
 const char *song_format(const Song *s) { return s->fmt; }
 int song_channels(const Song *s) { return s->nch; }
 int song_norders(const Song *s) { return s->nord; }
-int song_subsongs(const Song *s) { return (s->kind == K_TFMX || s->kind == K_ML) && s->nsub > 0 ? s->nsub : 1; }
-int song_subsong(const Song *s) { return s->kind == K_TFMX || s->kind == K_ML ? s->cursub : 0; }
+int song_subsongs(const Song *s) { return (s->kind == K_TFMX || s->kind == K_ML || s->kind == K_SA) && s->nsub > 0 ? s->nsub : 1; }
+int song_subsong(const Song *s) { return s->kind == K_TFMX || s->kind == K_ML || s->kind == K_SA ? s->cursub : 0; }
 void song_set_fast(Song *s, int on) { if (s && s->mr) s->mr->fast = on ? 1 : 0; }
 Song *song_open(const char *path, int rate, char *err, size_t errcap) { return song_open_sub(path, rate, 0, err, errcap); }
 int song_order(const Song *s) {
@@ -574,6 +597,7 @@ int song_order(const Song *s) {
     if (s->op) { int o = 0; opl_position(s->op, &o, NULL, NULL); return o; }
     if (s->ap) { int o = 0; ahx_pos(s->ap, &o, NULL); return o; }
     if (s->dp) { int o = 0; dmp_pos(s->dp, &o, NULL, NULL); return o; }
+    if (s->spl) { int o = 0; sa_pos(s->spl, &o, NULL); return o; }
     if (s->apl) { int o = 0; aon_pos(s->apl, &o, NULL, NULL); return o; }
     if (s->mr) return s->mr->pl.voices[0].tune_position;
     if (s->tp) { int o = tfp_pos(s->tp) - s->tstart; return o < 0 ? 0 : o; }
@@ -589,6 +613,7 @@ static int pat_of(const Song *s, int order) {
     if (s->kind == K_MIDI) return order;
     if (s->kind == K_ML) return order;
     if (s->kind == K_AON) return aon_position_pattern(s->asg, order);
+    if (s->kind == K_SA) return order;                                 /* Sonic Arranger: the position (4 tracks) is the pattern */
     if (s->kind == K_TFMX || s->kind == K_AHX) return order;          /* TFMX: Trackstep-Zeile; AHX: die Position (4 Tracks) ist das Pattern */
     if (s->kind == K_OPL && s->hs) return order;                       /* HERAD: the measure */
     if (s->kind == K_OPL && s->rd) return rad_order_track(s->rd, order);   /* RAD: the track, -1 = jump marker */
@@ -606,6 +631,7 @@ int song_pattern_rows(const Song *s, int pattern) {
     if (s->kind == K_MIDI) return 16;
     if (s->kind == K_ML) return s->mr ? ml_pattern_rows(s, pattern) : 128;
     if (s->kind == K_AON) return 64;
+    if (s->kind == K_SA) return s->ssg ? sa_rows(s->ssg) : 64;
     if (s->kind == K_OPL && s->hs) return HERAD_MEASURE_TICKS;           /* one row per tick */
     if (s->kind == K_OPL && s->rd) return RAD_LINES;
     if (s->kind == K_OPL && s->ld) return s->ld->pattlen;
@@ -626,6 +652,7 @@ void song_pos(const Song *s, SongPos *o) {
     else if (s->ip) itp_pos(s->ip, &ord, &pat, &row);
     else if (s->ap) { ahx_pos(s->ap, &ord, &row); pat = ord; }
     else if (s->dp) dmp_pos(s->dp, &ord, &pat, &row);
+    else if (s->spl) { sa_pos(s->spl, &ord, &row); pat = ord; }
     else if (s->apl) { aon_pos(s->apl, &ord, &pat, &row); }
     else if (s->mr) { const MlVoice *v0 = &s->mr->pl.voices[0]; ord = v0->tune_position; pat = ord; row = v0->part_position_work & 127; }
     else if (s->tp) { ord = tfp_pos(s->tp) - s->tstart; if (ord < 0) ord = 0; pat = ord; row = tfp_row(s->tp); }
@@ -865,6 +892,14 @@ void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
     if (pattern < 0 || s->kind == K_MIDI) return;
     SongCell t; memset(&t, 0, sizeof t);
     if (s->kind == K_ML) { if (s->mr) ml_cell(s, pattern, row, ch, &t); }
+    else if (s->kind == K_SA) {
+        int note, inst, fx, arg;
+        if (s->ssg && sa_cell(s->ssg, s->cursub, pattern, row, ch, &note, &inst, &fx, &arg)) {
+            if (note >= 1 && note <= 108) { put_note(t.note, note - 1); t.has_note = 1; }
+            if (inst) { t.inst[0] = hexc(inst >> 4); t.inst[1] = hexc(inst); t.inst[2] = 0; }
+            if (fx || arg) { fx3(t.fx, fxc(fx & 15), arg); t.fxclass = (fx == 1 || fx == 4 || fx == 7 || fx == 8) ? 2 : (fx == 6 || fx == 0xA || fx == 0xC) ? 1 : (fx == 0x9 || fx == 0xB || fx == 0xD || fx == 0xF) ? 4 : 5; }
+        }
+    }
     else if (s->kind == K_AON) {
         int note, inst, fx, arg;
         if (aon_cell(s->asg, pattern, row, ch, &note, &inst, &fx, &arg)) {
@@ -1000,6 +1035,7 @@ void song_scope_enable(Song *s, float *buf, int len) {
     if (s->mi) { midi_set_scope(s->mi, buf, len); return; }
     if (s->mr) { s->mr->sc = buf; s->mr->sc_len = len; return; }
     if (s->apl) { aon_set_scope(s->apl, buf, len); return; }
+    if (s->spl) { sa_set_scope(s->spl, buf, len); return; }
     if (s->op) opl_set_scope(s->op, buf, len);
     else if (s->ap) ahx_set_scope(s->ap, buf, len);
     else if (s->ip) itp_set_scope(s->ip, buf, len);
@@ -1012,6 +1048,7 @@ unsigned song_scope_pos(const Song *s) {
     if (s->mi) return midi_scope_pos(s->mi);
     if (s->mr) return s->mr->sc_pos;
     if (s->apl) return aon_scope_pos(s->apl);
+    if (s->spl) return sa_scope_pos(s->spl);
     if (s->op) return opl_scope_pos(s->op);
     if (s->ap) return ahx_scope_pos(s->ap);
     if (s->ip) return itp_scope_pos(s->ip);
@@ -1044,6 +1081,7 @@ int song_chan_pan(const Song *s, int ch) {
     if (s->ip) return itp_chan_pan(s->ip, ch);
     if (s->dp) return dmp_chan_pan(s->dp, ch);
     if (s->mr) return ((ch & 3) == 1 || (ch & 3) == 2) ? 255 : 0;
+    if (s->spl) return ((ch & 3) == 1 || (ch & 3) == 2) ? 255 : 0;
     if (s->apl) { static const int p8[8] = { 0, 0, 255, 255, 255, 255, 0, 0 }; return s->nch == 8 ? p8[ch & 7] : (((ch & 3) == 1 || (ch & 3) == 2) ? 255 : 0); }
     if (s->tp) return tfp_chan_pan(s->tp, ch) ? 255 : 0;
     if (s->xxp) return xxm_chan_pan(s->xxp, ch);
@@ -1054,6 +1092,12 @@ static int hexv(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'A' && c 
 
 const char *song_fx_name(const Song *s, const SongCell *c, int *is_vol) {
     if (is_vol) *is_vol = 0;
+    if (s->kind == K_SA) {
+        static const char *const nm[16] = { "Arpeggio", "Slide Speed", "Restart ADSR", NULL, "Vibrato", "Sync", "Master Volume", "Portamento",
+            "Skip Portamento", "Track Length", "Volume Slide", "Position Jump", "Set Volume", "Track Break", "Set Filter", "Set Speed" };
+        char L = c->fx[0]; int e = L >= '0' && L <= '9' ? L - '0' : L >= 'A' && L <= 'F' ? L - 'A' + 10 : -1;
+        return e >= 0 ? nm[e] : NULL;
+    }
     if (s->kind == K_AON) {
         static const char *const nm[36] = { "Arpeggio", "Slide Up", "Slide Down", "Tone Porta", "Vibrato", "TPorta+VolSlide", "Vib+VolSlide", NULL, NULL, "Sample Offset",
             "Volume Slide", "Position Jump", "Set Volume", "Pattern Break", "Extended", "Set Speed", "New Volume", "Synth Control", "Wave Table Speed", "Arpeggio Speed",
@@ -1280,6 +1324,10 @@ void song_info(const Song *s, SongInfo *o) {
         info_add(o, "Paula, 4 voices (Amiga), 8-bit samples");
         info_add(o, "%d patterns, %d macros, %s", s->tf->npat, s->tf->nmac, s->tf->pal ? "PAL" : "NTSC");
         if (s->nsub > 1) info_add(o, "%d subsongs", s->nsub);
+    } else if (s->kind == K_SA && s->ssg) {
+        info_add(o, "Paula, 4 voices (Amiga), samples and synth waves");
+        if (s->nsub > 1) info_add(o, "%d subsongs", s->nsub);
+        info_add(o, "%d positions", s->nord);
     } else if (s->kind == K_AON && s->asg) {
         info_add(o, "Paula, %d voices%s", s->nch, s->nch == 8 ? " (software mixed)" : " (Amiga)");
         if (aon_author(s->asg)[0]) info_add(o, "Author: %s", aon_author(s->asg));
