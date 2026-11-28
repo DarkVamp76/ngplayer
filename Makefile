@@ -5,7 +5,7 @@ SDL_CFLAGS ?= $(shell sdl2-config --cflags)
 SDL_LIBS   ?= $(shell sdl2-config --libs)
 CFLAGS  += -w -Isrc -Isrc/core -Ibuild $(SDL_CFLAGS)
 LIBS     = $(SDL_LIBS) -lm $(if $(filter Linux,$(shell uname -s)),-lasound)
-CORE     = $(addprefix src/core/,replay.c mod_load.c s3m_load.c stm_load.c ptm_load.c ult_load.c s669_load.c mtm_load.c asylum_load.c amf_load.c dsm_load.c sfx_load.c ahx.c med_load.c psm_load.c far_load.c mdl_load.c xm_load.c dbm_load.c xm_replay.c it_load.c dtm_load.c okt_load.c tp_common.c tp_2x3x.c tp_4x.c tp_5x6x.c aon.c sa.c umx.c gdm_load.c opl_replay.c opl/opl3.c ym7128b/YM7128B_emu.c adgold.c a2m_unpack.c a2m_load.c a2m_replay.c herad.c rad.c lds.c it_replay.c it_unpack.c period.c dmf_load.c dmf_replay.c tfmx_load.c tfmx_replay.c midi.c midi_hw.c ml_load.c ml_tables.c ml_play.c ml_effects.c ml_parteffects.c ml_waveeffects.c ml_replay.c)
+CORE     = $(addprefix src/core/,replay.c mod_load.c s3m_load.c stm_load.c ptm_load.c ult_load.c s669_load.c mtm_load.c asylum_load.c amf_load.c dsm_load.c sfx_load.c ahx.c med_load.c psm_load.c far_load.c mdl_load.c xm_load.c dbm_load.c xm_replay.c it_load.c dtm_load.c okt_load.c tp_common.c tp_2x3x.c tp_4x.c tp_5x6x.c aon.c sa.c fc.c umx.c gdm_load.c opl_replay.c opl/opl3.c ym7128b/YM7128B_emu.c adgold.c a2m_unpack.c a2m_load.c a2m_replay.c herad.c rad.c lds.c it_replay.c it_unpack.c period.c dmf_load.c dmf_replay.c tfmx_load.c tfmx_replay.c midi.c midi_hw.c ml_load.c ml_tables.c ml_play.c ml_effects.c ml_parteffects.c ml_waveeffects.c ml_replay.c)
 SRC      = src/main.c src/gfx_gl.c src/song.c src/net.c $(CORE)
 PREFIX  ?= /usr/local
 
@@ -27,7 +27,7 @@ build/ngplayer: $(SRC) build/version.h $(wildcard src/*.h src/*.inc src/core/*.h
 # Hilfswerkzeug: Modul -> WAV (ohne SDL, fuer Tests)
 build/ngrender: tools/render.c $(CORE)
 	@mkdir -p build
-	$(CC) $(CFLAGS) -o $@ tools/render.c $(filter-out src/core/it_load.c src/core/dtm_load.c src/core/okt_load.c src/core/tp_common.c src/core/tp_2x3x.c src/core/tp_4x.c src/core/tp_5x6x.c src/core/aon.c src/core/sa.c src/core/umx.c src/core/gdm_load.c src/core/it_replay.c,$(CORE)) $(LIBS)
+	$(CC) $(CFLAGS) -o $@ tools/render.c $(filter-out src/core/it_load.c src/core/dtm_load.c src/core/okt_load.c src/core/tp_common.c src/core/tp_2x3x.c src/core/tp_4x.c src/core/tp_5x6x.c src/core/aon.c src/core/sa.c src/core/fc.c src/core/umx.c src/core/gdm_load.c src/core/it_replay.c,$(CORE)) $(LIBS)
 
 # Hilfswerkzeug: beliebiges Modul (alle Formate von song.c) -> WAV, fuer den Vergleich mit libopenmpt
 build/songrender: tools/songrender.c src/song.c $(CORE)
