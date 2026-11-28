@@ -75,12 +75,14 @@ int ml_render(MlRender *r, int16_t *out, int n) {
         float l = 0, rr = 0;
         for (int i = 0; i < p->number_of_channels; i++) {
             MlChannel *c = &p->ch[i];
+            if (r->sc) r->sc[(size_t)i * r->sc_len + (r->sc_pos & (unsigned)(r->sc_len - 1))] = 0;
             if (!r->m[i].on || !r->m[i].d || (r->mute >> i & 1)) continue;
             double pos = r->m[i].pos; uint32_t len = c->len < r->m[i].len || r->m[i].d == c->data ? c->len : r->m[i].len;
             (void)len;
             uint32_t ip = (uint32_t)pos;
             int8_t smp = r->m[i].d[ip < r->m[i].len ? ip : r->m[i].len - 1];
             float v = (float)smp * (float)c->volume;
+            if (r->sc) r->sc[(size_t)i * r->sc_len + (r->sc_pos & (unsigned)(r->sc_len - 1))] = (float)smp * (float)c->volume / (127.0f * 64.0f);
             int right = (i & 3) == 1 || (i & 3) == 2;                     /* Amiga: 0 3 left, 1 2 right */
             if (right) rr += v; else l += v;
             double per = c->period ? c->period : 428;
@@ -91,6 +93,7 @@ int ml_render(MlRender *r, int16_t *out, int n) {
             }
             r->m[i].pos = pos;
         }
+        r->sc_pos++;
         out[2 * f] = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l);
         out[2 * f + 1] = (int16_t)(rr > 32767 ? 32767 : rr < -32768 ? -32768 : rr);
     }

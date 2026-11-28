@@ -10,6 +10,7 @@ typedef struct {
     struct { double pos; const int8_t *d; uint32_t len; const int8_t *ld; uint32_t llen; uint8_t on; } m[8];
     float lp[2];                                      /* the A500 filter */
     unsigned long long mute;
+    float *sc; int sc_len; unsigned sc_pos;             /* scope ring buffer: sc[channel * sc_len + pos] (sc_len a power of two) */
     long long frames; int ended;
 } MlRender;
 
