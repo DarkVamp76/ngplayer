@@ -9,6 +9,7 @@
 #include "midi.h"
 #include "herad.h"
 #include "rad.h"
+#include "ml_replay.h"
 #include "lds.h"
 #include "a2m_load.h"
 #include <stdio.h>
@@ -31,7 +32,7 @@ int xxm_chan_pan(const void *p, int ch);
 int itp_chan_pan(const ITPlayer *p, int ch);
 void itp_pos(const ITPlayer *p, int *ord, int *pat, int *row);
 
-enum { K_MOD, K_S3M, K_XM, K_IT, K_DMF, K_TFMX, K_AHX, K_OPL, K_MIDI };
+enum { K_MOD, K_S3M, K_XM, K_IT, K_DMF, K_TFMX, K_AHX, K_OPL, K_MIDI, K_ML };
 
 struct Song {
     int kind;
@@ -51,6 +52,7 @@ struct Song {
     RadSong *rd;                  /* AdLib FM: Reality ADlib Tracker (the player is op, too) */
     LdsSong *ld;                  /* AdLib FM: LOUDNESS Sound System (the player is op, too) */
     Midi *mi;                     /* MIDI file played through the SoundFont (desktop and web) */
+    MlSong *msong; MlRender *mr;  /* Musicline Editor */
     int tstart;             /* TFMX: erste Trackstep-Zeile des Subsongs */
     int nsub, cursub;       /* TFMX: Anzahl echter Subsongs, aktueller (0-basiert) */
     char title[40];
@@ -239,6 +241,16 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
             snprintf(s->title, sizeof s->title, "%s", bn); char *dot = strrchr(s->title, '.'); if (dot && dot > s->title) *dot = 0;
         }
         s->nch = 16; s->nord = midi_measures(s->mi);                 /* no patterns: the orders are 4/4 measures of 16 rows */
+    } else if (ml_probe(b, (size_t)n)) {
+        int e = 0;
+        s->msong = ml_load(b, (size_t)n, &e);
+        if (!s->msong) { snprintf(err, errcap, "Musicline Editor: damaged or unsupported file (%d)", e); free(b); song_close(s); return NULL; }
+        s->nsub = s->msong->ntunes; s->cursub = sub >= 0 && sub < s->nsub ? sub : 0;
+        s->mr = ml_render_new(s->msong, s->cursub, rate);
+        if (!s->mr) { snprintf(err, errcap, "Musicline Editor: this tune has no channels"); free(b); song_close(s); return NULL; }
+        s->kind = K_ML; s->fmt = "ML";
+        snprintf(s->title, sizeof s->title, "%s", s->msong->name[0] ? s->msong->name : s->msong->tune[s->cursub].title);
+        s->nch = s->mr->pl.number_of_channels; s->nord = 256;
     } else if (rad_probe(b, (size_t)n)) {
         int e = 0;
         s->rd = rad_load(b, (size_t)n, &e);
@@ -450,7 +462,7 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
     }
     if (!r) detect_tracker(s, b, n);
     free(b);
-    if (r || (!s->xp && !s->xxp && !s->ip && !s->dp && !s->tp && !s->ap && !s->op && !s->mi)) {
+    if (r || (!s->xp && !s->xxp && !s->ip && !s->dp && !s->tp && !s->ap && !s->op && !s->mi && !s->mr)) {
         snprintf(err, errcap, "unsupported or damaged module (%d)", r);
         song_close(s);
         return NULL;
@@ -479,10 +491,12 @@ void song_close(Song *s) {
     if (s->rd) rad_free(s->rd);
     if (s->ld) lds_free(s->ld);
     if (s->mi) midi_close(s->mi);
+    if (s->mr) ml_render_free(s->mr);
+    if (s->msong) ml_free(s->msong);
     if (s->tp) tfp_free(s->tp);
     if (s->tf) tfmx_free(s->tf);
     if (s->it) it_free(s->it);
-    if (s->kind != K_IT && s->kind != K_DMF && s->kind != K_TFMX && s->kind != K_AHX && s->kind != K_OPL && s->kind != K_MIDI) xsong_free(&s->xs);
+    if (s->kind != K_IT && s->kind != K_DMF && s->kind != K_TFMX && s->kind != K_AHX && s->kind != K_OPL && s->kind != K_MIDI && s->kind != K_ML) xsong_free(&s->xs);
     free(s);
 }
 
@@ -492,6 +506,7 @@ int song_render(Song *s, int16_t *out, int n) {
     if (s->ap) { ahx_set_mute(s->ap, (unsigned)song_get_mute()); return ahx_render(s->ap, out, n); }
     if (s->ip) return itp_render(s->ip, out, n);
     if (s->dp) return dmp_render(s->dp, out, n);
+    if (s->mr) { s->mr->mute = song_get_mute(); return ml_render(s->mr, out, n); }
     if (s->tp) return tfp_render(s->tp, out, n);
     if (s->xxp) return xxm_render(s->xxp, out, n);
     return xplay_render(s->xp, out, n);
@@ -501,14 +516,15 @@ const char *song_title(const Song *s) { return s->title; }
 const char *song_format(const Song *s) { return s->fmt; }
 int song_channels(const Song *s) { return s->nch; }
 int song_norders(const Song *s) { return s->nord; }
-int song_subsongs(const Song *s) { return s->kind == K_TFMX && s->nsub > 0 ? s->nsub : 1; }
-int song_subsong(const Song *s) { return s->kind == K_TFMX ? s->cursub : 0; }
+int song_subsongs(const Song *s) { return (s->kind == K_TFMX || s->kind == K_ML) && s->nsub > 0 ? s->nsub : 1; }
+int song_subsong(const Song *s) { return s->kind == K_TFMX || s->kind == K_ML ? s->cursub : 0; }
 Song *song_open(const char *path, int rate, char *err, size_t errcap) { return song_open_sub(path, rate, 0, err, errcap); }
 int song_order(const Song *s) {
     if (s->mi) { double t = midi_tick(s->mi); return (int)(t / (midi_division(s->mi) * 4)); }
     if (s->op) { int o = 0; opl_position(s->op, &o, NULL, NULL); return o; }
     if (s->ap) { int o = 0; ahx_pos(s->ap, &o, NULL); return o; }
     if (s->dp) { int o = 0; dmp_pos(s->dp, &o, NULL, NULL); return o; }
+    if (s->mr) return s->mr->pl.voices[0].tune_position;
     if (s->tp) { int o = tfp_pos(s->tp) - s->tstart; return o < 0 ? 0 : o; }
     if (s->xp) return xplay_order(s->xp);
     if (s->xxp) return xxm_order(s->xxp);
@@ -519,6 +535,7 @@ int song_order(const Song *s) {
 static int pat_of(const Song *s, int order) {
     if (order < 0 || order >= s->nord) return -1;
     if (s->kind == K_MIDI) return order;
+    if (s->kind == K_ML) return order;
     if (s->kind == K_TFMX || s->kind == K_AHX) return order;          /* TFMX: Trackstep-Zeile; AHX: die Position (4 Tracks) ist das Pattern */
     if (s->kind == K_OPL && s->hs) return order;                       /* HERAD: the measure */
     if (s->kind == K_OPL && s->rd) return rad_order_track(s->rd, order);   /* RAD: the track, -1 = jump marker */
@@ -534,6 +551,7 @@ int song_order_pattern(const Song *s, int order) { return pat_of(s, order); }
 
 int song_pattern_rows(const Song *s, int pattern) {
     if (s->kind == K_MIDI) return 16;
+    if (s->kind == K_ML) return 128;
     if (s->kind == K_OPL && s->hs) return HERAD_MEASURE_TICKS;           /* one row per tick */
     if (s->kind == K_OPL && s->rd) return RAD_LINES;
     if (s->kind == K_OPL && s->ld) return s->ld->pattlen;
@@ -554,6 +572,7 @@ void song_pos(const Song *s, SongPos *o) {
     else if (s->ip) itp_pos(s->ip, &ord, &pat, &row);
     else if (s->ap) { ahx_pos(s->ap, &ord, &row); pat = ord; }
     else if (s->dp) dmp_pos(s->dp, &ord, &pat, &row);
+    else if (s->mr) { const MlVoice *v0 = &s->mr->pl.voices[0]; ord = v0->tune_position; pat = ord; row = v0->part_position_work & 127; }
     else if (s->tp) { ord = tfp_pos(s->tp) - s->tstart; if (ord < 0) ord = 0; pat = ord; row = tfp_row(s->tp); }
     else { if (s->xxp) xxm_pos(s->xxp, &ord, &row); else xplay_pos(s->xp, &ord, &row); pat = pat_of(s, ord); }
     o->order = ord; o->pattern = pat; o->row = row; o->nrows = song_pattern_rows(s, pat);
@@ -679,7 +698,7 @@ static void fmt_it(const ITCell *x, SongCell *o) {
 void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
     memset(o, 0, sizeof *o);
     strcpy(o->note, "..."); strcpy(o->inst, ".."); strcpy(o->vol, "..."); strcpy(o->fx, "...");
-    if (pattern < 0 || s->kind == K_MIDI) return;
+    if (pattern < 0 || s->kind == K_MIDI || s->kind == K_ML) return;
     SongCell t; memset(&t, 0, sizeof t);
     if (s->kind == K_TFMX) {
         TfmxCell c = tfp_view_cell(s->tp, s->tstart + pattern, row, ch);
@@ -806,6 +825,7 @@ void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
 
 void song_scope_enable(Song *s, float *buf, int len) {
     if (s->mi) { midi_set_scope(s->mi, buf, len); return; }
+    if (s->mr) { s->mr->sc = buf; s->mr->sc_len = len; return; }
     if (s->op) opl_set_scope(s->op, buf, len);
     else if (s->ap) ahx_set_scope(s->ap, buf, len);
     else if (s->ip) itp_set_scope(s->ip, buf, len);
@@ -816,6 +836,7 @@ void song_scope_enable(Song *s, float *buf, int len) {
 }
 unsigned song_scope_pos(const Song *s) {
     if (s->mi) return midi_scope_pos(s->mi);
+    if (s->mr) return s->mr->sc_pos;
     if (s->op) return opl_scope_pos(s->op);
     if (s->ap) return ahx_scope_pos(s->ap);
     if (s->ip) return itp_scope_pos(s->ip);
@@ -847,6 +868,7 @@ int song_chan_pan(const Song *s, int ch) {
     if (s->ap) return ahx_chan_pan(s->ap, ch);
     if (s->ip) return itp_chan_pan(s->ip, ch);
     if (s->dp) return dmp_chan_pan(s->dp, ch);
+    if (s->mr) return ((ch & 3) == 1 || (ch & 3) == 2) ? 255 : 0;
     if (s->tp) return tfp_chan_pan(s->tp, ch) ? 255 : 0;
     if (s->xxp) return xxm_chan_pan(s->xxp, ch);
     return xplay_chan_pan(s->xp, ch);
@@ -1062,6 +1084,13 @@ void song_info(const Song *s, SongInfo *o) {
     } else if (s->kind == K_TFMX && s->tf) {
         info_add(o, "Paula, 4 voices (Amiga), 8-bit samples");
         info_add(o, "%d patterns, %d macros, %s", s->tf->npat, s->tf->nmac, s->tf->pal ? "PAL" : "NTSC");
+        if (s->nsub > 1) info_add(o, "%d subsongs", s->nsub);
+    } else if (s->kind == K_ML && s->msong) {
+        const MlSong *m = s->msong; int nwave = 0, nsmp = 0;
+        for (int i = 1; i <= m->nsmp; i++) { if (m->smp[i].sample_type) nwave++; else nsmp++; }
+        info_add(o, "Paula, %d voices%s", m->mixer_mode ? 8 : 4, m->mixer_mode ? " (software mixed)" : " (Amiga)");
+        info_add(o, "%d instruments, %d samples, %d waveforms", m->ninst, nsmp, nwave);
+        if (m->author[0]) info_add(o, "Author: %s", m->author);
         if (s->nsub > 1) info_add(o, "%d subsongs", s->nsub);
     } else if (s->kind == K_AHX) {
         info_add(o, "Synthesised on the Paula model: 4 voices, no samples");
