@@ -10,7 +10,8 @@
 void ml_on_end_reached(MlPlayer *p, int ch) { if (ch >= 0 && ch < 32) p->end_mask |= 1u << ch; }
 void ml_set_bpm_tempo(MlPlayer *p, uint16_t tempo) { p->tempo = tempo; }
 void ml_set_amiga_filter(MlPlayer *p, uint8_t on) { p->amiga_filter = on; }
-void ml_channel_set_sample(MlChannel *c, const int8_t *data, uint32_t offset, uint32_t length) { c->data = data + offset; c->len = length; }
+/* IChannel.SetSample: like writing the Paula pointer / length registers without a DMA restart: the new data plays when the current pass ends */
+void ml_channel_set_sample(MlChannel *c, const int8_t *data, uint32_t offset, uint32_t length) { c->loop_data = data + offset; c->loop_len = length; c->loop_set = 1; }
 
 static void init_sound(MlPlayer *p, int sub) {
     MlSong *s = p->song;
@@ -60,7 +61,7 @@ static void tick(MlRender *r) {
     ml_play_module(p);
     for (int i = 0; i < p->number_of_channels; i++) {                 /* the mixer takes over what DmaPlay / the effects wrote */
         MlChannel *c = &p->ch[i];
-        if (c->trigger) { r->m[i].d = c->data; r->m[i].len = c->len; r->m[i].pos = 0; r->m[i].on = c->len > 0; c->trigger = 0; }
+        if (c->trigger) { r->m[i].d = c->data; r->m[i].len = c->len; r->m[i].pos = 0; r->m[i].on = c->len > 0; r->m[i].ld = NULL; r->m[i].llen = 0; c->trigger = 0; }   /* a new sample starts without a loop; SetLoop of the same tick (below) sets the new one */
         if (c->loop_set) { r->m[i].ld = c->loop_data; r->m[i].llen = c->loop_len; c->loop_set = 0; }
         if (!c->trigger && r->m[i].d == NULL && c->data) { r->m[i].d = c->data; r->m[i].len = c->len; }
     }
