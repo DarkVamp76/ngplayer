@@ -40,6 +40,7 @@ typedef struct {
     int mpt_rpb;          /* OpenMPT extension chunk ".BPR": rows per beat (4 when the file has none) */
     int mpt_mixlevels;    /* OpenMPT extension chunk ".MMP": the mix levels of the file (0 original, 1..3 the 1.17 release candidates, 4 compatible, 5 FT2), -1 when the file has none */
     unsigned rsv;      /* header bytes 0x3C..0x3F: 0 in ModPlug files, a value in Impulse Tracker 2.14p4/p5 files (same cwtv/cmwt) */
+    int okt;           /* 1 = built from an Oktalyzer module (portamento on every tick, note slides D/U/L/H as internal commands 27 down / 28 up) */
     int dtm;           /* 1 = built from a Digital Tracker module (ProTracker-like periods, libopenmpt kPeriodsAreHertz reset) */
     int schism_days;   /* Schism Tracker: Tage seit 2009-10-31 (aus cwt bzw. Header-Feld), sonst -1 */
     uint8_t chpan[64], chvol[64];
@@ -56,6 +57,8 @@ void it_free(ITSong *s);
 size_t umx_extract(uint8_t *b, size_t n);                        /* Unreal package: moves the tracker module to the start of b, returns its length (0 = none) */
 int  gdm_probe(const uint8_t *b, size_t n);                       /* 1 = GDM (BWSB / 2GDM) */
 uint8_t *gdm_convert(const uint8_t *b, size_t n, size_t *outn);   /* the same module as an S3M image (malloc), NULL on error */
+int  okt_probe(const uint8_t *b, size_t n);                        /* 1 = Oktalyzer (OKTASONG) */
+ITSong *okt_load(const uint8_t *b, size_t n, int *err);         /* OKT -> ITSong, played by the IT engine */
 int  dtm_probe(const uint8_t *buf, size_t len);              /* 1 = Digital Tracker module ("D.T.") */
 ITSong *dtm_load(const uint8_t *buf, size_t len, int *err);   /* DTM -> ITSong, played by the IT engine */
 

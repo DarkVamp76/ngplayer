@@ -277,6 +277,16 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
             s->nch = s->it->nch; s->nord = s->it->nord;
             s->ip = itp_new(s->it, rate);
         }
+    } else if (okt_probe(b, (size_t)n)) {
+        int e = 0;
+        s->it = okt_load(b, (size_t)n, &e);
+        if (!s->it) { r = e ? e : -1; }
+        else {
+            s->kind = K_IT; s->fmt = "OKT";
+            snprintf(s->title, sizeof s->title, "%s", s->it->title);
+            s->nch = s->it->nch; s->nord = s->it->nord;
+            s->ip = itp_new(s->it, rate);
+        }
     } else if (dtm_probe(b, (size_t)n)) {
         int e = 0;
         s->it = dtm_load(b, (size_t)n, &e);
@@ -703,6 +713,7 @@ static void fmt_it(const ITCell *x, SongCell *o) {
         default: cl = 5; break;
         }
         if (c >= 1 && c <= 26) { fx3(o->fx, L, x->par); o->fxclass = (uint8_t)cl; }
+        else if (c == 27 || c == 28) { fx3(o->fx, c == 28 ? '+' : '-', x->par); o->fxclass = 2; }     /* Oktalyzer note slides */
     }
 }
 
@@ -998,6 +1009,10 @@ static int hexv(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'A' && c 
 
 const char *song_fx_name(const Song *s, const SongCell *c, int *is_vol) {
     if (is_vol) *is_vol = 0;
+    if (c->fx[0] == '+' || c->fx[0] == '-') {               /* Oktalyzer note slides (IT engine, internal commands 27 / 28) */
+        int once = (c->fx[1] == '5');
+        return c->fx[0] == '+' ? (once ? "Note Up Once" : "Note Slide Up") : (once ? "Note Down Once" : "Note Slide Down");
+    }
     if (s->kind == K_ML) {                                    /* Musicline: one symbol per part effect, the second effect sits in the volume column */
         const MlFxName *f = c->fx[0] != '.' ? ml_fx_by_sym(c->fx[0]) : NULL;
         if (f) return f->name;
@@ -1123,7 +1138,7 @@ static const struct { const char *f, *name, *tracker; } FMT_INFO[] = {
     { "PSM", "Epic MegaGames PSM", "Protracker Studio (Epic MegaGames)" }, { "FAR", "Farandole Composer module", "Farandole Composer" },
     { "MDL", "DigiTrakker module", "DigiTrakker" }, { "DMF", "X-Tracker module", "X-Tracker" }, { "TFMX", "TFMX song (mdat + smpl)", "TFMX (Chris Huelsbeck)" },
     { "AMF", "AMF module", "DSMI / Asylum Music Format" }, { "SFX", "SoundFX module", "SoundFX" }, { "AHX", "AHX module", "AHX (Abyss' Highest eXperience)" },
-    { "DBM", "DigiBooster Pro module", "DigiBooster Pro" }, { "DSM", "DSIK module", "DSIK (Digital Sound Interface Kit)" }, { "DTM", "Digital Tracker module", "Digital Tracker (Atari Falcon030)" },
+    { "DBM", "DigiBooster Pro module", "DigiBooster Pro" }, { "DSM", "DSIK module", "DSIK (Digital Sound Interface Kit)" }, { "DTM", "Digital Tracker module", "Digital Tracker (Atari Falcon030)" }, { "OKT", "Oktalyzer module", "Oktalyzer" },
     { "AMD", "AMUSIC module", "AMUSIC Adlib Tracker" }, { "MAD", "Mlat Adlib Tracker module", "Mlat Adlib Tracker" }, { "A2M", "Adlib Tracker 2 module", "Adlib Tracker 2" },
     { "LDS", "LOUDNESS Sound System song", "LOUDNESS Sound System (Andras Molnar)" }, { "HERAD", "Herbulot AdLib System tune", "HERAD System (Cryo)" }, { "RAD", "Reality ADlib Tracker tune", "Reality ADlib Tracker" }, { NULL, NULL, NULL } };
 
