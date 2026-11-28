@@ -68,7 +68,7 @@ int ml_render(MlRender *r, int16_t *out, int n) {
         if (r->tick_left <= 0) {
             tick(r);
             if (r->ended) { memset(out + 2 * f, 0, sizeof(int16_t) * 2 * (size_t)(n - f)); return f; }
-            double hz = (p->tempo ? p->tempo : 125) * 2.0 / 5.0;
+            double hz = (p->tempo ? p->tempo : 125) * 709378.9 / 1789773.0;      /* the CIA timer value is 1789773 / tempo (not the 1773447 of ProTracker): 0.9 % slower than tempo * 0.4 Hz */
             r->tick_left += r->rate / hz;
         }
         r->tick_left -= 1.0;
@@ -81,7 +81,7 @@ int ml_render(MlRender *r, int16_t *out, int n) {
             (void)len;
             uint32_t ip = (uint32_t)pos;
             int8_t smp = r->m[i].d[ip < r->m[i].len ? ip : r->m[i].len - 1];
-            float v = (float)smp * (float)c->volume;
+            float v = (float)smp * (float)c->volume * (10.0f / 7.0f);       /* the level of uade (measured: 0.70 over all files) */
             if (r->sc) r->sc[(size_t)i * r->sc_len + (r->sc_pos & (unsigned)(r->sc_len - 1))] = (float)smp * (float)c->volume / (127.0f * 64.0f);
             int right = (i & 3) == 1 || (i & 3) == 2;                     /* Amiga: 0 3 left, 1 2 right */
             if (right) rr += v; else l += v;
@@ -93,6 +93,7 @@ int ml_render(MlRender *r, int16_t *out, int n) {
             }
             r->m[i].pos = pos;
         }
+        { float a = l, b = rr; l = 0.866f * a + 0.5f * b; rr = 0.5f * a + 0.866f * b; }        /* uade's default stereo: the channels bleed 30 degrees into each other */
         r->sc_pos++;
         out[2 * f] = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l);
         out[2 * f + 1] = (int16_t)(rr > 32767 ? 32767 : rr < -32768 ? -32768 : rr);
