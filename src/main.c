@@ -2130,6 +2130,7 @@ static void seek_order(int target) {
     if (!s) return;
     static int16_t tmp[128 * 2];
     long long cap = (long long)g_rate * 3600; unsigned long long adv = 0;
+    song_set_fast(s, 1);
     for (SongPos p; ; ) {
         song_pos(s, &p);
         if (p.order >= target) break;
@@ -2137,6 +2138,7 @@ static void seek_order(int target) {
         cap -= 128; adv += (unsigned)got;
         if (!got || cap < 0) { song_close(s); return; }   /* Songende/Schleife: Abbruch, alter Song laeuft weiter */
     }
+    song_set_fast(s, 0);
     memset(g_scope, 0, sizeof g_scope);
     song_scope_enable(s, g_scope, SCOPE_LEN);
     if (g_dev) SDL_LockAudioDevice(g_dev);
