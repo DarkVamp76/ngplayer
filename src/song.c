@@ -70,6 +70,10 @@ static void trim_copy(char *dst, size_t cap, const uint8_t *src, size_t n) {
 }
 static void detect_tracker(Song *s, const uint8_t *b, long n) {
     char *t = s->tracker; const char *f = s->fmt; t[0] = 0;
+    if (!strcmp(f, "ML")) {                                   /* Musicline Editor: the VERS chunk holds the version word (0x0115 = 1.15) */
+        for (long i = 8; i + 10 <= n && i < 64; i++) if (!memcmp(b + i, "VERS", 4)) { unsigned v = (b[i + 8] << 8) | b[i + 9]; snprintf(t, 64, "Musicline Editor %u.%u%u", v >> 8, (v >> 4) & 15, v & 15); return; }
+        snprintf(t, 64, "Musicline Editor"); return;
+    }
     if (!strcmp(f, "XM") && n >= 58 && !memcmp(b, "Extended Module: ", 17)) trim_copy(t, 64, b + 38, 20);
     else if (!strcmp(f, "S3M") && n > 0x2A) {
         unsigned v = b[0x28] | (b[0x29] << 8), mj = (v >> 8) & 15;
@@ -199,7 +203,11 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
     fclose(f);
 
     { size_t um = umx_extract(b, (size_t)n); if (um) n = (long)um; }          /* Unreal package: play the module inside */
+    char gdm_trk[64] = "";
     if (gdm_probe(b, (size_t)n)) {                                    /* GDM: rewritten as an S3M image */
+        static const char *const org[] = { "?", "MOD", "MTM", "S3M", "669", "FAR", "ULT", "STM", "MED", "PSM" };
+        unsigned of = b[116] | (b[117] << 8);
+        snprintf(gdm_trk, sizeof gdm_trk, "BWSB 2GDM %u.%02u (from %s)", b[79], b[80], of < 10 ? org[of] : "?");
         size_t gn = 0; uint8_t *g = gdm_convert(b, (size_t)n, &gn);
         if (!g) { free(b); snprintf(err, errcap, "GDM: damaged file"); return NULL; }
         free(b); b = g; n = (long)gn;
@@ -461,6 +469,7 @@ Song *song_open_sub(const char *path, int rate, int sub, char *err, size_t errca
         }
     }
     if (!r) detect_tracker(s, b, n);
+    if (!r && gdm_trk[0]) snprintf(s->tracker, sizeof s->tracker, "%s", gdm_trk);
     free(b);
     if (r || (!s->xp && !s->xxp && !s->ip && !s->dp && !s->tp && !s->ap && !s->op && !s->mi && !s->mr)) {
         snprintf(err, errcap, "unsupported or damaged module (%d)", r);
@@ -532,6 +541,7 @@ int song_order(const Song *s) {
     return -1;
 }
 
+static int ml_pattern_rows(const Song *s, int order);
 /* ================================================================== Pattern-Zugriff */
 static int pat_of(const Song *s, int order) {
     if (order < 0 || order >= s->nord) return -1;
@@ -552,7 +562,7 @@ int song_order_pattern(const Song *s, int order) { return pat_of(s, order); }
 
 int song_pattern_rows(const Song *s, int pattern) {
     if (s->kind == K_MIDI) return 16;
-    if (s->kind == K_ML) return 128;
+    if (s->kind == K_ML) return s->mr ? ml_pattern_rows(s, pattern) : 128;
     if (s->kind == K_OPL && s->hs) return HERAD_MEASURE_TICKS;           /* one row per tick */
     if (s->kind == K_OPL && s->rd) return RAD_LINES;
     if (s->kind == K_OPL && s->ld) return s->ld->pattlen;
@@ -696,12 +706,121 @@ static void fmt_it(const ITCell *x, SongCell *o) {
     }
 }
 
+
+/* ---- Musicline Editor: the parts in the pattern view ---- */
+typedef struct { uint8_t code; char sym; const char *name; } MlFxName;
+static const MlFxName ml_fx_names[] = {
+    { 0x01, '1', "Slide Up" },
+    { 0x02, '2', "Slide Down" },
+    { 0x03, '3', "Portamento" },
+    { 0x04, '4', "Init Inst Portamento" },
+    { 0x05, '5', "Pitch Up" },
+    { 0x06, '6', "Pitch Down" },
+    { 0x07, '7', "Vibrato Speed" },
+    { 0x08, '8', "Vibrato Up" },
+    { 0x09, '9', "Vibrato Down" },
+    { 0x0A, 'A', "Vibrato Wave" },
+    { 0x0B, 'B', "Set Fine Tune" },
+    { 0x10, 'C', "Set Inst Vol" },
+    { 0x11, 'D', "Inst Vol Slide Up" },
+    { 0x12, 'E', "Inst Vol Slide Down" },
+    { 0x13, 'F', "Set Slide Inst Vol" },
+    { 0x14, 'G', "Slide To Inst Vol" },
+    { 0x15, 'H', "Inst Vol Add" },
+    { 0x16, 'I', "Inst Vol Sub" },
+    { 0x17, 'J', "Tremolo Speed" },
+    { 0x18, 'K', "Tremolo Up" },
+    { 0x19, 'L', "Tremolo Down" },
+    { 0x1A, 'M', "Tremolo Wave" },
+    { 0x20, 'N', "Set Chan Vol" },
+    { 0x21, 'O', "Chan Vol Slide Up" },
+    { 0x22, 'P', "Chan Vol Slide Down" },
+    { 0x23, 'Q', "Set Slide Chan Vol" },
+    { 0x24, 'R', "Slide To Chan Vol" },
+    { 0x25, 'S', "Chan Vol Add" },
+    { 0x26, 'T', "Chan Vol Sub" },
+    { 0x27, 'U', "Set Vol All Chans" },
+    { 0x30, 'V', "Set Master Vol" },
+    { 0x31, 'W', "Master Vol Slide Up" },
+    { 0x32, 'X', "Master Vol Slide Down" },
+    { 0x33, 'Y', "Set Slide Master Vol" },
+    { 0x34, 'Z', "Slide To Master Vol" },
+    { 0x35, 'a', "Master Vol Add" },
+    { 0x36, 'b', "Master Vol Sub" },
+    { 0x40, 'c', "Speed One Chan" },
+    { 0x41, 'd', "Groove One Chan" },
+    { 0x42, 'e', "Speed All Chans" },
+    { 0x43, 'f', "Groove All Chans" },
+    { 0x44, 'g', "Arpeggio Table" },
+    { 0x45, 'h', "Arpeggio Table One Step" },
+    { 0x46, 'i', "Hold Sustain" },
+    { 0x47, 'j', "Filter" },
+    { 0x48, 'k', "Sample Offset" },
+    { 0x49, 'l', "Restart No Vol" },
+    { 0x4A, 'm', "Wave Sample" },
+    { 0x4B, 'n', "Init Inst" },
+    { 0xE1, 'o', "PT Slide Up" },
+    { 0xE2, 'p', "PT Slide Down" },
+    { 0xE3, 'q', "PT Portamento" },
+    { 0xE4, 'r', "PT Fine Slide Up" },
+    { 0xE5, 's', "PT Fine Slide Down" },
+    { 0xE6, 't', "PT Vol Slide Up" },
+    { 0xE7, 'u', "PT Vol Slide Down" },
+    { 0xE8, 'v', "PT Tremolo" },
+    { 0xE9, 'w', "PT Tremolo Wave" },
+    { 0xEA, 'x', "PT Vibrato" },
+    { 0xEB, 'y', "PT Vibrato Wave" }
+};
+static const MlFxName *ml_fx_by_code(int code) { for (size_t i = 0; i < sizeof ml_fx_names / sizeof ml_fx_names[0]; i++) if (ml_fx_names[i].code == code) return &ml_fx_names[i]; return NULL; }
+static const MlFxName *ml_fx_by_sym(char c) { for (size_t i = 0; i < sizeof ml_fx_names / sizeof ml_fx_names[0]; i++) if (ml_fx_names[i].sym == c) return &ml_fx_names[i]; return NULL; }
+static int ml_fx_class(int code) { int g = code >> 4; return g == 0 || code == 0xE1 || code == 0xE2 || code == 0xE3 || code == 0xE4 || code == 0xE5 || code == 0xEA || code == 0xEB ? 2 : (g == 1 || g == 2 || g == 3 || code >= 0xE6) ? 1 : (code >= 0x40 && code <= 0x43) ? 4 : 5; }
+/* the part a channel plays at an order: the live one for the order that is playing, else the one the sequence names; -1 = a command step */
+static int ml_part_at(const Song *s, int order, int ch, int *transpose) {
+    const MlPlayer *p = &s->mr->pl;
+    if (ch < 0 || ch >= p->number_of_channels) return -1;
+    if (order == p->voices[0].tune_position) { *transpose = (int)(int8_t)p->voices[ch].transpose_number; return p->voices[ch].part_number; }
+    if (order < 0 || order > 255 || !p->cur->seq[ch]) return -1;
+    uint16_t d = p->cur->seq[ch][order]; int cmd = (d & 0xC0) >> 6;
+    if ((d & 0x20) && cmd != 0) return -1;
+    *transpose = (int)(d & 0x1F) - 16;
+    return ((d << 2) & 0x300) | ((d & 0xFF00) >> 8);
+}
+static int ml_pattern_rows(const Song *s, int order) {
+    int best = 1;
+    for (int ch = 0; ch < s->mr->pl.number_of_channels; ch++) {
+        int tr = 0, pn = ml_part_at(s, order, ch, &tr); const MlPart *pt = pn >= 0 && pn < 1024 ? s->msong->part[pn] : NULL;
+        if (!pt) continue;
+        int n = 128; for (int i = 0; i < 128; i++) if (pt->line[i].note == 61) { n = i + 1; break; }
+        if (n > best) best = n;
+    }
+    return best;
+}
+static void ml_cell(const Song *s, int order, int row, int ch, SongCell *t) {
+    int tr = 0, pn = ml_part_at(s, order, ch, &tr);
+    const MlPart *pt = pn >= 0 && pn < 1024 ? s->msong->part[pn] : NULL;
+    if (!pt || row < 0 || row > 127) return;
+    const MlPartLine *l = &pt->line[row];
+    if (l->note == 61) strcpy(t->note, "===");                                         /* end of the part */
+    else if (l->note & 0x80) { t->note[0] = 'J'; t->note[1] = hexc((l->note & 0x7F) >> 4); t->note[2] = hexc(l->note & 0x7F); t->note[3] = 0; }   /* jump to line */
+    else if (l->note) { int n = l->note - 1 + 12 + tr; if (n < 0) n = 0; put_note(t->note, n); t->has_note = 1; }
+    if (l->instrument && !(l->note & 0x80)) { t->inst[0] = hexc(l->instrument >> 4); t->inst[1] = hexc(l->instrument); t->inst[2] = 0; }
+    int k = 0;
+    for (int i = 0; i < 5 && k < 2; i++) {
+        const MlEff *e = &l->eff[i]; if (!e->effect) continue;
+        const MlFxName *f = ml_fx_by_code(e->effect); if (!f) continue;
+        if (k == 0) { fx3(t->fx, f->sym, e->argument); t->fxclass = (uint8_t)ml_fx_class(e->effect); }
+        else { fx3(t->vol, f->sym, e->argument); t->volclass = (uint8_t)ml_fx_class(e->effect); }
+        k++;
+    }
+}
+
 void song_cell(const Song *s, int pattern, int row, int ch, SongCell *o) {
     memset(o, 0, sizeof *o);
     strcpy(o->note, "..."); strcpy(o->inst, ".."); strcpy(o->vol, "..."); strcpy(o->fx, "...");
-    if (pattern < 0 || s->kind == K_MIDI || s->kind == K_ML) return;
+    if (pattern < 0 || s->kind == K_MIDI) return;
     SongCell t; memset(&t, 0, sizeof t);
-    if (s->kind == K_TFMX) {
+    if (s->kind == K_ML) { if (s->mr) ml_cell(s, pattern, row, ch, &t); }
+    else if (s->kind == K_TFMX) {
         TfmxCell c = tfp_view_cell(s->tp, s->tstart + pattern, row, ch);
         int m = c.note < 48 ? c.note : 36 + (c.note - 48) % 12;       /* Noten 48..63 wiederholen die Periodentabelle ab 36 */
         if (c.kind == 1 || c.kind == 2) {
@@ -879,6 +998,13 @@ static int hexv(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'A' && c 
 
 const char *song_fx_name(const Song *s, const SongCell *c, int *is_vol) {
     if (is_vol) *is_vol = 0;
+    if (s->kind == K_ML) {                                    /* Musicline: one symbol per part effect, the second effect sits in the volume column */
+        const MlFxName *f = c->fx[0] != '.' ? ml_fx_by_sym(c->fx[0]) : NULL;
+        if (f) return f->name;
+        f = c->vol[0] != '.' ? ml_fx_by_sym(c->vol[0]) : NULL;
+        if (f) { if (is_vol) *is_vol = 1; return f->name; }
+        return NULL;
+    }
     char L = c->fx[0];
     if (L != '.') {
         int par = (hexv(c->fx[1]) << 4) | hexv(c->fx[2]);
