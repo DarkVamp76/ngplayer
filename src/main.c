@@ -2092,7 +2092,7 @@ static void fav_rows(float x, float ry, float w, float rh, int first, int vis_ro
         int k = first + r; float yy = ry + r * rh; if (yy + rh > ybot) break;
         int isc = cur >= 0 && cur < npl && fav_find_entry(cur) == k, hv = !g_mobile && hit(x + 8, yy, w - 16, rh);
         if (isc) rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(VC[0], 0.16f)); else if (hv) rrect(x + 8, yy, w - 16, rh - 2, 8, alpha(EDGE, 0.25f));
-        char lab[128]; snprintf(lab, sizeof lab, "%s", g_fav[k].title); fit_text(lab, w - 36 - 96, 14);
+        char lab[128]; snprintf(lab, sizeof lab, "%s", g_fav[k].title); marquee_fit(lab, w - 36 - 96, 14, isc ? 0 : 1, 100000 + k, isc || hv);
         text(x + 20, yy + 5, 14, isc ? TXT : DIM, lab);
         char idb[16]; if (g_fav[k].id > 0) snprintf(idb, sizeof idb, "#%d", g_fav[k].id); else { int ff = fmt_from_name(g_fav[k].path); snprintf(idb, sizeof idb, "%s", ff > 0 && ff < FMT_COUNT ? FMT_NAME[ff] : "FILE"); }
         text_right(x + w - 44, yy + 5, 14, VC[1], idb);
