@@ -68,7 +68,7 @@ int ml_render(MlRender *r, int16_t *out, int n) {
         if (r->tick_left <= 0) {
             tick(r);
             if (r->ended) { memset(out + 2 * f, 0, sizeof(int16_t) * 2 * (size_t)(n - f)); return f; }
-            double hz = (p->tempo ? p->tempo : 125) * 709378.9 / 1789773.0;      /* the CIA timer value is 1789773 / tempo (not the 1773447 of ProTracker): 0.9 % slower than tempo * 0.4 Hz */      /* the CIA timer value is 1789773 / tempo (not the 1773447 of ProTracker): 0.9 % slower than tempo * 0.4 Hz */
+            double hz = (p->tempo ? p->tempo : 125) * 709378.9 / 1789773.0;      /* the CIA timer value is 1789773 / tempo (not the 1773447 of ProTracker): 0.9 % slower than tempo * 0.4 Hz */
             r->tick_left += r->rate / hz;
         }
         r->tick_left -= 1.0;
@@ -77,8 +77,7 @@ int ml_render(MlRender *r, int16_t *out, int n) {
             MlChannel *c = &p->ch[i];
             if (r->sc) r->sc[(size_t)i * r->sc_len + (r->sc_pos & (unsigned)(r->sc_len - 1))] = 0;
             if (!r->m[i].on || !r->m[i].d || (r->mute >> i & 1)) continue;
-            double pos = r->m[i].pos; uint32_t len = c->len < r->m[i].len || r->m[i].d == c->data ? c->len : r->m[i].len;
-            (void)len;
+            double pos = r->m[i].pos;
             uint32_t ip = (uint32_t)pos;
             int8_t smp = r->m[i].d[ip < r->m[i].len ? ip : r->m[i].len - 1];
             float v = (float)smp * (float)c->volume * (10.0f / 7.0f);       /* the level of uade (measured: 0.70 over all files) */
