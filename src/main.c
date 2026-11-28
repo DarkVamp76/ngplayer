@@ -1827,12 +1827,12 @@ static void chip_dip(float x, float y, float h, float beat) {            /* Paul
     z = chip_tsz(17, k); text(cx - text_width("8364R7", z) / 2, y + 57 * k - z * 0.8f, z, ink, "8364R7");
     z = chip_tsz(14, k); text(cx - text_width("1589  27", z) / 2, y + 77 * k - z * 0.8f, z, ink, "1589  27");
 }
-/* Which chip: 5 = the Amiga 500 (TFMX, AHX, SoundFX, MOD and MED up to 4 channels; the drawn Paula chip, kind 0, is not used any more), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices),
+/* Which chip: 5 = the Amiga 500 (TFMX, AHX, SoundFX, Musicline, MOD and MED up to 4 channels; the drawn Paula chip, kind 0, is not used any more), 1 = GF1 (up to 14 voices), 2 = InterWave (15 to 32 voices), 3 = Terratec EWS64 (more than 32 voices),
  * 4 = the AdLib Gold card (the pure FM formats, Yamaha OPL3), 8 = the Sound Blaster AWE32 (FM next to samples) */
 static int chip_kind_of(const char *f, int n) {
     if (!strcmp(f, "MIDI")) return 6;                                  /* the MIDI sound module */
     if (!strcmp(f, "AMD") || !strcmp(f, "MAD") || !strcmp(f, "A2M") || !strcmp(f, "HERAD") || !strcmp(f, "RAD") || !strcmp(f, "LDS")) return 4;
-    if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || !strcmp(f, "SFX") || ((!strcmp(f, "MOD") || !strcmp(f, "MED")) && n <= 4)) {     /* the Amiga formats that run on the four Paula voices */
+    if (!strcmp(f, "TFMX") || !strcmp(f, "AHX") || !strcmp(f, "SFX") || !strcmp(f, "ML") || ((!strcmp(f, "MOD") || !strcmp(f, "MED")) && n <= 4)) {     /* the Amiga formats that run on the four Paula voices (Musicline also with 8 voices: they are mixed into the four) */
         return 5;                                                      /* the Amiga 500 (desktop and web) */
     }
     return n > 32 ? 3 : (n >= 15 ? 2 : 1);
